@@ -11,11 +11,13 @@ import config
 def quaternion_to_rotation_matrix(qx, qy, qz, qw):
     """四元数を回転行列に変換"""
     # 回転行列を計算
-    R = np.array([
-        [1 - 2 * (qy**2 + qz**2), 2 * (qx*qy - qz*qw), 2 * (qx*qz + qy*qw)],
-        [2 * (qx*qy + qz*qw), 1 - 2 * (qx**2 + qz**2), 2 * (qy*qz - qx*qw)],
-        [2 * (qx*qz - qy*qw), 2 * (qy*qz + qx*qw), 1 - 2 * (qx**2 + qy**2)]
-    ])
+    R = np.array(
+        [
+            [1 - 2 * (qy**2 + qz**2), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
+            [2 * (qx * qy + qz * qw), 1 - 2 * (qx**2 + qz**2), 2 * (qy * qz - qx * qw)],
+            [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx**2 + qy**2)],
+        ]
+    )
     return R
 
 
@@ -141,7 +143,9 @@ for i in range(29, 33):
     qw = float(matches[i][2][6])
     T = np.array([-dy, dx, dz], dtype=np.float32)
     R = quaternion_to_rotation_matrix(qx, qy, qz, qw)
-    left_image = cv2.imread(os.path.join(config.DRONE_IMAGE_DIR, f"left_{img_id-1}.png"))
+    left_image = cv2.imread(
+        os.path.join(config.DRONE_IMAGE_DIR, f"left_{img_id-1}.png")
+    )
     left_image_gray = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY)
     left_image = cv2.flip(left_image, 0)
     left_image_gray = cv2.flip(left_image_gray, 0)
@@ -152,14 +156,21 @@ for i in range(29, 33):
     right_image_gray = cv2.flip(right_image_gray, 0)
 
     disparity = create_disparity_image(
-        left_image_gray, right_image_gray, i, window_size=window_size, min_disp=min_disp, num_disp=num_disp
+        left_image_gray,
+        right_image_gray,
+        i,
+        window_size=window_size,
+        min_disp=min_disp,
+        num_disp=num_disp,
     )
 
     depth = B * focal_length / (disparity + 1e-6)
     depth[(depth < 0) | (depth > 23)] = 0
-    depth, ortho_color_image = to_orthographic_projection(depth, left_image, camera_height)
+    depth, ortho_color_image = to_orthographic_projection(
+        depth, left_image, camera_height
+    )
     world_coords, colors = depth_to_world(depth, ortho_color_image, K, R, T, pixel_size)
-    #world_coords, colors = grid_sampling(world_coords, colors, 0.1)
+    # world_coords, colors = grid_sampling(world_coords, colors, 0.1)
 
     if cumulative_world_coords is None:
         cumulative_world_coords = world_coords

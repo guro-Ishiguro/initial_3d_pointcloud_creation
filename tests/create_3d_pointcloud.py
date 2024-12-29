@@ -90,7 +90,11 @@ right_image = cv2.imread(
 
 # 視差画像を生成
 disparity = create_disparity_image(
-    left_image, right_image, window_size=window_size, min_disp=min_disp, num_disp=num_disp
+    left_image,
+    right_image,
+    window_size=window_size,
+    min_disp=min_disp,
+    num_disp=num_disp,
 )
 
 # 深度画像を生成
@@ -100,7 +104,7 @@ depth = to_orthographic_projection(depth, camera_height)
 
 world_coords = convert_right_to_left_hand_coordinates(
     depth_to_world(depth, K, R, T, pixel_size)
-) 
+)
 world_coords = world_coords[depth.reshape(-1) > 0]
 pcd = o3d.geometry.PointCloud()
 pcd.points = o3d.utility.Vector3dVector(world_coords)
@@ -112,4 +116,4 @@ plt.title("Z-Coordinate Distribution")
 plt.xlabel("Z Coordinate")
 plt.ylabel("Frequency")
 plt.grid(True)
-plt.savefig("z_coordinate_distribution.png")  
+plt.savefig("z_coordinate_distribution.png")

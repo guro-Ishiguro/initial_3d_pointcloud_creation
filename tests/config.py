@@ -10,7 +10,9 @@ HOME_DIR = os.getenv("HOME_DIR")
 
 # dataディレクトリ配下のディレクトリを取得
 DATA_DIR = os.path.join(HOME_DIR, "data")
-directories = [d for d in os.listdir(DATA_DIR) if os.path.isdir(os.path.join(DATA_DIR, d))]
+directories = [
+    d for d in os.listdir(DATA_DIR) if os.path.isdir(os.path.join(DATA_DIR, d))
+]
 
 if not directories:
     raise FileNotFoundError(f"No directories found in {DATA_DIR}")
@@ -51,7 +53,13 @@ POINT_CLOUD_FILE_PATH = os.path.join(POINT_CLOUD_DIR, "output.ply")
 VIDEO_DIR = os.path.join(OUTPUT_TYPE_DIR, "video")
 
 # スケールの設定
-B, fov_h, fov_v, width, height = float(DATA_TYPE.split("_")[5]), float(DATA_TYPE.split("_")[4]), float(DATA_TYPE.split("_")[3]), int(DATA_TYPE.split("_")[0]), int(DATA_TYPE.split("_")[1])
+B, fov_h, fov_v, width, height = (
+    float(DATA_TYPE.split("_")[5]),
+    float(DATA_TYPE.split("_")[4]),
+    float(DATA_TYPE.split("_")[3]),
+    int(DATA_TYPE.split("_")[0]),
+    int(DATA_TYPE.split("_")[1]),
+)
 focal_length = width / (2 * np.tan(fov_h * np.pi / 180 / 2))
 camera_height = int(DATA_TYPE.split("_")[2])
 cx, cy = int(DATA_TYPE.split("_")[0]) / 2, int(DATA_TYPE.split("_")[1]) / 2

@@ -154,7 +154,7 @@ def process_point_cloud(points):
     pcd.points = o3d.utility.Vector3dVector(cumulative_world_coords)
     pcd = pcd.voxel_down_sample(voxel_size=0.02)
     pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=4.0)
-    #write_ply(config.POINT_CLOUD_FILE_PATH, np.asarray(pcd.points))
+    # write_ply(config.POINT_CLOUD_FILE_PATH, np.asarray(pcd.points))
     return pcd
 
 

@@ -11,11 +11,13 @@ import config
 def quaternion_to_rotation_matrix(qx, qy, qz, qw):
     """四元数を回転行列に変換"""
     # 回転行列を計算
-    R = np.array([
-        [1 - 2 * (qy**2 + qz**2), 2 * (qx*qy - qz*qw), 2 * (qx*qz + qy*qw)],
-        [2 * (qx*qy + qz*qw), 1 - 2 * (qx**2 + qz**2), 2 * (qy*qz - qx*qw)],
-        [2 * (qx*qz - qy*qw), 2 * (qy*qz + qx*qw), 1 - 2 * (qx**2 + qy**2)]
-    ])
+    R = np.array(
+        [
+            [1 - 2 * (qy**2 + qz**2), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
+            [2 * (qx * qy + qz * qw), 1 - 2 * (qx**2 + qz**2), 2 * (qy * qz - qx * qw)],
+            [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx**2 + qy**2)],
+        ]
+    )
     return R
 
 
@@ -133,7 +135,9 @@ for i in range(29, 31):
     T = np.array([dx, dy, dz], dtype=np.float32)
     R = quaternion_to_rotation_matrix(qx, qy, qz, qw)
     print(T, R)
-    left_image = cv2.imread(os.path.join(config.DRONE_IMAGE_DIR, f"left_{img_id-1}.png"))
+    left_image = cv2.imread(
+        os.path.join(config.DRONE_IMAGE_DIR, f"left_{img_id-1}.png")
+    )
     left_image_gray = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY)
     left_image_gray = cv2.flip(left_image_gray, 0)
     right_image = cv2.imread(
@@ -146,7 +150,12 @@ for i in range(29, 31):
         continue
 
     disparity = create_disparity_image(
-        left_image_gray, right_image_gray, i, window_size=window_size, min_disp=min_disp, num_disp=num_disp
+        left_image_gray,
+        right_image_gray,
+        i,
+        window_size=window_size,
+        min_disp=min_disp,
+        num_disp=num_disp,
     )
     if disparity is None:
         continue

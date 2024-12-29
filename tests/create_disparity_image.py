@@ -69,7 +69,11 @@ right_image = cv2.imread(
 
 # 視差画像を生成
 disparity = create_disparity_image(
-    left_image, right_image, window_size=window_size, min_disp=min_disp, num_disp=num_disp
+    left_image,
+    right_image,
+    window_size=window_size,
+    min_disp=min_disp,
+    num_disp=num_disp,
 )
 print(disparity)
 

@@ -160,7 +160,6 @@ end_header
         np.savetxt(f, data, fmt="%f %f %f %d %d %d")
 
 
-
 def grid_sampling(point_cloud, colors, grid_size):
     """三次元点群のグリッドサンプリングを行う"""
     rounded_coords = np.floor(point_cloud / grid_size).astype(int)
@@ -174,7 +173,9 @@ def process_point_cloud(points, colors):
     pcd.colors = o3d.utility.Vector3dVector(colors)
     pcd = pcd.voxel_down_sample(voxel_size=0.02)
     pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=4.0)
-    write_ply(config.POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors))
+    write_ply(
+        config.POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors)
+    )
     return pcd
 
 
@@ -205,7 +206,9 @@ def process_image_pair(image_data):
 
     # 画像読み込み確認
     if left_image is None or right_image is None:
-        logging.error(f"Failed to load images for ID {img_id}. Paths: {left_image_path}, {right_image_path}")
+        logging.error(
+            f"Failed to load images for ID {img_id}. Paths: {left_image_path}, {right_image_path}"
+        )
         return None
 
     left_image_gray = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY)
@@ -225,7 +228,9 @@ def process_image_pair(image_data):
     )
 
     depth = B * focal_length / (disparity + 1e-6)
-    depth, ortho_color_image = to_orthographic_projection(depth, left_image, camera_height)
+    depth, ortho_color_image = to_orthographic_projection(
+        depth, left_image, camera_height
+    )
     depth[(depth < 0) | (depth > camera_height + 2)] = 0
     world_coords, colors = depth_to_world(depth, ortho_color_image, K, R, T, pixel_size)
     world_coords, colors = grid_sampling(world_coords, colors, 0.1)
@@ -368,5 +373,5 @@ if __name__ == "__main__":
     if viewer_recorder:
         viewer_recorder.update_viewer(np.asarray(pcd.points))
         viewer_recorder.close()
-    
+
     o3d.visualization.draw_geometries([pcd])
