@@ -61,10 +61,10 @@ window_size, min_disp, num_disp = config.window_size, config.min_disp, config.nu
 # 左右の画像を読み込み
 img_id = 82
 left_image = cv2.imread(
-    os.path.join(config.DRONE_IMAGE_DIR, f"left_{img_id-1}.png"), cv2.IMREAD_GRAYSCALE
+    os.path.join(config.DRONE_IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png"), cv2.IMREAD_GRAYSCALE
 )
 right_image = cv2.imread(
-    os.path.join(config.DRONE_IMAGE_DIR, f"right_{img_id}.png"), cv2.IMREAD_GRAYSCALE
+    os.path.join(config.DRONE_IMAGE_DIR, f"right_{str(img_id).zfill(6)}.png"), cv2.IMREAD_GRAYSCALE
 )
 
 # 視差画像を生成
@@ -75,7 +75,6 @@ disparity = create_disparity_image(
     min_disp=min_disp,
     num_disp=num_disp,
 )
-print(disparity)
 
 # 視差画像をカラーマップとして保存
 output_path = os.path.join(config.DISPARITY_IMAGE_DIR, f"disparity_{img_id}.png")

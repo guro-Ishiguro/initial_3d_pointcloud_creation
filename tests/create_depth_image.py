@@ -67,15 +67,14 @@ def save_depth_colormap(depth, output_path):
     R,
 ) = (config.B, config.focal_length, config.camera_height, config.K, config.R)
 window_size, min_disp, num_disp = config.window_size, config.min_disp, config.num_disp
-print(B, focal_length, camera_height, K, R)
 
 # 左右の画像を読み込み
 img_id = 150
 left_image = cv2.imread(
-    os.path.join(config.DRONE_IMAGE_DIR, f"left_{img_id-1}.png"), cv2.IMREAD_GRAYSCALE
+    os.path.join(config.DRONE_IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png"), cv2.IMREAD_GRAYSCALE
 )
 right_image = cv2.imread(
-    os.path.join(config.DRONE_IMAGE_DIR, f"right_{img_id}.png"), cv2.IMREAD_GRAYSCALE
+    os.path.join(config.DRONE_IMAGE_DIR, f"right_{str(img_id).zfill(6)}.png"), cv2.IMREAD_GRAYSCALE
 )
 
 # 視差画像を生成
@@ -89,7 +88,6 @@ disparity = create_disparity_image(
 
 # 深度画像を生成
 depth = B * focal_length / (disparity + 1e-6)
-print(depth)
 depth[(depth < 0) | (depth > 23)] = 0
 # depth = to_orthographic_projection(depth, camera_height)
 

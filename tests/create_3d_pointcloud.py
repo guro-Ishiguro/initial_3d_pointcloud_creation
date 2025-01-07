@@ -82,10 +82,10 @@ window_size, min_disp, num_disp = config.window_size, config.min_disp, config.nu
 # 左右の画像を読み込み
 img_id = 300
 left_image = cv2.imread(
-    os.path.join(config.DRONE_IMAGE_DIR, f"left_{img_id-1}.png"), cv2.IMREAD_GRAYSCALE
+    os.path.join(config.DRONE_IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png"), cv2.IMREAD_GRAYSCALE
 )
 right_image = cv2.imread(
-    os.path.join(config.DRONE_IMAGE_DIR, f"right_{img_id}.png"), cv2.IMREAD_GRAYSCALE
+    os.path.join(config.DRONE_IMAGE_DIR, f"right_{str(img_id).zfill(6)}.png"), cv2.IMREAD_GRAYSCALE
 )
 
 # 視差画像を生成
@@ -109,11 +109,3 @@ world_coords = world_coords[depth.reshape(-1) > 0]
 pcd = o3d.geometry.PointCloud()
 pcd.points = o3d.utility.Vector3dVector(world_coords)
 o3d.visualization.draw_geometries([pcd])
-
-z_coords = np.asarray(pcd.points)[:, 2]
-plt.hist(z_coords, bins=100, color="blue", edgecolor="black")
-plt.title("Z-Coordinate Distribution")
-plt.xlabel("Z Coordinate")
-plt.ylabel("Frequency")
-plt.grid(True)
-plt.savefig("z_coordinate_distribution.png")

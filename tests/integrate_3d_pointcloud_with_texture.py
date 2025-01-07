@@ -132,7 +132,7 @@ matches = matching.associate(drone_image_list, orb_slam_pose_list, 0.0, 0.02)
 cumulative_world_coords = None
 cumulative_colors = None
 
-for i in range(29, 33):
+for i in range(4):
     img_id = int(matches[i][1][0])
     dx = float(matches[i][2][0])
     dy = float(matches[i][2][1])
@@ -144,13 +144,13 @@ for i in range(29, 33):
     T = np.array([-dy, dx, dz], dtype=np.float32)
     R = quaternion_to_rotation_matrix(qx, qy, qz, qw)
     left_image = cv2.imread(
-        os.path.join(config.DRONE_IMAGE_DIR, f"left_{img_id-1}.png")
+        os.path.join(config.DRONE_IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png")
     )
     left_image_gray = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY)
     left_image = cv2.flip(left_image, 0)
     left_image_gray = cv2.flip(left_image_gray, 0)
     right_image = cv2.imread(
-        os.path.join(config.DRONE_IMAGE_DIR, f"right_{img_id}.png")
+        os.path.join(config.DRONE_IMAGE_DIR, f"right_{str(img_id).zfill(6)}.png")
     )
     right_image_gray = cv2.cvtColor(right_image, cv2.COLOR_BGR2GRAY)
     right_image_gray = cv2.flip(right_image_gray, 0)

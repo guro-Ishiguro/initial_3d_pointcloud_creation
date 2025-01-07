@@ -84,12 +84,12 @@ B, height, focal_length, camera_height, K, pixel_size = (
 window_size, min_disp, num_disp = config.window_size, config.min_disp, config.num_disp
 
 # 左右の画像を読み込み
-img_id = 150
-left_image = cv2.imread(os.path.join(config.DRONE_IMAGE_DIR, f"left_{img_id-1}.png"))
+img_id = 1
+left_image = cv2.imread(os.path.join(config.DRONE_IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png"))
 left_image = cv2.cvtColor(left_image, cv2.COLOR_BGR2RGB)
 left_image_gray = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY)
 right_image = cv2.imread(
-    os.path.join(config.DRONE_IMAGE_DIR, f"right_{img_id}.png"), cv2.IMREAD_GRAYSCALE
+    os.path.join(config.DRONE_IMAGE_DIR, f"right_{str(img_id).zfill(6)}.png"), cv2.IMREAD_GRAYSCALE
 )
 
 R = np.eye(3, dtype=np.float32)

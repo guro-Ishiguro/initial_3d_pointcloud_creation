@@ -117,6 +117,7 @@ orb_slam_pose_list = matching.read_file_list(config.ORB_SLAM_LOG)
 
 # マッチング開始
 matches = matching.associate(drone_image_list, orb_slam_pose_list, 0.0, 0.02)
+print(len(matches))
 
 # 3Dマップ生成開始
 cumulative_world_coords = None
@@ -124,7 +125,6 @@ cumulative_colors = None
 
 for i in range(29, 31):
     img_id = int(matches[i][1][0])
-    print(img_id)
     dx = float(matches[i][2][0])
     dy = float(matches[i][2][1])
     dz = float(matches[i][2][2])
@@ -134,14 +134,13 @@ for i in range(29, 31):
     qw = float(matches[i][2][6])
     T = np.array([dx, dy, dz], dtype=np.float32)
     R = quaternion_to_rotation_matrix(qx, qy, qz, qw)
-    print(T, R)
     left_image = cv2.imread(
-        os.path.join(config.DRONE_IMAGE_DIR, f"left_{img_id-1}.png")
+        os.path.join(config.DRONE_IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png")
     )
     left_image_gray = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY)
     left_image_gray = cv2.flip(left_image_gray, 0)
     right_image = cv2.imread(
-        os.path.join(config.DRONE_IMAGE_DIR, f"right_{img_id}.png")
+        os.path.join(config.DRONE_IMAGE_DIR, f"right_{str(img_id).zfill(6)}.png")
     )
     right_image_gray = cv2.cvtColor(right_image, cv2.COLOR_BGR2GRAY)
     right_image_gray = cv2.flip(right_image_gray, 0)
@@ -161,6 +160,7 @@ for i in range(29, 31):
         continue
 
     depth = B * focal_length / (disparity + 1e-6)
+    depth[(depth < 0) | (depth > 23)] = 0
     depth = to_orthographic_projection(depth, camera_height)
     world_coords = depth_to_world(depth, K, R, T, pixel_size)
     world_coords = world_coords[depth.reshape(-1) > 0]
@@ -173,7 +173,7 @@ for i in range(29, 31):
 
 pcd = o3d.geometry.PointCloud()
 pcd.points = o3d.utility.Vector3dVector(cumulative_world_coords)
-pcd = pcd.voxel_down_sample(voxel_size=0.05)
-pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=2.0)
+# pcd = pcd.voxel_down_sample(voxel_size=0.05)
+# pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=2.0)
 write_ply(config.POINT_CLOUD_FILE_PATH, np.asarray(pcd.points))
 o3d.visualization.draw_geometries([pcd])
