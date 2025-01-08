@@ -3,7 +3,6 @@ import shutil
 import sys
 import cv2
 import numpy as np
-from matplotlib import pyplot as plt
 import open3d as o3d
 import logging
 import matching
@@ -233,8 +232,47 @@ def process_image_pair(image_data):
     )
     depth[(depth < 0) | (depth > camera_height + 2)] = 0
     world_coords, colors = depth_to_world(depth, ortho_color_image, K, R, T, pixel_size)
-    world_coords, colors = grid_sampling(world_coords, colors, 0.1)
+    world_coords[:, 1] = -world_coords[:, 1]
+    world_coords, colors = grid_sampling(world_coords, colors, 0.05)
+
+    filename = os.path.join(config.POINT_CLOUD_DIR, f"point_cloud_{img_id}.ply")
+    write_ply(filename, world_coords, colors)
+    logging.info(f"Point cloud saved to {filename}")
     return world_coords, colors
+
+
+def create_mesh_from_point_cloud(pcd):
+    """点群からメッシュを生成"""
+    try:
+        # 法線を計算
+        pcd.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.2, max_nn=20)
+        )
+        logging.info("Normals estimated for the point cloud.")
+
+        # ポアソン表面再構成でメッシュを作成
+        mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+            pcd, depth=12
+        )
+        logging.info(f"Mesh created with {len(mesh.triangles)} triangles.")
+
+        bbox = pcd.get_axis_aligned_bounding_box()
+        mesh = mesh.crop(bbox)
+        logging.info("Bounding box cleaned the mesh.")
+
+        return mesh
+    except Exception as e:
+        logging.error(f"Error creating mesh: {e}")
+        return None
+
+
+def save_mesh(mesh, output_path):
+    """生成されたメッシュをファイルに保存"""
+    try:
+        o3d.io.write_triangle_mesh(output_path, mesh)
+        logging.info(f"Mesh saved to {output_path}.")
+    except Exception as e:
+        logging.error(f"Error saving mesh: {e}")
 
 
 if __name__ == "__main__":
@@ -280,6 +318,10 @@ if __name__ == "__main__":
     logging.info("Starting timestamp matching...")
     match_start = time.time()
     matches = matching.associate(drone_image_list, orb_slam_pose_list, 0.0, 0.02)
+
+    # 暫定的な処理
+    matches = matches[::2]
+
     logging.info(
         f"Timestamp matching completed in {time.time() - match_start:.2f} seconds"
     )
@@ -298,8 +340,12 @@ if __name__ == "__main__":
                 [float(match[2][0]), float(match[2][1]), float(match[2][2])],
                 dtype=np.float32,
             ),
-            os.path.join(config.DRONE_IMAGE_DIR, f"left_{int(match[1][0])}.png"),
-            os.path.join(config.DRONE_IMAGE_DIR, f"right_{int(match[1][0])}.png"),
+            os.path.join(
+                config.DRONE_IMAGE_DIR, f"left_{str(match[1][0]).zfill(6)}.png"
+            ),
+            os.path.join(
+                config.DRONE_IMAGE_DIR, f"right_{str(match[1][0]).zfill(6)}.png"
+            ),
             B,
             focal_length,
             K,
@@ -315,12 +361,8 @@ if __name__ == "__main__":
         for match in matches
     ]
 
-    cumulative_world_coords = None
-    cumulative_world_colors = None
     total_tasks = len(image_pairs_data)
     completed_tasks = 0
-    cumulative_points = []
-    cumulative_colors = []
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=2) as executor:
         futures = [
@@ -331,8 +373,6 @@ if __name__ == "__main__":
                 result = future.result()
                 if result is not None:
                     world_coords, colors = result
-                    cumulative_points.append(world_coords)
-                    cumulative_colors.append(colors)
                     completed_tasks += 1
                     progress = (completed_tasks / total_tasks) * 100
                     logging.info(
@@ -342,25 +382,33 @@ if __name__ == "__main__":
                     logging.warning("Result is None.")
             except Exception as e:
                 logging.error(f"Error occurred while processing image pair: {e}")
+    logging.info("All point clouds have been saved individually.")
 
-    if cumulative_points:
-        cumulative_world_coords = np.vstack(cumulative_points)
-    else:
-        cumulative_world_coords = np.empty((0, 3))
-    if cumulative_colors:
-        cumulative_world_colors = np.vstack(cumulative_colors)
-    else:
-        cumulative_world_colors = np.empty((0, 3))
-    logging.info(f"3D map creation completed in {time.time() - map_start:.2f} seconds")
-    logging.info(
-        f"Number of points in the cumulative point cloud: {len(cumulative_world_coords)}"
-    )
+    point_cloud_files = [
+        os.path.join(config.POINT_CLOUD_DIR, f)
+        for f in os.listdir(config.POINT_CLOUD_DIR)
+        if f.endswith(".ply") and f.startswith("point")
+    ]
+    all_points = []
+    all_colors = []
+    for pc_file in point_cloud_files:
+        pcd = o3d.io.read_point_cloud(pc_file)
+        all_points.append(np.asarray(pcd.points))
+        all_colors.append(np.asarray(pcd.colors))
 
-    # PointCloudフィルタリング
-    if cumulative_world_coords is not None:
+    if all_points:
+        all_points = np.vstack(all_points)
+        all_colors = np.vstack(all_colors)
+        logging.info(
+            f"3D map creation completed in {time.time() - map_start:.2f} seconds"
+        )
+        logging.info(
+            f"Number of points in the cumulative point cloud: {len(all_points)}"
+        )
+        # PointCloudフィルタリング
         logging.info("Starting pointcloud filtering...")
         filter_start = time.time()
-        pcd = process_point_cloud(cumulative_world_coords, cumulative_world_colors)
+        pcd = process_point_cloud(all_points, all_colors)
         total_time = time.time() - start_time
         logging.info(
             f"Pointcloud filtering completed in {time.time() - filter_start:.2f} seconds"
@@ -369,9 +417,22 @@ if __name__ == "__main__":
         logging.info(
             f"Final number of points in the point cloud: {len(np.asarray(pcd.points))}"
         )
+        o3d.visualization.draw_geometries([pcd])
 
-    if viewer_recorder:
-        viewer_recorder.update_viewer(np.asarray(pcd.points))
-        viewer_recorder.close()
+        for pc_file in point_cloud_files:
+            try:
+                os.remove(pc_file)
+                logging.info(f"Deleted file: {pc_file}")
+            except Exception as e:
+                logging.error(f"Error deleting file {pc_file}: {e}")
 
-    o3d.visualization.draw_geometries([pcd])
+        # 点群からメッシュを生成する
+        mesh = create_mesh_from_point_cloud(pcd)
+
+        # 生成したメッシュを保存する
+        save_mesh(mesh, config.MESH_FILE_PATH)
+
+        # メッシュの表示
+        o3d.visualization.draw_geometries([mesh], window_name="Generated Mesh")
+    else:
+        logging.warning("No points to merge. Point cloud files might be empty.")
