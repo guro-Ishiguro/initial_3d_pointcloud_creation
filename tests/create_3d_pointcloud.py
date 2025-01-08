@@ -82,10 +82,12 @@ window_size, min_disp, num_disp = config.window_size, config.min_disp, config.nu
 # 左右の画像を読み込み
 img_id = 300
 left_image = cv2.imread(
-    os.path.join(config.DRONE_IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png"), cv2.IMREAD_GRAYSCALE
+    os.path.join(config.DRONE_IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png"),
+    cv2.IMREAD_GRAYSCALE,
 )
 right_image = cv2.imread(
-    os.path.join(config.DRONE_IMAGE_DIR, f"right_{str(img_id).zfill(6)}.png"), cv2.IMREAD_GRAYSCALE
+    os.path.join(config.DRONE_IMAGE_DIR, f"right_{str(img_id).zfill(6)}.png"),
+    cv2.IMREAD_GRAYSCALE,
 )
 
 # 視差画像を生成
