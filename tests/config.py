@@ -63,6 +63,7 @@ B, fov_h, fov_v, width, height = (
 focal_length = width / (2 * np.tan(fov_h * np.pi / 180 / 2))
 camera_height = int(DATA_TYPE.split("_")[2])
 cx, cy = int(DATA_TYPE.split("_")[0]) / 2, int(DATA_TYPE.split("_")[1]) / 2
+
 K = np.array(
     [[focal_length, 0, cx], [0, focal_length, cy], [0, 0, 1]], dtype=np.float32
 )
