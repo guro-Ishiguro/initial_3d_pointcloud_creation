@@ -205,7 +205,7 @@ def process_image_pair(image_data):
 if __name__ == "__main__":
     args = parse_arguments()
 
-    logging.info(f"Image directory is {config.DRONE_IMAGE_DIR}")
+    logging.info(f"Image directory is {config.IMAGE_DIR}")
     logging.info(f"Show view flag is {args.show_viewer}")
     logging.info(f"Video capture flag is {args.record_video}")
 
@@ -263,8 +263,8 @@ if __name__ == "__main__":
                 [float(match[2][0]), float(match[2][1]), float(match[2][2])],
                 dtype=np.float32,
             ),
-            os.path.join(config.DRONE_IMAGE_DIR, f"left_{int(match[1][0])}.png"),
-            os.path.join(config.DRONE_IMAGE_DIR, f"right_{int(match[1][0])}.png"),
+            os.path.join(config.IMAGE_DIR, f"left_{int(match[1][0])}.png"),
+            os.path.join(config.IMAGE_DIR, f"right_{int(match[1][0])}.png"),
             B,
             focal_length,
             K,

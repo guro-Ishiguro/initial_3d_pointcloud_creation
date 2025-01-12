@@ -40,9 +40,6 @@ print(f"Selected data type: {DATA_TYPE}")
 DATA_TYPE_DIR = os.path.join(DATA_DIR, DATA_TYPE)
 IMAGE_DIR = os.path.join(DATA_TYPE_DIR, "images")
 TXT_DIR = os.path.join(DATA_TYPE_DIR, "txt")
-DRONE_IMAGE_DIR = os.path.join(IMAGE_DIR, "drone")
-DISPARITY_IMAGE_DIR = os.path.join(IMAGE_DIR, "disparity")
-DEPTH_IMAGE_DIR = os.path.join(IMAGE_DIR, "depth")
 DRONE_IMAGE_LOG = os.path.join(TXT_DIR, "drone_image_log.txt")
 ORB_SLAM_LOG = os.path.join(TXT_DIR, "KeyFrameTrajectory.txt")
 
@@ -50,7 +47,11 @@ OUTPUT_DIR = os.path.join(HOME_DIR, "output")
 OUTPUT_TYPE_DIR = os.path.join(OUTPUT_DIR, DATA_TYPE)
 POINT_CLOUD_DIR = os.path.join(OUTPUT_TYPE_DIR, "point_cloud")
 POINT_CLOUD_FILE_PATH = os.path.join(POINT_CLOUD_DIR, "output.ply")
+MESH_DIR = os.path.join(OUTPUT_TYPE_DIR, "mesh")
+MESH_FILE_PATH = os.path.join(MESH_DIR, "mesh.ply")
 VIDEO_DIR = os.path.join(OUTPUT_TYPE_DIR, "video")
+DISPARITY_IMAGE_DIR = os.path.join(OUTPUT_TYPE_DIR, "disparity")
+DEPTH_IMAGE_DIR = os.path.join(OUTPUT_TYPE_DIR, "depth")
 
 # スケールの設定
 B, fov_h, fov_v, width, height = (

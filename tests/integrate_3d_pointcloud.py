@@ -135,12 +135,12 @@ for i in range(29, 31):
     T = np.array([dx, dy, dz], dtype=np.float32)
     R = quaternion_to_rotation_matrix(qx, qy, qz, qw)
     left_image = cv2.imread(
-        os.path.join(config.DRONE_IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png")
+        os.path.join(config.IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png")
     )
     left_image_gray = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY)
     left_image_gray = cv2.flip(left_image_gray, 0)
     right_image = cv2.imread(
-        os.path.join(config.DRONE_IMAGE_DIR, f"right_{str(img_id).zfill(6)}.png")
+        os.path.join(config.IMAGE_DIR, f"right_{str(img_id).zfill(6)}.png")
     )
     right_image_gray = cv2.cvtColor(right_image, cv2.COLOR_BGR2GRAY)
     right_image_gray = cv2.flip(right_image_gray, 0)

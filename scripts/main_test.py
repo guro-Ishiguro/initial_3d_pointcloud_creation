@@ -278,7 +278,7 @@ def save_mesh(mesh, output_path):
 if __name__ == "__main__":
     args = parse_arguments()
 
-    logging.info(f"Image directory is {config.DRONE_IMAGE_DIR}")
+    logging.info(f"Image directory is {config.IMAGE_DIR}")
     logging.info(f"Show view flag is {args.show_viewer}")
     logging.info(f"Video capture flag is {args.record_video}")
 
@@ -341,10 +341,10 @@ if __name__ == "__main__":
                 dtype=np.float32,
             ),
             os.path.join(
-                config.DRONE_IMAGE_DIR, f"left_{str(match[1][0]).zfill(6)}.png"
+                config.IMAGE_DIR, f"left_{str(match[1][0]).zfill(6)}.png"
             ),
             os.path.join(
-                config.DRONE_IMAGE_DIR, f"right_{str(match[1][0]).zfill(6)}.png"
+                config.IMAGE_DIR, f"right_{str(match[1][0]).zfill(6)}.png"
             ),
             B,
             focal_length,
