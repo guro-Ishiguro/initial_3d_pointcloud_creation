@@ -30,12 +30,12 @@ def to_orthographic_projection(depth, camera_height):
     col_indices = np.vstack([np.arange(cols)] * rows)
     row_indices = np.vstack([np.arange(rows)] * cols).transpose()
     shift_x = np.where(
-        (depth > 23) | (depth < 0),
+        (depth > 40) | (depth < 0),
         0,
         ((camera_height - depth) * (mid_idx - col_indices) / camera_height).astype(int),
     )
     shift_y = np.where(
-        (depth > 23) | (depth < 0),
+        (depth > 40) | (depth < 0),
         0,
         ((camera_height - depth) * (mid_idy - row_indices) / camera_height).astype(int),
     )
@@ -69,7 +69,7 @@ def save_depth_colormap(depth, output_path):
 window_size, min_disp, num_disp = config.window_size, config.min_disp, config.num_disp
 
 # 左右の画像を読み込み
-img_id = 150
+img_id = 2
 left_image = cv2.imread(
     os.path.join(config.IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png"),
     cv2.IMREAD_GRAYSCALE,
@@ -90,8 +90,8 @@ disparity = create_disparity_image(
 
 # 深度画像を生成
 depth = B * focal_length / (disparity + 1e-6)
-depth[(depth < 0) | (depth > 23)] = 0
-# depth = to_orthographic_projection(depth, camera_height)
+depth[(depth < 0) | (depth > 40)] = 0
+depth = to_orthographic_projection(depth, camera_height)
 
 # 深度画像をカラーマップとして保存
 output_path = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{img_id}.png")

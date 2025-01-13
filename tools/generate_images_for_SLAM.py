@@ -15,7 +15,7 @@ def process_images(input_dir, output_dir, size=(960, 540)):
         input_path = os.path.join(input_dir, filename)
         
         # ファイルが画像かどうかを確認
-        if os.path.isfile(input_path) and filename.lower().endswith(('png', 'jpg', 'jpeg', 'bmp', 'gif')) and filename.startswith('left'):
+        if os.path.isfile(input_path) and filename.lower().endswith(('png', 'jpg', 'jpeg', 'bmp', 'gif')) and filename.startswith('right'):
             try:
                 # 画像を読み込み
                 img = cv2.imread(input_path)
@@ -43,4 +43,4 @@ def process_images(input_dir, output_dir, size=(960, 540)):
             print(f"{filename} は画像ではないためスキップされました。")
 
 # 左と右の画像をそれぞれ処理
-process_images('/home/geolab/Projects/initial_3d_pointcloud_creation/data/3840_2160_16_74.73365_92_0.3/images', '/home/geolab/Projects/catkin_ws/src/process_images/data/left')
+process_images('/home/geolab/Projects/initial_3d_pointcloud_creation/data/3840_2160_16_74.73365_92_0.3/images', '/home/geolab/Projects/catkin_ws/src/process_images/data/right')

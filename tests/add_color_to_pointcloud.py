@@ -31,12 +31,12 @@ def to_orthographic_projection(depth, color_image, camera_height):
     row_indices = np.vstack([np.arange(rows)] * cols).transpose()
 
     shift_x = np.where(
-        (depth > 23) | (depth < 0),
+        (depth > 40) | (depth < 0),
         0,
         ((camera_height - depth) * (mid_idx - col_indices) / camera_height).astype(int),
     )
     shift_y = np.where(
-        (depth > 23) | (depth < 0),
+        (depth > 40) | (depth < 0),
         0,
         ((camera_height - depth) * (mid_idy - row_indices) / camera_height).astype(int),
     )
@@ -84,7 +84,7 @@ B, height, focal_length, camera_height, K, pixel_size = (
 window_size, min_disp, num_disp = config.window_size, config.min_disp, config.num_disp
 
 # 左右の画像を読み込み
-img_id = 1
+img_id = 100
 left_image = cv2.imread(
     os.path.join(config.IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png")
 )
@@ -109,7 +109,7 @@ disparity = create_disparity_image(
 
 # 深度画像を生成
 depth = B * focal_length / (disparity + 1e-6)
-depth[(depth < 0) | (depth > 23)] = 0
+depth[(depth < 0) | (depth > 40)] = 0
 depth, ortho_color_image = to_orthographic_projection(depth, left_image, camera_height)
 
 # ワールド座標とテクスチャを取得

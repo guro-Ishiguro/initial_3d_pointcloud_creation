@@ -59,7 +59,7 @@ camera_height = config.camera_height
 window_size, min_disp, num_disp = config.window_size, config.min_disp, config.num_disp
 
 # 左右の画像を読み込み
-img_id = 82
+img_id = 5
 left_image = cv2.imread(
     os.path.join(config.IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png"),
     cv2.IMREAD_GRAYSCALE,
