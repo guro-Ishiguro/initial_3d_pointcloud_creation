@@ -22,27 +22,6 @@ def create_disparity_image(image_L, image_R, window_size, min_disp, num_disp):
     return disparity
 
 
-def to_orthographic_projection(depth, camera_height):
-    """中心投影から正射投影への変換を適用する"""
-    rows, cols = depth.shape
-    mid_idx = cols // 2
-    mid_idy = rows // 2
-    col_indices = np.vstack([np.arange(cols)] * rows)
-    row_indices = np.vstack([np.arange(rows)] * cols).transpose()
-    shift_x = (
-        (camera_height - depth) * (mid_idx - col_indices) / camera_height
-    ).astype(int)
-    shift_y = (
-        (camera_height - depth) * (mid_idy - row_indices) / camera_height
-    ).astype(int)
-    new_x = np.clip(col_indices + shift_x, 0, cols - 1)
-    new_y = np.clip(row_indices + shift_y, 0, rows - 1)
-    ortho_depth = np.full_like(depth, np.inf)
-    np.minimum.at(ortho_depth, (new_y, new_x), depth)
-    ortho_depth[ortho_depth == np.inf] = 0
-    return ortho_depth
-
-
 def save_disparity_colormap(disparity, output_path):
     """視差画像をカラーマップで保存する"""
     disparity_normalized = cv2.normalize(
@@ -59,7 +38,7 @@ camera_height = config.camera_height
 window_size, min_disp, num_disp = config.window_size, config.min_disp, config.num_disp
 
 # 左右の画像を読み込み
-img_id = 102
+img_id = 1
 left_image = cv2.imread(
     os.path.join(config.IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png"),
     cv2.IMREAD_GRAYSCALE,

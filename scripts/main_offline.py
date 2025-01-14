@@ -227,10 +227,19 @@ def process_image_pair(image_data):
     )
 
     depth = B * focal_length / (disparity + 1e-6)
+    depth[(depth < 0) | (depth > 40)] = 0
+
+    # 境界値の処理
+    valid_area = (depth > 0)
+    boundary_mask = valid_area & (
+        ~np.roll(valid_area, 10, axis=0) | ~np.roll(valid_area, -10, axis=0) |
+        ~np.roll(valid_area, 10, axis=1) | ~np.roll(valid_area, -10, axis=1)
+    )
+    depth[boundary_mask] = 0
+
     depth, ortho_color_image = to_orthographic_projection(
         depth, left_image, camera_height
     )
-    depth[(depth < 0) | (depth > 40)] = 0
     world_coords, colors = depth_to_world(depth, ortho_color_image, K, R, T, pixel_size)
     world_coords, colors = grid_sampling(world_coords, colors, 0.1)
 

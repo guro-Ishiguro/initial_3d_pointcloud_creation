@@ -22,13 +22,14 @@ def create_disparity_image(image_L, image_R, window_size, min_disp, num_disp):
     return disparity
 
 
-def to_orthographic_projection(depth, camera_height):
-    """中心投影から正射投影への変換を適用する"""
+def to_orthographic_projection(depth, color_image, camera_height):
+    """中心投影から正射投影への変換を適用し、カラー画像を正射投影にマッピング"""
     rows, cols = depth.shape
     mid_idx = cols // 2
     mid_idy = rows // 2
     col_indices = np.vstack([np.arange(cols)] * rows)
     row_indices = np.vstack([np.arange(rows)] * cols).transpose()
+
     shift_x = np.where(
         (depth > 40) | (depth < 0),
         0,
@@ -39,12 +40,28 @@ def to_orthographic_projection(depth, camera_height):
         0,
         ((camera_height - depth) * (mid_idy - row_indices) / camera_height).astype(int),
     )
-    new_x = np.clip(col_indices + shift_x, 0, cols - 1)
-    new_y = np.clip(row_indices + shift_y, 0, rows - 1)
+
+    new_x = col_indices + shift_x
+    new_y = row_indices + shift_y
+
+    valid_mask = (new_x >= 0) & (new_x < cols) & (new_y >= 0) & (new_y < rows)
+    new_x = np.where(valid_mask, new_x, -1)
+    new_y = np.where(valid_mask, new_y, -1)
+
+    ortho_color_image = np.zeros_like(color_image)
+    valid_depth_mask = (depth > 0) & (depth < 40) & valid_mask
+
+    ortho_color_image[new_y[valid_depth_mask], new_x[valid_depth_mask]] = color_image[
+        row_indices[valid_depth_mask], col_indices[valid_depth_mask]
+    ]
+
     ortho_depth = np.full_like(depth, np.inf)
-    np.minimum.at(ortho_depth, (new_y, new_x), depth)
+    np.minimum.at(ortho_depth, (new_y[valid_mask], new_x[valid_mask]), depth[valid_mask])
     ortho_depth[ortho_depth == np.inf] = 0
-    return ortho_depth
+
+    ortho_color_image[ortho_depth == 0] = [0, 0, 0]
+
+    return ortho_depth, ortho_color_image
 
 
 def save_depth_colormap(depth, output_path):
@@ -69,11 +86,12 @@ def save_depth_colormap(depth, output_path):
 window_size, min_disp, num_disp = config.window_size, config.min_disp, config.num_disp
 
 # 左右の画像を読み込み
-img_id = 102
+img_id = 1
 left_image = cv2.imread(
-    os.path.join(config.IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png"),
-    cv2.IMREAD_GRAYSCALE,
+    os.path.join(config.IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png")
 )
+left_image = cv2.cvtColor(left_image, cv2.COLOR_BGR2RGB)
+left_image_gray = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY)
 right_image = cv2.imread(
     os.path.join(config.IMAGE_DIR, f"right_{str(img_id).zfill(6)}.png"),
     cv2.IMREAD_GRAYSCALE,
@@ -81,7 +99,7 @@ right_image = cv2.imread(
 
 # 視差画像を生成
 disparity = create_disparity_image(
-    left_image,
+    left_image_gray,
     right_image,
     window_size=window_size,
     min_disp=min_disp,
@@ -90,8 +108,10 @@ disparity = create_disparity_image(
 
 # 深度画像を生成
 depth = B * focal_length / (disparity + 1e-6)
-depth[(depth < 0) | (depth > 40)] = 0
-depth = to_orthographic_projection(depth, camera_height)
+depth[(depth < 0) | (depth > 100)] = -1
+ortho_depth, ortho_color_image = to_orthographic_projection(depth, left_image, camera_height)
+
+print(depth)
 
 # 深度画像をカラーマップとして保存
 output_path = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{img_id}.png")

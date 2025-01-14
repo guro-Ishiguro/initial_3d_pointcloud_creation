@@ -8,7 +8,6 @@ import config
 
 def quaternion_to_rotation_matrix(qx, qy, qz, qw):
     """四元数を回転行列に変換"""
-    # 回転行列を計算
     R = np.array(
         [
             [1 - 2 * (qy**2 + qz**2), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
@@ -90,7 +89,7 @@ def depth_to_world(depth_map, color_image, K, R, T, pixel_size):
     z_coords = depth_map
     local_coords = np.stack((x_coords, y_coords, z_coords), axis=-1).reshape(-1, 3)
     world_coords = (R @ local_coords.T).T + T
-    valid_mask = (depth_map > 10).reshape(-1)
+    valid_mask = (depth_map > 0).reshape(-1)
     colors = color_image.reshape(-1, 3)[valid_mask] / 255.0
     return world_coords[valid_mask], colors
 
@@ -144,7 +143,7 @@ with open(drone_image_list, "r") as file:
 cumulative_world_coords = None
 cumulative_colors = None
 
-for i in range(100, 110):
+for i in range(63, 64):
     dx = float(camera_data[i][1][0])
     dy = float(camera_data[i][1][1])
     dz = float(camera_data[i][1][2])
@@ -175,6 +174,15 @@ for i in range(100, 110):
 
     depth = B * focal_length / (disparity + 1e-6)
     depth[(depth < 0) | (depth > 40)] = 0
+
+    # 境界値の処理
+    valid_area = (depth > 0)
+    boundary_mask = valid_area & (
+        ~np.roll(valid_area, 10, axis=0) | ~np.roll(valid_area, -10, axis=0) |
+        ~np.roll(valid_area, 10, axis=1) | ~np.roll(valid_area, -10, axis=1)
+    )
+    depth[boundary_mask] = 0
+
     depth, ortho_color_image = to_orthographic_projection(
         depth, left_image, camera_height
     )
@@ -197,7 +205,6 @@ for i in range(100, 110):
         cumulative_world_coords = np.vstack((cumulative_world_coords, np.asarray(pcd.points)))
         cumulative_colors = np.vstack((cumulative_colors, np.asarray(pcd.colors)))
 
-# 統合された点群をOpen3D PointCloudに変換
 final_pcd = o3d.geometry.PointCloud()
 final_pcd.points = o3d.utility.Vector3dVector(cumulative_world_coords)
 final_pcd.colors = o3d.utility.Vector3dVector(cumulative_colors)
