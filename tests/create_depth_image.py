@@ -108,10 +108,8 @@ disparity = create_disparity_image(
 
 # 深度画像を生成
 depth = B * focal_length / (disparity + 1e-6)
-depth[(depth < 0) | (depth > 100)] = -1
+depth[(depth < 10) | (depth > 40)] = 0
 ortho_depth, ortho_color_image = to_orthographic_projection(depth, left_image, camera_height)
-
-print(depth)
 
 # 深度画像をカラーマップとして保存
 output_path = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{img_id}.png")

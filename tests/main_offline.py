@@ -143,7 +143,7 @@ with open(drone_image_list, "r") as file:
 cumulative_world_coords = None
 cumulative_colors = None
 
-for i in range(63, 64):
+for i in range(0, 90):
     dx = float(camera_data[i][1][0])
     dy = float(camera_data[i][1][1])
     dz = float(camera_data[i][1][2])
@@ -173,7 +173,7 @@ for i in range(63, 64):
     )
 
     depth = B * focal_length / (disparity + 1e-6)
-    depth[(depth < 0) | (depth > 40)] = 0
+    depth[(depth < 10) | (depth > 40)] = 0
 
     # 境界値の処理
     valid_area = (depth > 0)

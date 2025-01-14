@@ -227,7 +227,7 @@ def process_image_pair(image_data):
     )
 
     depth = B * focal_length / (disparity + 1e-6)
-    depth[(depth < 0) | (depth > 40)] = 0
+    depth[(depth < 10) | (depth > 40)] = 0
 
     # 境界値の処理
     valid_area = (depth > 0)
