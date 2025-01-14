@@ -40,17 +40,23 @@ def to_orthographic_projection(depth, color_image, camera_height):
         0,
         ((camera_height - depth) * (mid_idy - row_indices) / camera_height).astype(int),
     )
-    new_x = np.clip(col_indices + shift_x, 0, cols - 1)
-    new_y = np.clip(row_indices + shift_y, 0, rows - 1)
+
+    new_x = col_indices + shift_x
+    new_y = row_indices + shift_y
+
+    valid_mask = (new_x >= 0) & (new_x < cols) & (new_y >= 0) & (new_y < rows)
+    new_x = np.where(valid_mask, new_x, -1)
+    new_y = np.where(valid_mask, new_y, -1)
 
     ortho_color_image = np.zeros_like(color_image)
-    valid_mask = (depth > 0) & (depth < 23)
-    ortho_color_image[new_y[valid_mask], new_x[valid_mask]] = color_image[
-        row_indices[valid_mask], col_indices[valid_mask]
+    valid_depth_mask = (depth > 0) & (depth < 40) & valid_mask
+
+    ortho_color_image[new_y[valid_depth_mask], new_x[valid_depth_mask]] = color_image[
+        row_indices[valid_depth_mask], col_indices[valid_depth_mask]
     ]
 
     ortho_depth = np.full_like(depth, np.inf)
-    np.minimum.at(ortho_depth, (new_y, new_x), depth)
+    np.minimum.at(ortho_depth, (new_y[valid_mask], new_x[valid_mask]), depth[valid_mask])
     ortho_depth[ortho_depth == np.inf] = 0
 
     ortho_color_image[ortho_depth == 0] = [0, 0, 0]
@@ -62,9 +68,9 @@ def depth_to_world(depth_map, color_image, K, R, T, pixel_size):
     """深度マップをワールド座標に変換し、テクスチャを適用する"""
     height, width = depth_map.shape
     i, j = np.meshgrid(np.arange(width), np.arange(height), indexing="xy")
-    x_coords = (j - width // 2) * pixel_size
-    y_coords = (i - height // 2) * pixel_size
-    z_coords = camera_height - depth_map
+    x_coords = (i - width // 2) * pixel_size
+    y_coords = (j - height // 2) * pixel_size
+    z_coords = depth_map
     local_coords = np.stack((x_coords, y_coords, z_coords), axis=-1).reshape(-1, 3)
     world_coords = (R @ local_coords.T).T + T
     valid_mask = (depth_map > 0).reshape(-1)
@@ -84,7 +90,7 @@ B, height, focal_length, camera_height, K, pixel_size = (
 window_size, min_disp, num_disp = config.window_size, config.min_disp, config.num_disp
 
 # 左右の画像を読み込み
-img_id = 100
+img_id = 102
 left_image = cv2.imread(
     os.path.join(config.IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png")
 )
@@ -110,10 +116,10 @@ disparity = create_disparity_image(
 # 深度画像を生成
 depth = B * focal_length / (disparity + 1e-6)
 depth[(depth < 0) | (depth > 40)] = 0
-depth, ortho_color_image = to_orthographic_projection(depth, left_image, camera_height)
+ortho_depth, ortho_color_image = to_orthographic_projection(depth, left_image, camera_height)
 
 # ワールド座標とテクスチャを取得
-world_coords, colors = depth_to_world(depth, ortho_color_image, K, R, T, pixel_size)
+world_coords, colors = depth_to_world(ortho_depth, ortho_color_image, K, R, T, pixel_size)
 
 # 三次元点群を生成し、テクスチャを適用
 pcd = o3d.geometry.PointCloud()

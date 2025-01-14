@@ -46,6 +46,7 @@ def to_orthographic_projection(depth, color_image, camera_height):
     mid_idy = rows // 2
     col_indices = np.vstack([np.arange(cols)] * rows)
     row_indices = np.vstack([np.arange(rows)] * cols).transpose()
+
     shift_x = np.where(
         (depth > 40) | (depth < 0),
         0,
@@ -56,18 +57,25 @@ def to_orthographic_projection(depth, color_image, camera_height):
         0,
         ((camera_height - depth) * (mid_idy - row_indices) / camera_height).astype(int),
     )
-    new_x = np.clip(col_indices + shift_x, 0, cols - 1)
-    new_y = np.clip(row_indices + shift_y, 0, rows - 1)
+
+    new_x = col_indices + shift_x
+    new_y = row_indices + shift_y
+
+    valid_mask = (new_x >= 0) & (new_x < cols) & (new_y >= 0) & (new_y < rows)
+    new_x = np.where(valid_mask, new_x, -1)
+    new_y = np.where(valid_mask, new_y, -1)
 
     ortho_color_image = np.zeros_like(color_image)
-    valid_mask = (depth > 0) & (depth < 40)
-    ortho_color_image[new_y[valid_mask], new_x[valid_mask]] = color_image[
-        row_indices[valid_mask], col_indices[valid_mask]
+    valid_depth_mask = (depth > 0) & (depth < 40) & valid_mask
+
+    ortho_color_image[new_y[valid_depth_mask], new_x[valid_depth_mask]] = color_image[
+        row_indices[valid_depth_mask], col_indices[valid_depth_mask]
     ]
 
     ortho_depth = np.full_like(depth, np.inf)
-    np.minimum.at(ortho_depth, (new_y, new_x), depth)
+    np.minimum.at(ortho_depth, (new_y[valid_mask], new_x[valid_mask]), depth[valid_mask])
     ortho_depth[ortho_depth == np.inf] = 0
+
     ortho_color_image[ortho_depth == 0] = [0, 0, 0]
 
     return ortho_depth, ortho_color_image
@@ -136,7 +144,7 @@ with open(drone_image_list, "r") as file:
 cumulative_world_coords = None
 cumulative_colors = None
 
-for i in range(2):
+for i in range(100, 110):
     dx = float(camera_data[i][1][0])
     dy = float(camera_data[i][1][1])
     dz = float(camera_data[i][1][2])
@@ -173,19 +181,29 @@ for i in range(2):
     world_coords, colors = depth_to_world(depth, ortho_color_image, K, R, T, pixel_size)
     world_coords, colors = grid_sampling(world_coords, colors, 0.1)
 
+    # 点群をOpen3DのPointCloud形式に変換
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(world_coords)
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    # ノイズ除去を適用
+    pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=2.0)
+
+    # 点群を統合
     if cumulative_world_coords is None:
-        cumulative_world_coords = world_coords
+        cumulative_world_coords = np.asarray(pcd.points)
+        cumulative_colors = np.asarray(pcd.colors)
     else:
-        cumulative_world_coords = np.vstack((cumulative_world_coords, world_coords))
+        cumulative_world_coords = np.vstack((cumulative_world_coords, np.asarray(pcd.points)))
+        cumulative_colors = np.vstack((cumulative_colors, np.asarray(pcd.colors)))
 
-    if cumulative_colors is None:
-        cumulative_colors = colors
-    else:
-        cumulative_colors = np.vstack((cumulative_colors, colors))
+# 統合された点群をOpen3D PointCloudに変換
+final_pcd = o3d.geometry.PointCloud()
+final_pcd.points = o3d.utility.Vector3dVector(cumulative_world_coords)
+final_pcd.colors = o3d.utility.Vector3dVector(cumulative_colors)
 
-pcd = o3d.geometry.PointCloud()
-pcd.points = o3d.utility.Vector3dVector(cumulative_world_coords)
-pcd.colors = o3d.utility.Vector3dVector(cumulative_colors)
-pcd = pcd.voxel_down_sample(voxel_size=0.05)
-pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=2.0)
-o3d.visualization.draw_geometries([pcd])
+# ボクセルダウンサンプリング
+final_pcd = final_pcd.voxel_down_sample(voxel_size=0.05)
+
+# 統合点群の可視化
+o3d.visualization.draw_geometries([final_pcd])

@@ -85,17 +85,23 @@ def to_orthographic_projection(depth, color_image, camera_height):
         0,
         ((camera_height - depth) * (mid_idy - row_indices) / camera_height).astype(int),
     )
-    new_x = np.clip(col_indices + shift_x, 0, cols - 1)
-    new_y = np.clip(row_indices + shift_y, 0, rows - 1)
+
+    new_x = col_indices + shift_x
+    new_y = row_indices + shift_y
+
+    valid_mask = (new_x >= 0) & (new_x < cols) & (new_y >= 0) & (new_y < rows)
+    new_x = np.where(valid_mask, new_x, -1)
+    new_y = np.where(valid_mask, new_y, -1)
 
     ortho_color_image = np.zeros_like(color_image)
-    valid_mask = (depth > 0) & (depth < 40)
-    ortho_color_image[new_y[valid_mask], new_x[valid_mask]] = color_image[
-        row_indices[valid_mask], col_indices[valid_mask]
+    valid_depth_mask = (depth > 0) & (depth < 40) & valid_mask
+
+    ortho_color_image[new_y[valid_depth_mask], new_x[valid_depth_mask]] = color_image[
+        row_indices[valid_depth_mask], col_indices[valid_depth_mask]
     ]
 
     ortho_depth = np.full_like(depth, np.inf)
-    np.minimum.at(ortho_depth, (new_y, new_x), depth)
+    np.minimum.at(ortho_depth, (new_y[valid_mask], new_x[valid_mask]), depth[valid_mask])
     ortho_depth[ortho_depth == np.inf] = 0
 
     ortho_color_image[ortho_depth == 0] = [0, 0, 0]
@@ -226,7 +232,7 @@ def process_image_pair(image_data):
     )
     depth[(depth < 0) | (depth > 40)] = 0
     world_coords, colors = depth_to_world(depth, ortho_color_image, K, R, T, pixel_size)
-    world_coords, colors = grid_sampling(world_coords, colors, 0.05)
+    world_coords, colors = grid_sampling(world_coords, colors, 0.1)
 
     filename = os.path.join(config.POINT_CLOUD_DIR, f"point_cloud_{img_id}.ply")
     write_ply(filename, world_coords, colors)
