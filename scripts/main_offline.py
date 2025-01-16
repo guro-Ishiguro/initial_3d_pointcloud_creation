@@ -398,6 +398,7 @@ if __name__ == "__main__":
 
     if all_points:
         all_points = np.vstack(all_points)
+        all_points[:, 2] = -all_points[:, 2]
         all_colors = np.vstack(all_colors)
         logging.info(
             f"3D map creation completed in {time.time() - map_start:.2f} seconds"
@@ -426,13 +427,5 @@ if __name__ == "__main__":
             except Exception as e:
                 logging.error(f"Error deleting file {pc_file}: {e}")
 
-        # 点群からメッシュを生成する
-        # mesh = create_mesh_from_point_cloud(pcd)
-
-        # 生成したメッシュを保存する
-        # save_mesh(mesh, config.MESH_FILE_PATH)
-
-        # メッシュの表示
-        # o3d.visualization.draw_geometries([mesh], window_name="Generated Mesh")
     else:
         logging.warning("No points to merge. Point cloud files might be empty.")

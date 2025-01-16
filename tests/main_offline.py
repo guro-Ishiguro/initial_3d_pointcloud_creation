@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 import open3d as o3d
 import config
+from matplotlib import pyplot as plt
 
 
 def quaternion_to_rotation_matrix(qx, qy, qz, qw):
@@ -143,7 +144,7 @@ with open(drone_image_list, "r") as file:
 cumulative_world_coords = None
 cumulative_colors = None
 
-for i in range(0, 90):
+for i in range(39, 40):
     dx = float(camera_data[i][1][0])
     dy = float(camera_data[i][1][1])
     dz = float(camera_data[i][1][2])
@@ -204,6 +205,8 @@ for i in range(0, 90):
     else:
         cumulative_world_coords = np.vstack((cumulative_world_coords, np.asarray(pcd.points)))
         cumulative_colors = np.vstack((cumulative_colors, np.asarray(pcd.colors)))
+
+cumulative_world_coords[:, 2] = -cumulative_world_coords[:, 2]
 
 final_pcd = o3d.geometry.PointCloud()
 final_pcd.points = o3d.utility.Vector3dVector(cumulative_world_coords)
