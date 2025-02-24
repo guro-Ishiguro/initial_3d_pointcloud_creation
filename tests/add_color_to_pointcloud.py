@@ -90,7 +90,7 @@ B, height, focal_length, camera_height, K, pixel_size = (
 window_size, min_disp, num_disp = config.window_size, config.min_disp, config.num_disp
 
 # 左右の画像を読み込み
-img_id = 102
+img_id = 87
 left_image = cv2.imread(
     os.path.join(config.IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png")
 )
