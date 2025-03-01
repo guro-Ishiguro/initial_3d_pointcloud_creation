@@ -12,43 +12,28 @@ import concurrent.futures
 import multiprocessing
 
 # ログ設定
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # 録画の設定
-video_writer = None
 video_filename = os.path.join(config.VIDEO_DIR, "3d_map_visualization.avi")
 video_fps = 10
 video_width, video_height = 640, 480
 
-
 def parse_arguments():
     """コマンド引数の値を受け取る"""
     parser = argparse.ArgumentParser(description="3D Point Cloud Creater")
-    parser.add_argument(
-        "--show-viewer",
-        action="store_true",
-        help="Show viewer during point cloud generation.",
-    )
-    parser.add_argument(
-        "--record-video", action="store_true", help="Record viewer output to video."
-    )
+    parser.add_argument("--show-viewer", action="store_true", help="Show viewer during point cloud generation.")
+    parser.add_argument("--record-video", action="store_true", help="Record viewer output to video.")
     return parser.parse_args()
-
 
 def quaternion_to_rotation_matrix(qx, qy, qz, qw):
     """四元数を回転行列に変換"""
-    # 回転行列を計算
-    R = np.array(
-        [
-            [1 - 2 * (qy**2 + qz**2), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
-            [2 * (qx * qy + qz * qw), 1 - 2 * (qx**2 + qz**2), 2 * (qy * qz - qx * qw)],
-            [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx**2 + qy**2)],
-        ]
-    )
+    R = np.array([
+        [1 - 2 * (qy**2 + qz**2), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
+        [2 * (qx * qy + qz * qw), 1 - 2 * (qx**2 + qz**2), 2 * (qy * qz - qx * qw)],
+        [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx**2 + qy**2)],
+    ])
     return R
-
 
 def clear_folder(dir_path):
     """指定フォルダの中身を削除する"""
@@ -65,7 +50,6 @@ def clear_folder(dir_path):
                 logging.error(f"Error deleting {file_path}: {e}")
     else:
         logging.info(f"The folder {dir_path} does not exist.")
-
 
 def to_orthographic_projection(depth, color_image, camera_height):
     """中心投影から正射投影への変換を適用し、カラー画像を正射投影にマッピング"""
@@ -103,11 +87,9 @@ def to_orthographic_projection(depth, color_image, camera_height):
     ortho_depth = np.full_like(depth, np.inf)
     np.minimum.at(ortho_depth, (new_y[valid_mask], new_x[valid_mask]), depth[valid_mask])
     ortho_depth[ortho_depth == np.inf] = 0
-
     ortho_color_image[ortho_depth == 0] = [0, 0, 0]
 
     return ortho_depth, ortho_color_image
-
 
 def depth_to_world(depth_map, color_image, K, R, T, pixel_size):
     """深度マップをワールド座標に変換し、テクスチャを適用する"""
@@ -122,7 +104,6 @@ def depth_to_world(depth_map, color_image, K, R, T, pixel_size):
     colors = color_image.reshape(-1, 3)[valid_mask] / 255.0
     return world_coords[valid_mask], colors
 
-
 def create_disparity_image(image_L, image_R, img_id, window_size, min_disp, num_disp):
     """左・右画像から視差画像を生成する"""
     if image_L is None or image_R is None:
@@ -133,7 +114,7 @@ def create_disparity_image(image_L, image_R, img_id, window_size, min_disp, num_
         numDisparities=num_disp,
         blockSize=window_size,
         P1=8 * 3 * window_size**2,
-        P2=32 * 3 * window_size**2,
+        P2=16 * 3 * window_size**2,
         disp12MaxDiff=1,
         uniquenessRatio=10,
         speckleWindowSize=100,
@@ -141,7 +122,6 @@ def create_disparity_image(image_L, image_R, img_id, window_size, min_disp, num_
     )
     disparity = stereo.compute(image_L, image_R).astype(np.float32) / 16.0
     return disparity
-
 
 def write_ply(filename, vertices, colors):
     """頂点データと色データをPLYファイルに書き込む"""
@@ -162,28 +142,51 @@ end_header
         data = np.hstack((vertices, (colors * 255).astype(np.uint8)))
         np.savetxt(f, data, fmt="%f %f %f %d %d %d")
 
-
 def grid_sampling(point_cloud, colors, grid_size):
-    """三次元点群のグリッドサンプリングを行う"""
+    """各画像ペア内でのグリッドサンプリング（単純にユニークなグリッドセルごとに1点を残す）"""
     rounded_coords = np.floor(point_cloud / grid_size).astype(int)
     _, unique_indices = np.unique(rounded_coords, axis=0, return_index=True)
     return point_cloud[unique_indices], colors[unique_indices]
 
+def icp_registration(source_points, target_points, threshold=0.05):
+    """
+    ICP (Iterative Closest Point) を用いて2つの点群を位置合わせする関数
+    :param source_points: ソース点群 (整合させたい点群)
+    :param target_points: ターゲット点群 (基準となる点群)
+    :param threshold: 最近傍点探索の許容範囲 (メートル)
+    :return: 位置合わせ後のソース点群と変換行列
+    """
+    source_pcd = o3d.geometry.PointCloud()
+    target_pcd = o3d.geometry.PointCloud()
+    source_pcd.points = o3d.utility.Vector3dVector(source_points)
+    target_pcd.points = o3d.utility.Vector3dVector(target_points)
+    initial_transform = np.identity(4)
+    reg_p2p = o3d.pipelines.registration.registration_icp(
+        source_pcd, target_pcd, threshold, initial_transform,
+        o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+        o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=50)
+    )
+    source_pcd.transform(reg_p2p.transformation)
+    transformed_points = np.asarray(source_pcd.points)
+    return transformed_points, reg_p2p.transformation
 
 def process_point_cloud(points, colors):
+    """統合点群に対してボクセルダウンサンプリングとアウトライヤ除去を実施"""
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points)
     pcd.colors = o3d.utility.Vector3dVector(colors)
+    # ボクセルダウンサンプリング
     pcd = pcd.voxel_down_sample(voxel_size=0.02)
+    # 統計的外れ値除去
     pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=4.0)
-    write_ply(
-        config.POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors)
-    )
+    write_ply(config.POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors))
     return pcd
 
-
 def process_image_pair(image_data):
-    """画像ペアを処理してワールド座標を生成する"""
+    """
+    画像ペアを処理してワールド座標の点群を生成する。
+    個別ファイルへの保存は行わず、後で統合できるように点群、色、さらに光学中心からの距離を返す。
+    """
     (
         img_id,
         T,
@@ -195,73 +198,61 @@ def process_image_pair(image_data):
         R,
         camera_height,
         pixel_size,
+        window_size,
+        min_disp,
+        num_disp,
     ) = image_data
 
     left_image = cv2.imread(left_image_path)
+    if left_image is None:
+        logging.error(f"Left image not found for ID {img_id}: {left_image_path}")
+        return None
     left_image = cv2.cvtColor(left_image, cv2.COLOR_BGR2RGB)
     right_image = cv2.imread(right_image_path)
-
-    # パス確認
-    if not os.path.exists(left_image_path):
-        logging.error(f"Left image path does not exist: {left_image_path}")
-    if not os.path.exists(right_image_path):
-        logging.error(f"Right image path does not exist: {right_image_path}")
-
-    # 画像読み込み確認
-    if left_image is None or right_image is None:
-        logging.error(
-            f"Failed to load images for ID {img_id}. Paths: {left_image_path}, {right_image_path}"
-        )
+    if right_image is None:
+        logging.error(f"Right image not found for ID {img_id}: {right_image_path}")
         return None
 
     left_image_gray = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY)
     right_image_gray = cv2.cvtColor(right_image, cv2.COLOR_BGR2GRAY)
 
     disparity = create_disparity_image(
-        left_image_gray,
-        right_image_gray,
-        img_id,
-        window_size=window_size,
-        min_disp=min_disp,
-        num_disp=num_disp,
+        left_image_gray, right_image_gray, img_id, window_size, min_disp, num_disp
     )
+    if disparity is None:
+        logging.error(f"Disparity computation failed for ID {img_id}")
+        return None
 
     depth = B * focal_length / (disparity + 1e-6)
     depth[(depth < 10) | (depth > 40)] = 0
 
-    # 境界値の処理
+    # 境界部分の除去
     valid_area = (depth > 0)
     boundary_mask = valid_area & (
-        ~np.roll(valid_area, 10, axis=0) | ~np.roll(valid_area, -10, axis=0) |
-        ~np.roll(valid_area, 10, axis=1) | ~np.roll(valid_area, -10, axis=1)
+        ~np.roll(valid_area, 10, axis=0)
+        | ~np.roll(valid_area, -10, axis=0)
+        | ~np.roll(valid_area, 10, axis=1)
+        | ~np.roll(valid_area, -10, axis=1)
     )
     depth[boundary_mask] = 0
 
-    depth, ortho_color_image = to_orthographic_projection(
-        depth, left_image, camera_height
-    )
+    depth, ortho_color_image = to_orthographic_projection(depth, left_image, camera_height)
     world_coords, colors = depth_to_world(depth, ortho_color_image, K, R, T, pixel_size)
+    # 各画像ペア内でのグリッドサンプリング
     world_coords, colors = grid_sampling(world_coords, colors, 0.1)
+    # 光学中心（カメラT）からの距離を算出（各点ごと）
+    distances = np.linalg.norm(world_coords - T, axis=1)
 
-    filename = os.path.join(config.POINT_CLOUD_DIR, f"point_cloud_{img_id}.ply")
-    write_ply(filename, world_coords, colors)
-    logging.info(f"Point cloud saved to {filename}")
-    return world_coords, colors
-
+    logging.info(f"Processed image pair ID {img_id}")
+    return world_coords, colors, distances
 
 def create_mesh_from_point_cloud(pcd):
     """点群からメッシュを生成"""
     try:
-        # 法線を計算
-        pcd.estimate_normals(
-            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.2, max_nn=20)
-        )
+        pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.2, max_nn=20))
         logging.info("Normals estimated for the point cloud.")
 
-        # ポアソン表面再構成でメッシュを作成
-        mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-            pcd, depth=12
-        )
+        mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=12)
         logging.info(f"Mesh created with {len(mesh.triangles)} triangles.")
 
         bbox = pcd.get_axis_aligned_bounding_box()
@@ -273,7 +264,6 @@ def create_mesh_from_point_cloud(pcd):
         logging.error(f"Error creating mesh: {e}")
         return None
 
-
 def save_mesh(mesh, output_path):
     """生成されたメッシュをファイルに保存"""
     try:
@@ -282,15 +272,12 @@ def save_mesh(mesh, output_path):
     except Exception as e:
         logging.error(f"Error saving mesh: {e}")
 
-
 if __name__ == "__main__":
     args = parse_arguments()
 
     logging.info(f"Image directory is {config.IMAGE_DIR}")
-    logging.info(f"Show view flag is {args.show_viewer}")
+    logging.info(f"Show viewer flag is {args.show_viewer}")
     logging.info(f"Video capture flag is {args.record_video}")
-
-    max_workers = multiprocessing.cpu_count()
 
     start_time = time.time()
 
@@ -305,127 +292,109 @@ if __name__ == "__main__":
         )
 
     # パラメータの読み込み
-    B, height, focal_length, camera_height, K, pixel_size = (
-        config.B,
-        config.height,
-        config.focal_length,
-        config.camera_height,
-        config.K,
-        config.pixel_size,
-    )
-    window_size, min_disp, num_disp = (
-        config.window_size,
-        config.min_disp,
-        config.num_disp,
-    )
+    B = config.B
+    focal_length = config.focal_length
+    camera_height = config.camera_height
+    K = config.K
+    pixel_size = config.pixel_size
+    window_size = config.window_size
+    min_disp = config.min_disp
+    num_disp = config.num_disp
 
+    # ドローン画像ログの読み込み
     drone_image_list = config.DRONE_IMAGE_LOG
     camera_data = []
-
     with open(drone_image_list, "r") as file:
         for line in file:
             parts = line.strip().split(",")
             file_name = parts[0]
-            position = tuple(map(float, parts[1:4]))  
-            quaternion = tuple(map(float, parts[4:8]))  
+            position = tuple(map(float, parts[1:4]))
+            quaternion = tuple(map(float, parts[4:8]))
             camera_data.append((file_name, position, quaternion))
-
-    # 3Dマップ生成開始
-    logging.info(f"Starting 3D map creation...")
+    logging.info("Starting 3D map creation...")
     map_start = time.time()
+    # 各画像ペア処理用のパラメータをまとめる（window_size, min_disp, num_dispも渡す）
     image_pairs_data = [
         (
-            int(id),
-            np.array(
-                [float(camera_data[id][1][0]), float(camera_data[id][1][1]), float(camera_data[id][1][2])],
-                dtype=np.float32,
-            ),
-            os.path.join(
-                config.IMAGE_DIR, f"left_{str(id).zfill(6)}.png"
-            ),
-            os.path.join(
-                config.IMAGE_DIR, f"right_{str(id).zfill(6)}.png"
-            ),
+            idx,
+            np.array(camera_data[idx][1], dtype=np.float32),
+            os.path.join(config.IMAGE_DIR, f"left_{str(idx).zfill(6)}.png"),
+            os.path.join(config.IMAGE_DIR, f"right_{str(idx).zfill(6)}.png"),
             B,
             focal_length,
             K,
-            quaternion_to_rotation_matrix(
-                float(camera_data[id][2][0]),
-                float(camera_data[id][2][1]),
-                float(camera_data[id][2][2]),
-                float(camera_data[id][2][3]),
-            ),
+            quaternion_to_rotation_matrix(*camera_data[idx][2]),
             camera_height,
             pixel_size,
+            window_size,
+            min_disp,
+            num_disp,
         )
-        for id in range(len(camera_data))
+        for idx in range(len(camera_data))
     ]
 
-    total_tasks = len(image_pairs_data)
-    completed_tasks = 0
-
+    merged_points_list = []
+    merged_colors_list = []
+    merged_distances_list = []
     with concurrent.futures.ProcessPoolExecutor(max_workers=2) as executor:
-        futures = [
-            executor.submit(process_image_pair, data) for data in image_pairs_data
-        ]
+        futures = [executor.submit(process_image_pair, data) for data in image_pairs_data]
+        completed_tasks = 0
+        total_tasks = len(futures)
         for future in concurrent.futures.as_completed(futures):
             try:
                 result = future.result()
                 if result is not None:
-                    world_coords, colors = result
+                    points, colors, distances = result
+                    merged_points_list.append(points)
+                    merged_colors_list.append(colors)
+                    merged_distances_list.append(distances)
                     completed_tasks += 1
                     progress = (completed_tasks / total_tasks) * 100
-                    logging.info(
-                        f"Progress: {completed_tasks}/{total_tasks} tasks completed ({progress:.2f}%)"
-                    )
+                    logging.info(f"Progress: {completed_tasks}/{total_tasks} tasks completed ({progress:.2f}%)")
                 else:
                     logging.warning("Result is None.")
             except Exception as e:
                 logging.error(f"Error occurred while processing image pair: {e}")
-    logging.info("All point clouds have been saved individually.")
 
-    point_cloud_files = [
-        os.path.join(config.POINT_CLOUD_DIR, f)
-        for f in os.listdir(config.POINT_CLOUD_DIR)
-        if f.endswith(".ply") and f.startswith("point")
-    ]
-    all_points = []
-    all_colors = []
-    for pc_file in point_cloud_files:
-        pcd = o3d.io.read_point_cloud(pc_file)
-        all_points.append(np.asarray(pcd.points))
-        all_colors.append(np.asarray(pcd.colors))
+    if merged_points_list:
+        # ICPを用いて隣接視点の点群を位置合わせする
+        aligned_points_list = []
+        aligned_colors_list = []
+        
+        # 最初の点群を基準とする
+        target_points = merged_points_list[0]
+        target_colors = merged_colors_list[0]
+        aligned_points_list.append(target_points)
+        aligned_colors_list.append(target_colors)
+        
+        for i in range(1, len(merged_points_list)):
+            source_points = merged_points_list[i]
+            source_colors = merged_colors_list[i]
+            transformed_points, transformation_matrix = icp_registration(source_points, target_points, threshold=0.05)
+            aligned_points_list.append(transformed_points)
+            aligned_colors_list.append(source_colors)
+            # 更新: 基準点群に位置合わせ後の点群を統合する
+            target_points = np.vstack((target_points, transformed_points))
+            target_colors = np.vstack((target_colors, source_colors))
+        
+        # ICP適用後のすべての点群を統合
+        all_points = np.vstack(aligned_points_list)
+        all_colors = np.vstack(aligned_colors_list)
+        all_distances = np.concatenate(merged_distances_list)  # 距離情報は各画像ペアごとに計算済み
 
-    if all_points:
-        all_points = np.vstack(all_points)
+        # 必要に応じて座標系変換（例：Z軸反転）
         all_points[:, 2] = -all_points[:, 2]
-        all_colors = np.vstack(all_colors)
-        logging.info(
-            f"3D map creation completed in {time.time() - map_start:.2f} seconds"
-        )
-        logging.info(
-            f"Number of points in the cumulative point cloud: {len(all_points)}"
-        )
-        # PointCloudフィルタリング
-        logging.info("Starting pointcloud filtering...")
+        logging.info(f"3D map creation completed in {time.time() - map_start:.2f} seconds")
+        logging.info(f"Number of points in the merged point cloud: {len(all_points)}")
+
+        logging.info("Starting point cloud filtering and voxelization...")
         filter_start = time.time()
         pcd = process_point_cloud(all_points, all_colors)
-        total_time = time.time() - start_time
-        logging.info(
-            f"Pointcloud filtering completed in {time.time() - filter_start:.2f} seconds"
-        )
-        logging.info(f"Total processing time: {total_time:.2f} seconds")
-        logging.info(
-            f"Final number of points in the point cloud: {len(np.asarray(pcd.points))}"
-        )
+        logging.info(f"Point cloud filtering and voxelization completed in {time.time() - filter_start:.2f} seconds")
+        logging.info(f"Total processing time: {time.time() - start_time:.2f} seconds")
+        logging.info(f"Final number of points in the point cloud: {len(np.asarray(pcd.points))}")
+
+        # 可視化
         o3d.visualization.draw_geometries([pcd])
-
-        for pc_file in point_cloud_files:
-            try:
-                os.remove(pc_file)
-                logging.info(f"Deleted file: {pc_file}")
-            except Exception as e:
-                logging.error(f"Error deleting file {pc_file}: {e}")
-
     else:
-        logging.warning("No points to merge. Point cloud files might be empty.")
+        logging.warning("No points to merge. The point cloud might be empty.")
