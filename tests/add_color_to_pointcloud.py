@@ -12,7 +12,7 @@ def create_disparity_image(image_L, image_R, window_size, min_disp, num_disp):
         numDisparities=num_disp,
         blockSize=window_size,
         P1=8 * 3 * window_size**2,
-        P2=32 * 3 * window_size**2,
+        P2=16 * 3 * window_size**2,
         disp12MaxDiff=1,
         uniquenessRatio=10,
         speckleWindowSize=100,
@@ -116,6 +116,15 @@ disparity = create_disparity_image(
 # 深度画像を生成
 depth = B * focal_length / (disparity + 1e-6)
 depth[(depth < 0) | (depth > 40)] = 0
+# 境界部分の除去
+valid_area = (depth > 0)
+boundary_mask = valid_area & (
+    ~np.roll(valid_area, 10, axis=0)
+    | ~np.roll(valid_area, -10, axis=0)
+    | ~np.roll(valid_area, 10, axis=1)
+    | ~np.roll(valid_area, -10, axis=1)
+)
+depth[boundary_mask] = 0
 ortho_depth, ortho_color_image = to_orthographic_projection(depth, left_image, camera_height)
 
 # ワールド座標とテクスチャを取得

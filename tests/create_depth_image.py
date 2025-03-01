@@ -12,7 +12,7 @@ def create_disparity_image(image_L, image_R, window_size, min_disp, num_disp):
         numDisparities=num_disp,
         blockSize=window_size,
         P1=8 * 3 * window_size**2,
-        P2=32 * 3 * window_size**2,
+        P2=16 * 3 * window_size**2,
         disp12MaxDiff=1,
         uniquenessRatio=10,
         speckleWindowSize=100,
@@ -89,7 +89,7 @@ def save_depth_colormap(depth, output_path):
 window_size, min_disp, num_disp = config.window_size, config.min_disp, config.num_disp
 
 # 左右の画像を読み込み
-img_id = 102
+img_id = 87
 left_image = cv2.imread(
     os.path.join(config.IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png")
 )
@@ -116,4 +116,4 @@ ortho_depth, ortho_color_image = to_orthographic_projection(depth, left_image, c
 
 # 深度画像をカラーマップとして保存
 output_path = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{img_id}.png")
-save_depth_colormap(depth, output_path)
+save_depth_colormap(ortho_depth, output_path)

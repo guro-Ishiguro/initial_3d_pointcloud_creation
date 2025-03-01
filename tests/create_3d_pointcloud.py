@@ -13,7 +13,7 @@ def create_disparity_image(image_L, image_R, window_size, min_disp, num_disp):
         numDisparities=num_disp,
         blockSize=window_size,
         P1=8 * 3 * window_size**2,
-        P2=32 * 3 * window_size**2,
+        P2=16 * 3 * window_size**2,
         disp12MaxDiff=1,
         uniquenessRatio=10,
         speckleWindowSize=100,
