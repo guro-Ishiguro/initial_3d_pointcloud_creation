@@ -12,6 +12,10 @@ import concurrent.futures
 # ログ設定
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+# 録画の設定
+video_filename = os.path.join(config.VIDEO_DIR, "3d_map_visualization.avi")
+video_fps = 10
+video_width, video_height = 640, 480
 
 def parse_arguments():
     """コマンド引数の値を受け取る"""
@@ -98,8 +102,11 @@ def depth_to_world(depth_map, color_image, K, R, T, pixel_size):
     colors = color_image.reshape(-1, 3)[valid_mask] / 255.0
     return world_coords[valid_mask], colors
 
-def create_disparity_image(image_L, image_R, window_size, min_disp, num_disp):
+def create_disparity_image(image_L, image_R, img_id, window_size, min_disp, num_disp):
     """左・右画像から視差画像を生成する"""
+    if image_L is None or image_R is None:
+        logging.error(f"Error: One or both images for ID {img_id} are None.")
+        return None
     stereo = cv2.StereoSGBM_create(
         minDisparity=min_disp,
         numDisparities=num_disp,
@@ -114,69 +121,12 @@ def create_disparity_image(image_L, image_R, window_size, min_disp, num_disp):
     disparity = stereo.compute(image_L, image_R).astype(np.float32) / 16.0
     return disparity
 
-def write_ply(filename, vertices, colors):
-    """頂点データと色データをPLYファイルに書き込む"""
-    assert vertices.shape[0] == colors.shape[0], "頂点数と色データの数が一致しません。"
-    header = f"""ply
-format ascii 1.0
-element vertex {len(vertices)}
-property float x
-property float y
-property float z
-property uchar red
-property uchar green
-property uchar blue
-end_header
-"""
-    with open(filename, "w") as f:
-        f.write(header)
-        data = np.hstack((vertices, (colors * 255).astype(np.uint8)))
-        np.savetxt(f, data, fmt="%f %f %f %d %d %d")
 
 def grid_sampling(point_cloud, colors, grid_size):
     """各画像ペア内でのグリッドサンプリング（単純にユニークなグリッドセルごとに1点を残す）"""
     rounded_coords = np.floor(point_cloud / grid_size).astype(int)
     _, unique_indices = np.unique(rounded_coords, axis=0, return_index=True)
     return point_cloud[unique_indices], colors[unique_indices]
-
-def merge_points_by_voxel(points, colors, distances, grid_size):
-    """
-    複数画像ペアから統合した点群に対して、同一グリッドセル内では光学中心からの距離が
-    短い点を優先して統合する処理を行う。
-    """
-    voxel_dict = {}
-    for i in range(len(points)):
-        key = tuple(np.floor(points[i] / grid_size).astype(int))
-        if key not in voxel_dict or distances[i] < voxel_dict[key][2]:
-            voxel_dict[key] = (points[i], colors[i], distances[i])
-    merged_points = []
-    merged_colors = []
-    for val in voxel_dict.values():
-        merged_points.append(val[0])
-        merged_colors.append(val[1])
-    return np.array(merged_points), np.array(merged_colors)
-
-def icp_registration(source_points, target_points, threshold=0.05):
-    """
-    ICP (Iterative Closest Point) を用いて2つの点群を位置合わせする関数
-    :param source_points: ソース点群 (整合させたい点群)
-    :param target_points: ターゲット点群 (基準となる点群)
-    :param threshold: 最近傍点探索の許容範囲 (メートル)
-    :return: 位置合わせ後のソース点群と変換行列
-    """
-    source_pcd = o3d.geometry.PointCloud()
-    target_pcd = o3d.geometry.PointCloud()
-    source_pcd.points = o3d.utility.Vector3dVector(source_points)
-    target_pcd.points = o3d.utility.Vector3dVector(target_points)
-    initial_transform = np.identity(4)
-    reg_p2p = o3d.pipelines.registration.registration_icp(
-        source_pcd, target_pcd, threshold, initial_transform,
-        o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-        o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=50)
-    )
-    source_pcd.transform(reg_p2p.transformation)
-    transformed_points = np.asarray(source_pcd.points)
-    return transformed_points, reg_p2p.transformation
 
 def process_point_cloud(points, colors):
     """統合点群に対してボクセルダウンサンプリングとアウトライヤ除去を実施"""
@@ -187,13 +137,11 @@ def process_point_cloud(points, colors):
     pcd = pcd.voxel_down_sample(voxel_size=0.02)
     # 統計的外れ値除去
     pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=4.0)
-    write_ply(config.POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors))
     return pcd
 
 def process_image_pair(image_data):
     """
     画像ペアを処理してワールド座標の点群を生成する。
-    個別ファイルへの保存は行わず、後で統合できるように点群、色、さらに光学中心からの距離を返す。
     """
     (
         img_id,
@@ -254,32 +202,6 @@ def process_image_pair(image_data):
     logging.info(f"Processed image pair ID {img_id}")
     return world_coords, colors, distances
 
-def create_mesh_from_point_cloud(pcd):
-    """点群からメッシュを生成"""
-    try:
-        pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.2, max_nn=20))
-        logging.info("Normals estimated for the point cloud.")
-
-        mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=12)
-        logging.info(f"Mesh created with {len(mesh.triangles)} triangles.")
-
-        bbox = pcd.get_axis_aligned_bounding_box()
-        mesh = mesh.crop(bbox)
-        logging.info("Bounding box cleaned the mesh.")
-
-        return mesh
-    except Exception as e:
-        logging.error(f"Error creating mesh: {e}")
-        return None
-
-def save_mesh(mesh, output_path):
-    """生成されたメッシュをファイルに保存"""
-    try:
-        o3d.io.write_triangle_mesh(output_path, mesh)
-        logging.info(f"Mesh saved to {output_path}.")
-    except Exception as e:
-        logging.error(f"Error saving mesh: {e}")
-
 if __name__ == "__main__":
     args = parse_arguments()
 
@@ -328,7 +250,7 @@ if __name__ == "__main__":
             min_disp,
             num_disp,
         )
-        for idx in range(100, 115)
+        for idx in range(10,11)
     ]
 
     merged_points_list = []
@@ -355,42 +277,17 @@ if __name__ == "__main__":
                 logging.error(f"Error occurred while processing image pair: {e}")
 
     if merged_points_list:
-        # ICPを用いて隣接視点の点群を位置合わせする
-        aligned_points_list = []
-        aligned_colors_list = []
-        
-        # 最初の点群を基準とする
-        target_points = merged_points_list[0]
-        target_colors = merged_colors_list[0]
-        aligned_points_list.append(target_points)
-        aligned_colors_list.append(target_colors)
-        
-        for i in range(1, len(merged_points_list)):
-            source_points = merged_points_list[i]
-            source_colors = merged_colors_list[i]
-            transformed_points, transformation_matrix = icp_registration(source_points, target_points, threshold=0.05)
-            aligned_points_list.append(transformed_points)
-            aligned_colors_list.append(source_colors)
-            # 更新: 基準点群に位置合わせ後の点群を統合する
-            target_points = np.vstack((target_points, transformed_points))
-            target_colors = np.vstack((target_colors, source_colors))
-        
-        # ICP適用後のすべての点群を統合
-        all_points = np.vstack(aligned_points_list)
-        all_colors = np.vstack(aligned_colors_list)
-        all_distances = np.concatenate(merged_distances_list)  # 距離情報は各画像ペアごとに計算済み
-
-        # 重なった領域では光学中心からの距離が短い点を優先して統合
-        merged_points, merged_colors = merge_points_by_voxel(all_points, all_colors, all_distances, grid_size=0.1)
+        all_points = np.vstack(merged_points_list)
+        all_colors = np.vstack(merged_colors_list)
 
         # 必要に応じて座標系変換（例：Z軸反転）
-        merged_points[:, 2] = -merged_points[:, 2]
+        all_points[:, 2] = -all_points[:, 2]
         logging.info(f"3D map creation completed in {time.time() - map_start:.2f} seconds")
-        logging.info(f"Number of points in the merged point cloud: {len(merged_points)}")
+        logging.info(f"Number of points in the merged point cloud: {len(all_points)}")
 
         logging.info("Starting point cloud filtering and voxelization...")
         filter_start = time.time()
-        pcd = process_point_cloud(merged_points, merged_colors)
+        pcd = process_point_cloud(all_points, all_colors)
         logging.info(f"Point cloud filtering and voxelization completed in {time.time() - filter_start:.2f} seconds")
         logging.info(f"Total processing time: {time.time() - start_time:.2f} seconds")
         logging.info(f"Final number of points in the point cloud: {len(np.asarray(pcd.points))}")
