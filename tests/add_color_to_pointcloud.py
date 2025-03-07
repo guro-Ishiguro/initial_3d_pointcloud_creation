@@ -11,8 +11,8 @@ def create_disparity_image(image_L, image_R, window_size, min_disp, num_disp):
         minDisparity=min_disp,
         numDisparities=num_disp,
         blockSize=window_size,
-        P1=8 * 3 * window_size**2,
-        P2=16 * 3 * window_size**2,
+        P1=8 * 3 * window_size ** 2,
+        P2=16 * 3 * window_size ** 2,
         disp12MaxDiff=1,
         uniquenessRatio=10,
         speckleWindowSize=100,
@@ -56,7 +56,9 @@ def to_orthographic_projection(depth, color_image, camera_height):
     ]
 
     ortho_depth = np.full_like(depth, np.inf)
-    np.minimum.at(ortho_depth, (new_y[valid_mask], new_x[valid_mask]), depth[valid_mask])
+    np.minimum.at(
+        ortho_depth, (new_y[valid_mask], new_x[valid_mask]), depth[valid_mask]
+    )
     ortho_depth[ortho_depth == np.inf] = 0
 
     ortho_color_image[ortho_depth == 0] = [0, 0, 0]
@@ -117,7 +119,7 @@ disparity = create_disparity_image(
 depth = B * focal_length / (disparity + 1e-6)
 depth[(depth < 0) | (depth > 40)] = 0
 # 境界部分の除去
-valid_area = (depth > 0)
+valid_area = depth > 0
 boundary_mask = valid_area & (
     ~np.roll(valid_area, 10, axis=0)
     | ~np.roll(valid_area, -10, axis=0)
@@ -125,10 +127,14 @@ boundary_mask = valid_area & (
     | ~np.roll(valid_area, -10, axis=1)
 )
 depth[boundary_mask] = 0
-ortho_depth, ortho_color_image = to_orthographic_projection(depth, left_image, camera_height)
+ortho_depth, ortho_color_image = to_orthographic_projection(
+    depth, left_image, camera_height
+)
 
 # ワールド座標とテクスチャを取得
-world_coords, colors = depth_to_world(ortho_depth, ortho_color_image, K, R, T, pixel_size)
+world_coords, colors = depth_to_world(
+    ortho_depth, ortho_color_image, K, R, T, pixel_size
+)
 
 # 三次元点群を生成し、テクスチャを適用
 pcd = o3d.geometry.PointCloud()

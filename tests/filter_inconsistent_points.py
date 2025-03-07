@@ -8,45 +8,63 @@ import numba
 from numba import njit, prange
 
 # ログ設定
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
 
 def quaternion_to_rotation_matrix(qx, qy, qz, qw):
-    R = np.array([
-        [1 - 2 * (qy**2 + qz**2),     2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
-        [2 * (qx * qy + qz * qw), 1 - 2 * (qx**2 + qz**2),     2 * (qy * qz - qx * qw)],
-        [2 * (qx * qz - qy * qw),     2 * (qy * qz + qx * qw), 1 - 2 * (qx**2 + qy**2)]
-    ])
+    R = np.array(
+        [
+            [
+                1 - 2 * (qy ** 2 + qz ** 2),
+                2 * (qx * qy - qz * qw),
+                2 * (qx * qz + qy * qw),
+            ],
+            [
+                2 * (qx * qy + qz * qw),
+                1 - 2 * (qx ** 2 + qz ** 2),
+                2 * (qy * qz - qx * qw),
+            ],
+            [
+                2 * (qx * qz - qy * qw),
+                2 * (qy * qz + qx * qw),
+                1 - 2 * (qx ** 2 + qy ** 2),
+            ],
+        ]
+    )
     return R
+
 
 def load_point_cloud(file_path):
     try:
         pcd = o3d.io.read_point_cloud(file_path)
-        logging.info(f"Loaded point cloud from {file_path} with {len(pcd.points)} points.")
-        
-        transform_matrix = np.array([
-            [1, 0, 0, 0],
-            [0, 1, 0, 0],
-            [0, 0, -1, 0],
-            [0, 0, 0, 1]
-        ])
+        logging.info(
+            f"Loaded point cloud from {file_path} with {len(pcd.points)} points."
+        )
+
+        transform_matrix = np.array(
+            [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]]
+        )
         pcd.transform(transform_matrix)
-        
+
         return pcd
     except Exception as e:
         logging.error(f"Error loading point cloud: {e}")
         return None
 
+
 def reproject_point_cloud(pcd, position, quaternion, K, image_shape, splat_radius=3):
     """
     点群 pcd を指定カメラ姿勢から再投影し、ポイントスプラッティングと zバッファ法を適用する関数
     """
-    points = np.asarray(pcd.points)      # (N,3)
-    colors = np.asarray(pcd.colors)      # (N,3) [0,1] 範囲と仮定
+    points = np.asarray(pcd.points)  # (N,3)
+    colors = np.asarray(pcd.colors)  # (N,3) [0,1] 範囲と仮定
 
     # カメラパラメータの作成
     T = np.array(position).reshape(3, 1)
     R = quaternion_to_rotation_matrix(*quaternion)
-    
+
     # 点をカメラ座標系に変換 (R^T @ (p - T))
     p_cam = (R.T @ (points.T - T)).T
 
@@ -74,12 +92,25 @@ def reproject_point_cloud(pcd, position, quaternion, K, image_shape, splat_radiu
     colors_uint8 = (colors * 255).astype(np.uint8)
 
     # Numba を使ったスプラッティング処理
-    splat_points_numba(u, v, z_all.astype(np.float32), colors_uint8, splat_radius, width, height, z_buffer, reprojected_img)
-    
+    splat_points_numba(
+        u,
+        v,
+        z_all.astype(np.float32),
+        colors_uint8,
+        splat_radius,
+        width,
+        height,
+        z_buffer,
+        reprojected_img,
+    )
+
     return reprojected_img
 
+
 @njit(parallel=True)
-def splat_points_numba(u, v, z_all, colors, splat_radius, width, height, z_buffer, reprojected_img):
+def splat_points_numba(
+    u, v, z_all, colors, splat_radius, width, height, z_buffer, reprojected_img
+):
     for i in prange(u.shape[0]):
         for dy in range(-splat_radius, splat_radius + 1):
             for dx in range(-splat_radius, splat_radius + 1):
@@ -93,6 +124,7 @@ def splat_points_numba(u, v, z_all, colors, splat_radius, width, height, z_buffe
                             reprojected_img[vv, uu, 1] = colors[i, 1]
                             reprojected_img[vv, uu, 2] = colors[i, 2]
 
+
 def compute_color_difference(image1, image2):
     """
     image1: ドローン画像 (BGR, 0-255)
@@ -105,6 +137,7 @@ def compute_color_difference(image1, image2):
     diff_gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
     _, diff_binary = cv2.threshold(diff_gray, 120, 255, cv2.THRESH_BINARY)
     return diff_binary
+
 
 def filter_point_cloud_by_color_diff_image(pcd, position, quaternion, K, color_diff):
     """
@@ -146,8 +179,8 @@ def filter_point_cloud_by_color_diff_image(pcd, position, quaternion, K, color_d
     valid_indices_in = valid_indices[in_bounds]
 
     # 色差が大きい（255）ピクセルかどうかをベクトルでチェック
-    diff_condition = (color_diff[v_in, u_in] == 255)
-    
+    diff_condition = color_diff[v_in, u_in] == 255
+
     # 条件に該当する点を除外
     keep_mask[valid_indices_in[diff_condition]] = False
 
@@ -157,13 +190,12 @@ def filter_point_cloud_by_color_diff_image(pcd, position, quaternion, K, color_d
     new_pcd = o3d.geometry.PointCloud()
     new_pcd.points = o3d.utility.Vector3dVector(new_points)
     new_pcd.colors = o3d.utility.Vector3dVector(new_colors)
-    
+
     logging.info(f"Filtered point cloud: {len(points)} -> {len(new_points)} points.")
     return new_pcd
 
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     pcd = load_point_cloud(config.POINT_CLOUD_FILE_PATH)
     if pcd is None:
         exit(1)
@@ -176,7 +208,7 @@ if __name__ == '__main__':
             position = (float(parts[1]), float(parts[2]), float(parts[3]))
             quaternion = tuple(map(float, parts[4:8]))
             camera_data.append((file_name, position, quaternion))
-    
+
     if len(camera_data) == 0:
         logging.error("No camera data found.")
         exit(1)
@@ -184,20 +216,23 @@ if __name__ == '__main__':
     test_camera_indices = list(range(0, len(camera_data), 15))
     test_camera_params = []
     for idx in test_camera_indices:
-        # 元の position, quaternion をそのまま利用
         position = camera_data[idx][1]
         quaternion = camera_data[idx][2]
-        test_image_path = os.path.join(config.IMAGE_DIR, f"left_{str(idx).zfill(6)}.png")
+        test_image_path = os.path.join(
+            config.IMAGE_DIR, f"left_{str(idx).zfill(6)}.png"
+        )
         test_img = cv2.imread(test_image_path)
         if test_img is None:
             logging.warning(f"Test image not found for index {idx}: {test_image_path}")
             continue
-        test_camera_params.append({
-            'K': config.K,
-            'position': position,
-            'quaternion': quaternion,
-            'image': test_img
-        })
+        test_camera_params.append(
+            {
+                "K": config.K,
+                "position": position,
+                "quaternion": quaternion,
+                "image": test_img,
+            }
+        )
 
     for test_camera_param in test_camera_params:
         K = test_camera_param["K"]
@@ -206,9 +241,13 @@ if __name__ == '__main__':
         test_image = test_camera_param["image"]
         image_shape = test_image.shape
         # 再投影画像の生成
-        reprojected_image = reproject_point_cloud(pcd, position, quaternion, K, image_shape, splat_radius=3)
+        reprojected_image = reproject_point_cloud(
+            pcd, position, quaternion, K, image_shape, splat_radius=3
+        )
         reprojected_image = cv2.cvtColor(reprojected_image, cv2.COLOR_RGB2BGR)
         # 色差2値画像の計算
         color_diff = compute_color_difference(test_image, reprojected_image)
         # 色差画像を用いた点群フィルタリング
-        pcd = filter_point_cloud_by_color_diff_image(pcd, position, quaternion, K, color_diff)
+        pcd = filter_point_cloud_by_color_diff_image(
+            pcd, position, quaternion, K, color_diff
+        )

@@ -11,8 +11,8 @@ def create_disparity_image(image_L, image_R, window_size, min_disp, num_disp):
         minDisparity=min_disp,
         numDisparities=num_disp,
         blockSize=window_size,
-        P1=8 * 3 * window_size**2,
-        P2=16 * 3 * window_size**2,
+        P1=8 * 3 * window_size ** 2,
+        P2=16 * 3 * window_size ** 2,
         disp12MaxDiff=1,
         uniquenessRatio=10,
         speckleWindowSize=100,
@@ -56,7 +56,9 @@ def to_orthographic_projection(depth, color_image, camera_height):
     ]
 
     ortho_depth = np.full_like(depth, np.inf)
-    np.minimum.at(ortho_depth, (new_y[valid_mask], new_x[valid_mask]), depth[valid_mask])
+    np.minimum.at(
+        ortho_depth, (new_y[valid_mask], new_x[valid_mask]), depth[valid_mask]
+    )
     ortho_depth[ortho_depth == np.inf] = 0
 
     ortho_color_image[ortho_depth == 0] = [0, 0, 0]
@@ -71,21 +73,22 @@ def save_depth_colormap(depth, output_path):
     )
     depth_normalized = depth_normalized.astype(np.uint8)
     depth_colormap = cv2.applyColorMap(depth_normalized, cv2.COLORMAP_JET)
-    
+
     # カラーマップの範囲を表示
     plt.imshow(depth_colormap)
-    plt.colorbar(label='Depth (normalized)')  # カラーバーを表示
+    plt.colorbar(label="Depth (normalized)")  # カラーバーを表示
     plt.title("Disparity Colormap with Depth Values")
     plt.savefig(output_path)
 
+
 # パラメータの読み込み
-(
-    B,
-    focal_length,
-    camera_height,
-    K,
-    R,
-) = (config.B, config.focal_length, config.camera_height, config.K, config.R)
+(B, focal_length, camera_height, K, R) = (
+    config.B,
+    config.focal_length,
+    config.camera_height,
+    config.K,
+    config.R,
+)
 window_size, min_disp, num_disp = config.window_size, config.min_disp, config.num_disp
 
 # 左右の画像を読み込み
@@ -112,7 +115,9 @@ disparity = create_disparity_image(
 # 深度画像を生成
 depth = B * focal_length / (disparity + 1e-6)
 depth[(depth < 10) | (depth > 40)] = 0
-ortho_depth, ortho_color_image = to_orthographic_projection(depth, left_image, camera_height)
+ortho_depth, ortho_color_image = to_orthographic_projection(
+    depth, left_image, camera_height
+)
 
 # 深度画像をカラーマップとして保存
 output_path = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{img_id}.png")
