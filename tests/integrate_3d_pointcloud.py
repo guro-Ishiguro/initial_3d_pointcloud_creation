@@ -8,6 +8,8 @@ import time
 import config
 import argparse
 import concurrent.futures
+import numba
+from numba import njit, prange
 
 # ログ設定
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -207,56 +209,122 @@ def process_image_pair(image_data):
     
     return world_coords, colors
 
-def reproject_points(points, K, R, T):
-    """
-    3D世界座標の点群をカメラパラメータを用いて画像平面へ射影する。
-    カメラ座標系への変換は X_cam = R^T * (X_world - T) とする。
-    """
-    # (points - T) は各点からカメラ中心へのベクトル
-    points_cam = (points - T) @ R.T  # shape: (N,3)
-    projected = (K @ points_cam.T).T  # shape: (N,3)
-    projected_xy = projected[:, :2] / projected[:, 2:3]  # 正規化
-    
-    return projected_xy, points_cam[:, 2]  # 返り値：画像平面上の座標と深度
 
-def filter_inconsistent_points(points, colors, test_camera_params, diff_threshold=0.1):
+def reproject_point_cloud(pcd, position, quaternion, K, image_shape, splat_radius=3):
     """
-    テスト用カメラパラメータに基づき、各テスト画像に再投影して色差が大きい点をフィルタリングする。
-    - points: 点群 (N,3)
-    - colors: 各点のRGB (N,3) (0～1の範囲)
-    - test_camera_params: 辞書のリスト。各辞書は 'K', 'R', 'T', 'image'（0～1のfloat画像）を含む。
-    - diff_threshold: 色差の閾値（0～1のスケール）
+    点群 pcd を指定カメラ姿勢から再投影し、ポイントスプラッティングと zバッファ法を適用する関数
     """
-    N = points.shape[0]
-    # 各点の最大色差を初期化（各テストカメラでの色差の最大値）
-    max_diff = np.zeros(N)
-    for cam in test_camera_params:
-        K_cam = cam['K']
-        R_cam = cam['R']
-        T_cam = cam['T']
-        test_img = cam['image']  # float32, 0～1, shape: (H, W, 3)
-        h, w, _ = test_img.shape
-        proj_xy, depth = reproject_points(points, K_cam, R_cam, T_cam)
-        # 画像内に入っていて、かつ深度が正の点を対象とする
-        valid_mask = (depth > 0) & \
-                     (proj_xy[:, 0] >= 0) & (proj_xy[:, 0] < w) & \
-                     (proj_xy[:, 1] >= 0) & (proj_xy[:, 1] < h)
-        valid_indices = np.where(valid_mask)[0]
-        if valid_indices.size == 0:
-            continue
-        proj_valid = proj_xy[valid_indices]
-        proj_valid_int = np.round(proj_valid).astype(int)
-        # インデックスが画像サイズの範囲を超えないようにクリッピング
-        proj_valid_int[:, 0] = np.clip(proj_valid_int[:, 0], 0, w - 1)
-        proj_valid_int[:, 1] = np.clip(proj_valid_int[:, 1], 0, h - 1)
-        # 画像インデックスは (row, col) で取得
-        test_colors = test_img[proj_valid_int[:, 1], proj_valid_int[:, 0], :]
-        # 各点の色との差（ユークリッド距離）を計算
-        diff = np.linalg.norm(colors[valid_indices] - test_colors, axis=1)
-        max_diff[valid_indices] = np.maximum(max_diff[valid_indices], diff)
-    # 最大色差が閾値以下の点のみ残す
-    consistent_mask = max_diff <= diff_threshold
-    return points[consistent_mask], colors[consistent_mask]
+    R = quaternion_to_rotation_matrix(*quaternion)
+    C = np.array(position).reshape(3, 1)
+    
+    points = np.asarray(pcd.points)      # (N,3)
+    colors = np.asarray(pcd.colors)      # (N,3) [0,1] 範囲と仮定
+
+    p_cam = (R.T @ (points.T - C)).T
+
+    # カメラ前方の定義が逆の場合に備えて
+    if np.median(p_cam[:, 2]) < 0:
+        p_cam = -p_cam
+
+    valid_idx = p_cam[:, 2] > 0
+    p_cam = p_cam[valid_idx]
+    colors = colors[valid_idx]
+    z_all = p_cam[:, 2]  # 正の深度
+
+    # 画像平面への投影
+    u = (K[0, 0] * (p_cam[:, 0] / z_all) + K[0, 2]).astype(np.int32)
+    v = (K[1, 1] * (p_cam[:, 1] / z_all) + K[1, 2]).astype(np.int32)
+
+    height, width = image_shape[:2]
+    v = height - 1 - v  # v 座標を上下反転
+
+    # zバッファと再投影画像の初期化
+    reprojected_img = np.zeros((height, width, 3), dtype=np.uint8)
+    z_buffer = np.full((height, width), np.inf, dtype=np.float32)
+
+    # colors を uint8 型に変換（Numba 関数で扱いやすいように）
+    colors_uint8 = (colors * 255).astype(np.uint8)
+
+    # Numba を使ったスプラッティング処理
+    splat_points_numba(u, v, z_all.astype(np.float32), colors_uint8, splat_radius, width, height, z_buffer, reprojected_img)
+    
+    return reprojected_img
+
+@njit(parallel=True)
+def splat_points_numba(u, v, z_all, colors, splat_radius, width, height, z_buffer, reprojected_img):
+    for i in prange(u.shape[0]):
+        for dy in range(-splat_radius, splat_radius + 1):
+            for dx in range(-splat_radius, splat_radius + 1):
+                if dx * dx + dy * dy <= splat_radius * splat_radius:
+                    uu = u[i] + dx
+                    vv = v[i] + dy
+                    if 0 <= uu < width and 0 <= vv < height:
+                        if z_all[i] < z_buffer[vv, uu]:
+                            z_buffer[vv, uu] = z_all[i]
+                            reprojected_img[vv, uu, 0] = colors[i, 0]
+                            reprojected_img[vv, uu, 1] = colors[i, 1]
+                            reprojected_img[vv, uu, 2] = colors[i, 2]
+
+def compute_color_difference(image1, image2):
+    """
+    image1: ドローン画像 (BGR, 0-255)
+    image2: 再投影画像 (RGB, 0-255) → BGR に変換済みと仮定
+    背景（黒色）を除外した後、2値化した色差画像を返す
+    """
+    mask = np.any(image2 != 0, axis=-1)
+    diff = cv2.absdiff(image1, image2)
+    diff[~mask] = 0
+    diff_gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+    _, diff_binary = cv2.threshold(diff_gray, 120, 255, cv2.THRESH_BINARY)
+    return diff_binary
+
+def filter_point_cloud_by_color_diff_image(pcd, position, quaternion, K, color_diff):
+    """
+    指定カメラパラメータから点群を再投影し、
+    色差画像 (バイナリ画像：255が色差大) に該当する点を除外して新たな点群を返す関数
+    """
+    # 点群の座標と色を取得
+    points = np.asarray(pcd.points)
+    colors = np.asarray(pcd.colors)
+    height, width = color_diff.shape[:2]
+
+    # カメラ座標系へ変換（reproject_point_cloud と同様の処理）
+    R = quaternion_to_rotation_matrix(*quaternion)
+    C = np.array(position).reshape(3, 1)
+    p_cam = (R.T @ (points.T - C)).T
+
+    # カメラ前方の定義が逆の場合に備えて
+    if np.median(p_cam[:, 2]) < 0:
+        p_cam = -p_cam
+
+    # 正の深度を持つ点のみ対象
+    valid_mask = p_cam[:, 2] > 0
+
+    # フィルタリング用のマスク（初期状態は全点保持）
+    keep_mask = np.ones(points.shape[0], dtype=bool)
+
+    # 正の深度を持つ点について、画像上のピクセル位置を計算
+    valid_indices = np.where(valid_mask)[0]
+    u = (K[0, 0] * (p_cam[valid_mask, 0] / p_cam[valid_mask, 2]) + K[0, 2]).astype(np.int32)
+    v = (K[1, 1] * (p_cam[valid_mask, 1] / p_cam[valid_mask, 2]) + K[1, 2]).astype(np.int32)
+    # reproject_point_cloud と同様に、v 座標を上下反転
+    v = height - 1 - v
+
+    # 各有効な点について、画像内で色差が大きい領域に属するかをチェック
+    for idx, (px, py) in zip(valid_indices, zip(u, v)):
+        if 0 <= px < width and 0 <= py < height:
+            if color_diff[py, px] == 255:
+                keep_mask[idx] = False
+
+    # フィルタリング後の点群作成
+    new_points = points[keep_mask]
+    new_colors = colors[keep_mask]
+    new_pcd = o3d.geometry.PointCloud()
+    new_pcd.points = o3d.utility.Vector3dVector(new_points)
+    new_pcd.colors = o3d.utility.Vector3dVector(new_colors)
+    
+    logging.info(f"Filtered point cloud: {len(points)} -> {len(new_points)} points.")
+    return new_pcd
 
 
 if __name__ == "__main__":
@@ -299,8 +367,6 @@ if __name__ == "__main__":
         if test_img is None:
             logging.warning(f"Test image not found for index {idx}: {test_image_path}")
             continue
-        test_img = cv2.cvtColor(test_img, cv2.COLOR_BGR2RGB)
-        test_img = test_img.astype(np.float32) / 255.0
         test_camera_params.append({
             'K': K,
             'R': R_test,
@@ -377,17 +443,26 @@ if __name__ == "__main__":
 
         # ---------- テストカメラによる再投影と色不整合点のフィルタリング ----------
         logging.info("Starting reprojection-based color consistency filtering...")
-        all_points_np = np.asarray(pcd.points)
-        all_colors_np = np.asarray(pcd.colors)
-        filtered_points, filtered_colors = filter_inconsistent_points(all_points_np, all_colors_np, test_camera_params, diff_threshold=0.1)
-        logging.info(f"After filtering, remaining points: {len(filtered_points)}")
-        
-        # フィルタリング結果を新たな点群として生成
-        filtered_pcd = o3d.geometry.PointCloud()
-        filtered_pcd.points = o3d.utility.Vector3dVector(filtered_points)
-        filtered_pcd.colors = o3d.utility.Vector3dVector(filtered_colors)
+        for test_camera_param in test_camera_params:
+            K = test_camera_param["K"]
+            R = test_camera_param["R"]
+            T = test_camera_param["T"]
+            test_image = test_camera_param["image"]
+            image_shape = test_image.shape
+            # 再投影画像の生成
+            reprojected_image = reproject_point_cloud(pcd, position, quaternion, K, image_shape, splat_radius=3)
+            reprojected_image = cv2.cvtColor(reprojected_image, cv2.COLOR_RGB2BGR)
+            logging.info("Saved reprojected image")
+            cv2.imwrite("reprojected_image.png", reprojected_image)
+            cv2.imwrite("test.png", test_image)
+            # 色差2値画像の計算
+            color_diff = compute_color_difference(test_image, reprojected_image)
+            cv2.imwrite("color_diff.png", color_diff)
+            # 色差画像を用いた点群フィルタリング
+            pcd = filter_point_cloud_by_color_diff_image(pcd, position, quaternion, K, color_diff)
+
 
         # --- 可視化 ----------
-        o3d.visualization.draw_geometries([filtered_pcd])
+        o3d.visualization.draw_geometries([pcd])
     else:
         logging.warning("No points to merge. The point cloud might be empty.")
