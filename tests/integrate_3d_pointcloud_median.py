@@ -339,7 +339,7 @@ def process_image_pair(image_data):
         ortho_depth, ortho_color, ortho_conf, K, R, T, pixel_size
     )
 
-    world_coords, colors, conf = grid_sampling(world_coords, colors, conf, 0.05)
+    world_coords, colors, conf = grid_sampling(world_coords, colors, conf, 0.1)
 
     return world_coords, colors, conf
 
@@ -532,43 +532,37 @@ def filter_points_by_support(
     )
 
 
-def weighted_integration(points, colors, confidences, voxel_size):
+def median_integration(points, colors, voxel_size):
     """
-    複数の点群を、各ボクセル内で信頼度を用いた重み付き平均で統合する関数。
-    ただし、各ボクセル内の平均信頼度が一定の閾値 (ここでは 0.5) より低い場合、そのボクセルは統合結果から除外する。
-    """
-    min_avg_conf = 0.5  # 各ボクセル内の平均信頼度の閾値（必要に応じて調整可能）
+    複数の点群を、各ボクセル内に存在する点群の位置と色の中央値をとって統合する関数
+    ここでは、各ボクセルに属する全ての点の位置と色を中央値で統合することで、
+    信頼度を用いない統合結果を得ることを目的とする。
     
+    Parameters:
+        points (np.ndarray): 点群の位置 (N, 3)
+        colors (np.ndarray): 各点の色 (N, 3) [RGB, 0-1]
+        voxel_size (float): ボクセルのサイズ
+    
+    Returns:
+        integrated_points (np.ndarray): 統合された点群の位置
+        integrated_colors (np.ndarray): 統合された点群の色
+    """
     # 各点のボクセルインデックスを計算
     voxel_indices = np.floor(points / voxel_size).astype(np.int32)
-    _, inverse_indices = np.unique(voxel_indices, axis=0, return_inverse=True)
+    # ユニークなボクセルごとにグループ化するためのインデックスを取得
+    unique_voxels, inverse_indices = np.unique(voxel_indices, axis=0, return_inverse=True)
+    num_voxels = unique_voxels.shape[0]
+    integrated_points = np.zeros((num_voxels, 3), dtype=np.float32)
+    integrated_colors = np.zeros((num_voxels, 3), dtype=np.float32)
     
-    # 各ボクセル内の点数を計算
-    counts = np.bincount(inverse_indices)
-    # 各ボクセル内の信頼度の合計
-    sum_conf = np.bincount(inverse_indices, weights=confidences)
-    # 各ボクセル内の平均信頼度
-    avg_conf = sum_conf / counts
-    
-    # 信頼度が低いボクセルを除外するマスク
-    good_voxel_mask = avg_conf >= min_avg_conf
-    
-    # 重み付き和を計算（全ボクセルについて）
-    weighted_sum_x = np.bincount(inverse_indices, weights=points[:, 0] * confidences)
-    weighted_sum_y = np.bincount(inverse_indices, weights=points[:, 1] * confidences)
-    weighted_sum_z = np.bincount(inverse_indices, weights=points[:, 2] * confidences)
-    integrated_points_all = np.column_stack((weighted_sum_x, weighted_sum_y, weighted_sum_z)) / sum_conf[:, np.newaxis]
-    
-    weighted_sum_r = np.bincount(inverse_indices, weights=colors[:, 0] * confidences)
-    weighted_sum_g = np.bincount(inverse_indices, weights=colors[:, 1] * confidences)
-    weighted_sum_b = np.bincount(inverse_indices, weights=colors[:, 2] * confidences)
-    integrated_colors_all = np.column_stack((weighted_sum_r, weighted_sum_g, weighted_sum_b)) / sum_conf[:, np.newaxis]
-    
-    # 閾値を満たすボクセルのみ抽出
-    integrated_points = integrated_points_all[good_voxel_mask]
-    integrated_colors = integrated_colors_all[good_voxel_mask]
-    
+    # 各ユニークボクセルごとに、該当する点群の位置と色の中央値を計算
+    for i in range(num_voxels):
+        indices = np.where(inverse_indices == i)[0]
+        integrated_points[i] = np.median(points[indices], axis=0)
+        integrated_colors[i] = np.median(colors[indices], axis=0)
+        
     return integrated_points, integrated_colors
+
 
 
 
@@ -658,8 +652,8 @@ if __name__ == "__main__":
             f"3D map creation completed. Total points before weighted integration: {len(all_points)}"
         )
 
-        integrated_points, integrated_colors = weighted_integration(
-            all_points, all_colors, all_confidences, voxel_size=0.02
+        integrated_points, integrated_colors = median_integration(
+            all_points, all_colors, voxel_size=0.02
         )
 
         integrated_points[:, 2] = -integrated_points[:, 2]
@@ -671,7 +665,7 @@ if __name__ == "__main__":
         pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=4.0)
         logging.info(f"After outlier removal: {len(pcd.points)} points.")
         write_ply(
-            config.POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors)
+            config.OLD_POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors)
         )
 
         o3d.visualization.draw_geometries([pcd])
