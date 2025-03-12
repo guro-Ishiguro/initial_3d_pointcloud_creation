@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 from matplotlib import pyplot as plt
 import config
+import numba
 
 
 def create_disparity_image(image_L, image_R, window_size, min_disp, num_disp):
@@ -22,6 +23,32 @@ def create_disparity_image(image_L, image_R, window_size, min_disp, num_disp):
     return disparity
 
 
+# SAD ベースでコスト画像を計算（各ピクセルにおける左右ブロックの差分和）
+@numba.njit(parallel=True)
+def compute_disparity_cost(left, right, disparity, block_size):
+    half = block_size // 2
+    rows, cols = left.shape
+    cost_image = np.zeros((rows, cols), dtype=np.float32)
+
+    for y in numba.prange(half, rows - half):
+        for x in range(half, cols - half):
+            disp_value = disparity[y, x]
+            d = int(np.round(disp_value))
+            if d >= 0:
+                xr = x - d
+                if (xr - half >= 0) and (xr + half < cols):
+                    sad = 0.0
+                    # 内側の2重ループを numba でコンパイル
+                    for i in range(-half, half):
+                        for j in range(-half, half):
+                            diff = abs(
+                                float(left[y + i, x + j]) - float(right[y + i, xr + j])
+                            )
+                            sad += diff
+                    cost_image[y, x] = sad
+    return cost_image
+
+
 def save_disparity_colormap(disparity, output_path):
     """視差画像をカラーマップで保存する"""
     disparity_normalized = cv2.normalize(
@@ -38,7 +65,7 @@ camera_height = config.camera_height
 window_size, min_disp, num_disp = config.window_size, config.min_disp, config.num_disp
 
 # 左右の画像を読み込み
-img_id = 70
+img_id = 100
 left_image = cv2.imread(
     os.path.join(config.IMAGE_DIR, f"left_{str(img_id).zfill(6)}.png"),
     cv2.IMREAD_GRAYSCALE,
@@ -57,6 +84,14 @@ disparity = create_disparity_image(
     num_disp=num_disp,
 )
 
+# コスト画像の計算（SAD 値）
+disparity_cost = compute_disparity_cost(left_image, right_image, disparity, window_size)
+
 # 視差画像をカラーマップとして保存
-output_path = os.path.join(config.DISPARITY_IMAGE_DIR, f"disparity_{img_id}.png")
-save_disparity_colormap(disparity, output_path)
+disparity_output_path = os.path.join(
+    config.DISPARITY_IMAGE_DIR, f"disparity_{img_id}.png"
+)
+disparity_cost_output_path = os.path.join(
+    config.DISPARITY_IMAGE_DIR, f"disparity_cost_{img_id}.png"
+)
+save_disparity_colormap(disparity_cost, disparity_output_path)

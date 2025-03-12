@@ -7,9 +7,7 @@ import logging
 import time
 import config
 import argparse
-import concurrent.futures
-import numba
-from numba import njit, prange
+from numba import njit
 
 # ログ設定
 logging.basicConfig(
@@ -77,51 +75,81 @@ def clear_folder(dir_path):
         logging.info(f"The folder {dir_path} does not exist.")
 
 
-def to_orthographic_projection(depth, color_image, camera_height):
-    """中心投影から正射投影への変換を適用し、カラー画像を正射投影にマッピング"""
+def to_orthographic_projection(depth, color_image, confidence, camera_height):
+    """
+    中心投影から正射投影への変換を適用し、カラー画像を正射投影にマッピングする関数
+    """
     rows, cols = depth.shape
-    mid_idx = cols // 2
-    mid_idy = rows // 2
-    col_indices = np.vstack([np.arange(cols)] * rows)
-    row_indices = np.vstack([np.arange(rows)] * cols).transpose()
+    mid_x = cols // 2
+    mid_y = rows // 2
 
-    shift_x = np.where(
-        (depth > 40) | (depth < 0),
-        0,
-        ((camera_height - depth) * (mid_idx - col_indices) / camera_height).astype(int),
-    )
-    shift_y = np.where(
-        (depth > 40) | (depth < 0),
-        0,
-        ((camera_height - depth) * (mid_idy - row_indices) / camera_height).astype(int),
-    )
+    # 各ピクセルの行, 列インデックスを生成
+    row_indices, col_indices = np.indices((rows, cols))
 
+    # 有効な深度領域 (0 < depth < 40) のマスク
+    valid = (depth > 0) & (depth < 40)
+
+    # 有効領域に対するシフト量を計算
+    shift_x = np.zeros_like(depth, dtype=int)
+    shift_y = np.zeros_like(depth, dtype=int)
+    shift_x[valid] = (
+        (camera_height - depth[valid]) * (mid_x - col_indices[valid]) / camera_height
+    ).astype(int)
+    shift_y[valid] = (
+        (camera_height - depth[valid]) * (mid_y - row_indices[valid]) / camera_height
+    ).astype(int)
+
+    # 新しい座標の計算
     new_x = col_indices + shift_x
     new_y = row_indices + shift_y
 
-    valid_mask = (new_x >= 0) & (new_x < cols) & (new_y >= 0) & (new_y < rows)
-    new_x = np.where(valid_mask, new_x, -1)
-    new_y = np.where(valid_mask, new_y, -1)
+    # 座標が画像内にあり、かつ有効な領域のみ対象
+    valid_mask = valid & (new_x >= 0) & (new_x < cols) & (new_y >= 0) & (new_y < rows)
 
-    ortho_color_image = np.zeros_like(color_image)
-    valid_depth_mask = (depth > 0) & (depth < 40) & valid_mask
+    # 各入力画像の有効領域の値を抽出
+    valid_depths = depth[valid_mask]
+    valid_color = color_image[
+        row_indices[valid_mask], col_indices[valid_mask]
+    ]  # shape=(N,3)
+    valid_conf = confidence[valid_mask]
 
-    ortho_color_image[new_y[valid_depth_mask], new_x[valid_depth_mask]] = color_image[
-        row_indices[valid_depth_mask], col_indices[valid_depth_mask]
-    ]
+    # 再配置先の1次元インデックスを計算
+    flat_indices = new_y[valid_mask] * cols + new_x[valid_mask]
 
-    ortho_depth = np.full_like(depth, np.inf)
-    np.minimum.at(
-        ortho_depth, (new_y[valid_mask], new_x[valid_mask]), depth[valid_mask]
-    )
-    ortho_depth[ortho_depth == np.inf] = 0
-    ortho_color_image[ortho_depth == 0] = [0, 0, 0]
+    order = np.lexsort((valid_depths, flat_indices))
+    sorted_flat_indices = flat_indices[order]
+    sorted_depths = valid_depths[order]
+    sorted_color = valid_color[order]
+    sorted_conf = valid_conf[order]
 
-    return ortho_depth, ortho_color_image
+    # 同じ flat_indices 内で一意な値を取得（最小深度を採用）
+    unique_flat_indices, unique_idx = np.unique(sorted_flat_indices, return_index=True)
+    chosen_depth = sorted_depths[unique_idx]
+    chosen_color = sorted_color[unique_idx]
+    chosen_conf = sorted_conf[unique_idx]
+
+    # flat_indices を2次元の座標に変換
+    unique_new_y = unique_flat_indices // cols
+    unique_new_x = unique_flat_indices % cols
+
+    # 出力画像の初期化
+    ortho_depth = np.zeros_like(depth)
+    # カラー画像の場合は元のチャネル数を維持
+    ortho_color = np.zeros_like(color_image)
+    ortho_conf = np.zeros_like(confidence)
+
+    # 各再配置先に選ばれた値を割り当て
+    ortho_depth[unique_new_y, unique_new_x] = chosen_depth
+    ortho_color[unique_new_y, unique_new_x] = chosen_color
+    ortho_conf[unique_new_y, unique_new_x] = chosen_conf
+
+    return ortho_depth, ortho_color, ortho_conf
 
 
-def depth_to_world(depth_map, color_image, K, R, T, pixel_size):
-    """深度マップをワールド座標に変換し、テクスチャを適用する"""
+def depth_to_world(depth_map, color_image, confidence_image, K, R, T, pixel_size):
+    """
+    深度マップ、カラー画像、信頼度画像を用いて、ワールド座標とカラー情報、信頼度値を取得する関数
+    """
     height, width = depth_map.shape
     i, j = np.meshgrid(np.arange(width), np.arange(height), indexing="xy")
     x_coords = (i - width // 2) * pixel_size
@@ -129,9 +157,11 @@ def depth_to_world(depth_map, color_image, K, R, T, pixel_size):
     z_coords = depth_map
     local_coords = np.stack((x_coords, y_coords, z_coords), axis=-1).reshape(-1, 3)
     world_coords = (R @ local_coords.T).T + T
+    # ここでは、深度が有効な領域を (depth_map > 10) としている
     valid_mask = (depth_map > 10).reshape(-1)
     colors = color_image.reshape(-1, 3)[valid_mask] / 255.0
-    return world_coords[valid_mask], colors
+    conf = confidence_image.reshape(-1)[valid_mask]
+    return world_coords[valid_mask], colors, conf
 
 
 def create_disparity_image(image_L, image_R, img_id, window_size, min_disp, num_disp):
@@ -154,11 +184,70 @@ def create_disparity_image(image_L, image_R, img_id, window_size, min_disp, num_
     return disparity
 
 
-def grid_sampling(point_cloud, colors, grid_size):
-    """各画像ペア内でのグリッドサンプリング（単純にユニークなグリッドセルごとに1点を残す）"""
+# SAD ベースでコスト画像を計算（各ピクセルにおける左右ブロックの差分和）
+@njit
+def compute_disparity_cost(left, right, disparity, block_size):
+    half = block_size // 2
+    rows, cols = left.shape
+    cost_image = np.zeros((rows, cols), dtype=np.float32)
+    for y in range(half, rows - half):
+        for x in range(half, cols - half):
+            disp_value = disparity[y, x]
+            d = int(np.round(disp_value))
+            if d >= 0:
+                xr = x - d
+                if (xr - half >= 0) and (xr + half < cols):
+                    sad = 0.0
+                    for i in range(-half, half):
+                        for j in range(-half, half):
+                            diff = abs(
+                                float(left[y + i, x + j]) - float(right[y + i, xr + j])
+                            )
+                            sad += diff
+                    cost_image[y, x] = sad
+    return cost_image
+
+
+@njit
+def compute_depth_error_cost(disparity, block_size, B, c):
+    """
+    視差画像から深度誤差を考慮したコスト画像を生成する関数
+    """
+    half = block_size // 2
+    rows, cols = disparity.shape
+    cost_image = np.zeros((rows, cols), dtype=np.float32)
+    for y in range(half, rows - half):
+        for x in range(half, cols - half):
+            d = disparity[y, x]
+            if d > 0:
+                cost_image[y, x] = (B * c) / (d * d + 1e-6)
+            else:
+                cost_image[y, x] = 0.0
+    return cost_image
+
+
+def compute_confidence(sad_cost, depth_cost, alpha=0.5, beta=0.5):
+    sad_norm = (sad_cost - np.min(sad_cost)) / (
+        np.max(sad_cost) - np.min(sad_cost) + 1e-6
+    )
+    depth_norm = (depth_cost - np.min(depth_cost)) / (
+        np.max(depth_cost) - np.min(depth_cost) + 1e-6
+    )
+    confidence = np.exp(-(alpha * sad_norm + beta * depth_norm))
+    return confidence
+
+
+def grid_sampling(point_cloud, colors, confidences, grid_size):
+    """
+    各画像ペア内でのグリッドサンプリング
+    """
     rounded_coords = np.floor(point_cloud / grid_size).astype(int)
     _, unique_indices = np.unique(rounded_coords, axis=0, return_index=True)
-    return point_cloud[unique_indices], colors[unique_indices]
+    return (
+        point_cloud[unique_indices],
+        colors[unique_indices],
+        confidences[unique_indices],
+    )
 
 
 def process_point_cloud(points, colors):
@@ -166,9 +255,7 @@ def process_point_cloud(points, colors):
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points)
     pcd.colors = o3d.utility.Vector3dVector(colors)
-    # ボクセルダウンサンプリング
     pcd = pcd.voxel_down_sample(voxel_size=0.02)
-    # 統計的外れ値除去
     pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=4.0)
     return pcd
 
@@ -185,7 +272,6 @@ def voxel_downsample_points(points, colors, voxel_size):
 def process_image_pair(image_data):
     """
     画像ペアを処理してワールド座標の点群を生成する。
-    各画像ペアごとに事前にボクセル化を行ってから結果を返す。
     """
     (
         img_id,
@@ -223,6 +309,16 @@ def process_image_pair(image_data):
         logging.error(f"Disparity computation failed for ID {img_id}")
         return None
 
+    # コスト画像の計算（SAD 値）
+    disparity_cost = compute_disparity_cost(
+        left_image_gray, right_image_gray, disparity, window_size
+    )
+
+    # 深度誤差ベースのコスト画像を計算
+    depth_cost = compute_depth_error_cost(disparity, window_size, B, focal_length)
+
+    confidence = compute_confidence(disparity_cost, depth_cost)
+
     depth = B * focal_length / (disparity + 1e-6)
     depth[(depth < 10) | (depth > 40)] = 0
 
@@ -236,83 +332,16 @@ def process_image_pair(image_data):
     )
     depth[boundary_mask] = 0
 
-    depth, ortho_color_image = to_orthographic_projection(
-        depth, left_image, camera_height
+    ortho_depth, ortho_color, ortho_conf = to_orthographic_projection(
+        depth, left_image, confidence, camera_height
     )
-    world_coords, colors = depth_to_world(depth, ortho_color_image, K, R, T, pixel_size)
-    # 各画像ペア内でのグリッドサンプリング
-    world_coords, colors = grid_sampling(world_coords, colors, 0.1)
-
-    return world_coords, colors
-
-
-def reproject_point_cloud(pcd, position, quaternion, K, image_shape, splat_radius=3):
-    """
-    点群 pcd を指定カメラ姿勢から再投影し、ポイントスプラッティングと zバッファ法を適用する関数
-    """
-    R = quaternion_to_rotation_matrix(*quaternion)
-    C = np.array(position).reshape(3, 1)
-
-    points = np.asarray(pcd.points)  # (N,3)
-    colors = np.asarray(pcd.colors)  # (N,3) [0,1] 範囲と仮定
-
-    p_cam = (R.T @ (points.T - C)).T
-
-    # カメラ前方の定義が逆の場合に備えて
-    if np.median(p_cam[:, 2]) < 0:
-        p_cam = -p_cam
-
-    valid_idx = p_cam[:, 2] > 0
-    p_cam = p_cam[valid_idx]
-    colors = colors[valid_idx]
-    z_all = p_cam[:, 2]  # 正の深度
-
-    # 画像平面への投影
-    u = (K[0, 0] * (p_cam[:, 0] / z_all) + K[0, 2]).astype(np.int32)
-    v = (K[1, 1] * (p_cam[:, 1] / z_all) + K[1, 2]).astype(np.int32)
-
-    height, width = image_shape[:2]
-    v = height - 1 - v  # v 座標を上下反転
-
-    # zバッファと再投影画像の初期化
-    reprojected_img = np.zeros((height, width, 3), dtype=np.uint8)
-    z_buffer = np.full((height, width), np.inf, dtype=np.float32)
-
-    # colors を uint8 型に変換（Numba 関数で扱いやすいように）
-    colors_uint8 = (colors * 255).astype(np.uint8)
-
-    # Numba を使ったスプラッティング処理
-    splat_points_numba(
-        u,
-        v,
-        z_all.astype(np.float32),
-        colors_uint8,
-        splat_radius,
-        width,
-        height,
-        z_buffer,
-        reprojected_img,
+    world_coords, colors, conf = depth_to_world(
+        ortho_depth, ortho_color, ortho_conf, K, R, T, pixel_size
     )
 
-    return reprojected_img
+    world_coords, colors, conf = grid_sampling(world_coords, colors, conf, 0.05)
 
-
-@njit(parallel=True)
-def splat_points_numba(
-    u, v, z_all, colors, splat_radius, width, height, z_buffer, reprojected_img
-):
-    for i in prange(u.shape[0]):
-        for dy in range(-splat_radius, splat_radius + 1):
-            for dx in range(-splat_radius, splat_radius + 1):
-                if dx * dx + dy * dy <= splat_radius * splat_radius:
-                    uu = u[i] + dx
-                    vv = v[i] + dy
-                    if 0 <= uu < width and 0 <= vv < height:
-                        if z_all[i] < z_buffer[vv, uu]:
-                            z_buffer[vv, uu] = z_all[i]
-                            reprojected_img[vv, uu, 0] = colors[i, 0]
-                            reprojected_img[vv, uu, 1] = colors[i, 1]
-                            reprojected_img[vv, uu, 2] = colors[i, 2]
+    return world_coords, colors, conf
 
 
 def compute_color_difference(image1, image2):
@@ -334,47 +363,33 @@ def filter_point_cloud_by_color_diff_image(pcd, position, quaternion, K, color_d
     指定カメラパラメータから点群を再投影し、
     色差画像 (バイナリ画像：255が色差大) に該当する点を除外して新たな点群を返す関数
     """
-    # 点群の座標と色を取得
     points = np.asarray(pcd.points)
     colors = np.asarray(pcd.colors)
     height, width = color_diff.shape[:2]
 
-    # カメラ座標系へ変換（reproject_point_cloud と同様の処理）
     T = np.array(position).reshape(3, 1)
     R = quaternion_to_rotation_matrix(*quaternion)
     p_cam = (R.T @ (points.T - T)).T
 
-    # カメラ前方の定義が逆の場合に備えて
     if np.median(p_cam[:, 2]) < 0:
         p_cam = -p_cam
 
-    # 正の深度を持つ点のみ対象
     valid_mask = p_cam[:, 2] > 0
-
-    # 初期状態のマスク
     keep_mask = np.ones(points.shape[0], dtype=bool)
-
-    # 正の深度を持つ点のインデックスと対応する画素位置を計算
     valid_indices = np.where(valid_mask)[0]
     z_valid = p_cam[valid_mask, 2]
     u = (K[0, 0] * (p_cam[valid_mask, 0] / z_valid) + K[0, 2]).astype(np.int32)
     v = (K[1, 1] * (p_cam[valid_mask, 1] / z_valid) + K[1, 2]).astype(np.int32)
-    # 画像の上下反転（v 座標）
     v = height - 1 - v
 
-    # 範囲内の画素のみを対象にする
     in_bounds = (u >= 0) & (u < width) & (v >= 0) & (v < height)
     u_in = u[in_bounds]
     v_in = v[in_bounds]
     valid_indices_in = valid_indices[in_bounds]
 
-    # 色差が大きい（255）ピクセルかどうかをベクトルでチェック
     diff_condition = color_diff[v_in, u_in] == 255
-
-    # 条件に該当する点を除外
     keep_mask[valid_indices_in[diff_condition]] = False
 
-    # フィルタリング後の点群を作成
     new_points = points[keep_mask]
     new_colors = colors[keep_mask]
     new_pcd = o3d.geometry.PointCloud()
@@ -383,6 +398,165 @@ def filter_point_cloud_by_color_diff_image(pcd, position, quaternion, K, color_d
 
     logging.info(f"Filtered point cloud: {len(points)} -> {len(new_points)} points.")
     return new_pcd
+
+
+def write_ply(filename, vertices, colors):
+    """頂点データと色データをPLYファイルに書き込む"""
+    assert vertices.shape[0] == colors.shape[0], "頂点数と色データの数が一致しません。"
+    header = f"""ply
+format ascii 1.0
+element vertex {len(vertices)}
+property float x
+property float y
+property float z
+property uchar red
+property uchar green
+property uchar blue
+end_header
+"""
+    with open(filename, "w") as f:
+        f.write(header)
+        data = np.hstack((vertices, (colors * 255).astype(np.uint8)))
+        np.savetxt(f, data, fmt="%f %f %f %d %d %d")
+
+
+def compute_support_for_view(
+    points, colors, position, quaternion, K, neighbor_image, color_threshold=30
+):
+    """
+    各点を指定のカメラパラメータ（position, quaternion）から再投影し、
+    隣接画像（neighbor_image）上での色差がしきい値以下ならば1を返す配列を返す。
+    points: (N,3) 、colors: (N,3) [RGB, 0-1]
+    """
+    N = points.shape[0]
+    support = np.zeros(N, dtype=np.int32)
+    T = np.array(position).reshape(3, 1)
+    R = quaternion_to_rotation_matrix(*quaternion)
+    # カメラ座標系に変換
+    p_cam = (R.T @ (points.T - T)).T  # shape (N,3)
+    if np.median(p_cam[:, 2]) < 0:
+        p_cam = -p_cam
+    valid_mask = p_cam[:, 2] > 0
+    if not np.any(valid_mask):
+        return support
+    p_valid = p_cam[valid_mask]
+    u = (K[0, 0] * (p_valid[:, 0] / p_valid[:, 2]) + K[0, 2]).astype(np.int32)
+    v = (K[1, 1] * (p_valid[:, 1] / p_valid[:, 2]) + K[1, 2]).astype(np.int32)
+    height, width = neighbor_image.shape[:2]
+    # 画像座標系は上下反転
+    v = height - 1 - v
+
+    valid_indices = np.where(valid_mask)[0]
+    for idx_local, idx in enumerate(valid_indices):
+        if (
+            u[idx_local] < 0
+            or u[idx_local] >= width
+            or v[idx_local] < 0
+            or v[idx_local] >= height
+        ):
+            continue
+        # 隣接画像（RGBに変換済み）の該当画素の色
+        neighbor_color = neighbor_image[v[idx_local], u[idx_local], :].astype(
+            np.float32
+        )
+        # 点の色（0-1の範囲）を255倍して比較
+        point_color = colors[idx] * 255.0
+        diff = np.linalg.norm(point_color - neighbor_color)
+        if diff < color_threshold:
+            support[idx] = 1
+    return support
+
+
+def filter_points_by_support(
+    points,
+    colors,
+    confidences,
+    current_index,
+    camera_data,
+    K,
+    image_dir,
+    support_threshold=3,
+):
+    """
+    現在の画像ペアから得られた各点について、隣接ビューからの支持数を計算し、
+    支持数がしきい値以上の点のみを残す。
+    - camera_data: ドローン画像ログで、各要素は (file_name, position, quaternion)
+    - current_index: 現在の画像ペアのインデックス
+    - image_dir: 画像ディレクトリパス
+    ここでは、前後2枚ずつ、計4ビューで再投影支持数を計算する。
+    """
+    n = len(camera_data)
+    neighbor_indices = []
+    # 前後2枚ずつ取得（存在する場合）
+    if current_index - 2 >= 0:
+        neighbor_indices.append(camera_data[current_index - 2])
+    if current_index - 1 >= 0:
+        neighbor_indices.append(camera_data[current_index - 1])
+    if current_index + 1 < n:
+        neighbor_indices.append(camera_data[current_index + 1])
+    if current_index + 2 < n:
+        neighbor_indices.append(camera_data[current_index + 2])
+
+    # もし利用可能な隣接ビューが support_threshold 未満なら、thresholdを利用可能枚数に調整
+    if len(neighbor_indices) < support_threshold:
+        support_threshold = len(neighbor_indices)
+
+    # 各点の支持数を初期化
+    support_counts = np.zeros(points.shape[0], dtype=np.int32)
+
+    for neighbor_cam in neighbor_indices:
+        neighbor_position = neighbor_cam[1]
+        neighbor_quaternion = neighbor_cam[2]
+        neighbor_image_path = os.path.join(image_dir, neighbor_cam[0])
+        print(neighbor_image_path)
+        neighbor_image = cv2.imread(neighbor_image_path)
+        if neighbor_image is None:
+            logging.warning(f"Neighbor image not found: {neighbor_image_path}")
+            continue
+        # 色比較のためRGBに変換
+        neighbor_image = cv2.cvtColor(neighbor_image, cv2.COLOR_BGR2RGB)
+        support_view = compute_support_for_view(
+            points, colors, neighbor_position, neighbor_quaternion, K, neighbor_image
+        )
+        support_counts += support_view
+
+    keep_indices = support_counts >= support_threshold
+    logging.info(
+        f"Support filtering: {points.shape[0]} -> {np.sum(keep_indices)} points (threshold: {support_threshold}, neighbor count: {len(neighbor_indices)})"
+    )
+    return (
+        points[keep_indices],
+        colors[keep_indices],
+        confidences[keep_indices],
+        support_counts[keep_indices],
+    )
+
+
+def weighted_integration(points, colors, confidences, voxel_size):
+    """
+    複数の点群を、各ボクセル内で信頼度を用いた重み付き平均で統合する関数
+    """
+    voxel_indices = np.floor(points / voxel_size).astype(np.int32)
+    _, inverse_indices = np.unique(voxel_indices, axis=0, return_inverse=True)
+
+    sum_conf = np.bincount(inverse_indices, weights=confidences)
+    weighted_sum_x = np.bincount(inverse_indices, weights=points[:, 0] * confidences)
+    weighted_sum_y = np.bincount(inverse_indices, weights=points[:, 1] * confidences)
+    weighted_sum_z = np.bincount(inverse_indices, weights=points[:, 2] * confidences)
+    integrated_points = (
+        np.column_stack((weighted_sum_x, weighted_sum_y, weighted_sum_z))
+        / sum_conf[:, np.newaxis]
+    )
+
+    weighted_sum_r = np.bincount(inverse_indices, weights=colors[:, 0] * confidences)
+    weighted_sum_g = np.bincount(inverse_indices, weights=colors[:, 1] * confidences)
+    weighted_sum_b = np.bincount(inverse_indices, weights=colors[:, 2] * confidences)
+    integrated_colors = (
+        np.column_stack((weighted_sum_r, weighted_sum_g, weighted_sum_b))
+        / sum_conf[:, np.newaxis]
+    )
+
+    return integrated_points, integrated_colors
 
 
 if __name__ == "__main__":
@@ -415,28 +589,7 @@ if __name__ == "__main__":
             quaternion = tuple(map(float, parts[4:8]))
             camera_data.append((file_name, position, quaternion))
 
-    test_camera_indices = list(range(0, len(camera_data), 15))
-    test_camera_params = []
-    for idx in test_camera_indices:
-        position = camera_data[idx][1]
-        quaternion = camera_data[idx][2]
-        test_image_path = os.path.join(
-            config.IMAGE_DIR, f"left_{str(idx).zfill(6)}.png"
-        )
-        test_img = cv2.imread(test_image_path)
-        if test_img is None:
-            logging.warning(f"Test image not found for index {idx}: {test_image_path}")
-            continue
-        test_camera_params.append(
-            {
-                "K": config.K,
-                "position": position,
-                "quaternion": quaternion,
-                "image": test_img,
-            }
-        )
-
-    logging.info("Starting 3D map creation (training set)...")
+    logging.info("Starting 3D map creation")
     map_start = time.time()
     image_pairs_data = [
         (
@@ -454,83 +607,60 @@ if __name__ == "__main__":
             min_disp,
             num_disp,
         )
-        for idx in range(150)
+        for idx in range(len(camera_data))
     ]
 
     merged_points_list = []
     merged_colors_list = []
-    with concurrent.futures.ProcessPoolExecutor(max_workers=2) as executor:
-        futures = [
-            executor.submit(process_image_pair, data) for data in image_pairs_data
-        ]
-        completed_tasks = 0
-        total_tasks = len(futures)
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                result = future.result()
-                if result is not None:
-                    points, colors = result
-                    merged_points_list.append(points)
-                    merged_colors_list.append(colors)
-                    completed_tasks += 1
-                    progress = (completed_tasks / total_tasks) * 100
-                    logging.info(
-                        f"Progress: {completed_tasks}/{total_tasks} tasks completed ({progress:.2f}%)"
-                    )
-                else:
-                    logging.warning("Result is None.")
-            except Exception as e:
-                logging.error(f"Error occurred while processing image pair: {e}")
+    merged_confidences_list = []
+    last_pair = image_pairs_data[-1][0]
+    for data in image_pairs_data:
+        current_idx = data[0]
+        result = process_image_pair(data)
+        if result is not None:
+            points, colors, conf = result
+            points, colors, conf, support = filter_points_by_support(
+                points,
+                colors,
+                conf,
+                current_idx,
+                camera_data,
+                K,
+                config.IMAGE_DIR,
+                support_threshold=4,
+            )
+            merged_points_list.append(points)
+            merged_colors_list.append(colors)
+            merged_confidences_list.append(conf)
+            logging.info(f"Processed {current_idx} out of {last_pair} image pairs.")
+        else:
+            logging.warning(f"Result is None for image pair {current_idx}.")
 
     if merged_points_list:
-        # --- 統合 ---
         all_points = np.vstack(merged_points_list)
         all_colors = np.vstack(merged_colors_list)
-
-        # Z軸反転
-        all_points[:, 2] = -all_points[:, 2]
+        all_confidences = np.concatenate(merged_confidences_list)
 
         logging.info(
-            f"3D map creation completed. Total points before filtering: {len(all_points)}"
+            f"3D map creation completed. Total points before weighted integration: {len(all_points)}"
         )
 
-        # --- 完全重複点の削除 ---
+        integrated_points, integrated_colors = weighted_integration(
+            all_points, all_colors, all_confidences, voxel_size=0.02
+        )
+
+        integrated_points[:, 2] = -integrated_points[:, 2]
+
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(all_points)
-        pcd.colors = o3d.utility.Vector3dVector(all_colors)
+        pcd.points = o3d.utility.Vector3dVector(integrated_points)
+        pcd.colors = o3d.utility.Vector3dVector(integrated_colors)
 
-        # --- ボクセルダウンサンプリング（統一ボクセルグリッドで均一化） ---
-        voxel_size = 0.02  # ボクセルサイズを調整
-        pcd = pcd.voxel_down_sample(voxel_size)
-        logging.info(f"Voxel downsampling applied. New count: {len(pcd.points)}")
-
-        # --- 統計的外れ値除去（ノイズ除去） ---
         pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=4.0)
-        logging.info(
-            f"Outlier removal applied. Count after outlier removal: {len(pcd.points)}"
+        logging.info(f"After outlier removal: {len(pcd.points)} points.")
+        write_ply(
+            config.POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors)
         )
 
-        # ---------- テストカメラによる再投影と色不整合点のフィルタリング ----------
-        logging.info("Starting reprojection-based color consistency filtering...")
-        for test_camera_param in test_camera_params:
-            K = test_camera_param["K"]
-            position = test_camera_param["position"]
-            quaternion = test_camera_param["quaternion"]
-            test_image = test_camera_param["image"]
-            image_shape = test_image.shape
-            # 再投影画像の生成
-            reprojected_image = reproject_point_cloud(
-                pcd, position, quaternion, K, image_shape, splat_radius=3
-            )
-            reprojected_image = cv2.cvtColor(reprojected_image, cv2.COLOR_RGB2BGR)
-            # 色差2値画像の計算
-            color_diff = compute_color_difference(test_image, reprojected_image)
-            # 色差画像を用いた点群フィルタリング
-            pcd = filter_point_cloud_by_color_diff_image(
-                pcd, position, quaternion, K, color_diff
-            )
-
-        # --- 可視化 ----------
         o3d.visualization.draw_geometries([pcd])
     else:
         logging.warning("No points to merge. The point cloud might be empty.")
