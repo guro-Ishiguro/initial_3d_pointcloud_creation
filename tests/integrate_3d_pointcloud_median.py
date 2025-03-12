@@ -7,7 +7,7 @@ import logging
 import time
 import config
 import argparse
-from numba import njit
+from numba import njit, prange
 
 # ログ設定
 logging.basicConfig(
@@ -39,19 +39,19 @@ def quaternion_to_rotation_matrix(qx, qy, qz, qw):
     R = np.array(
         [
             [
-                1 - 2 * (qy ** 2 + qz ** 2),
+                1 - 2 * (qy**2 + qz**2),
                 2 * (qx * qy - qz * qw),
                 2 * (qx * qz + qy * qw),
             ],
             [
                 2 * (qx * qy + qz * qw),
-                1 - 2 * (qx ** 2 + qz ** 2),
+                1 - 2 * (qx**2 + qz**2),
                 2 * (qy * qz - qx * qw),
             ],
             [
                 2 * (qx * qz - qy * qw),
                 2 * (qy * qz + qx * qw),
-                1 - 2 * (qx ** 2 + qy ** 2),
+                1 - 2 * (qx**2 + qy**2),
             ],
         ]
     )
@@ -173,8 +173,8 @@ def create_disparity_image(image_L, image_R, img_id, window_size, min_disp, num_
         minDisparity=min_disp,
         numDisparities=num_disp,
         blockSize=window_size,
-        P1=8 * 3 * window_size ** 2,
-        P2=16 * 3 * window_size ** 2,
+        P1=8 * 3 * window_size**2,
+        P2=16 * 3 * window_size**2,
         disp12MaxDiff=1,
         uniquenessRatio=10,
         speckleWindowSize=100,
@@ -534,36 +534,78 @@ def filter_points_by_support(
 
 def median_integration(points, colors, voxel_size):
     """
-    複数の点群を、各ボクセル内に存在する点群の位置と色の中央値をとって統合する関数
-    ここでは、各ボクセルに属する全ての点の位置と色を中央値で統合することで、
-    信頼度を用いない統合結果を得ることを目的とする。
-    
-    Parameters:
-        points (np.ndarray): 点群の位置 (N, 3)
-        colors (np.ndarray): 各点の色 (N, 3) [RGB, 0-1]
-        voxel_size (float): ボクセルのサイズ
-    
-    Returns:
-        integrated_points (np.ndarray): 統合された点群の位置
-        integrated_colors (np.ndarray): 統合された点群の色
+    複数の点群を、各ボクセル内の点位置と色の中央値で統合する。
     """
     # 各点のボクセルインデックスを計算
     voxel_indices = np.floor(points / voxel_size).astype(np.int32)
-    # ユニークなボクセルごとにグループ化するためのインデックスを取得
-    unique_voxels, inverse_indices = np.unique(voxel_indices, axis=0, return_inverse=True)
-    num_voxels = unique_voxels.shape[0]
-    integrated_points = np.zeros((num_voxels, 3), dtype=np.float32)
-    integrated_colors = np.zeros((num_voxels, 3), dtype=np.float32)
-    
-    # 各ユニークボクセルごとに、該当する点群の位置と色の中央値を計算
-    for i in range(num_voxels):
-        indices = np.where(inverse_indices == i)[0]
-        integrated_points[i] = np.median(points[indices], axis=0)
-        integrated_colors[i] = np.median(colors[indices], axis=0)
-        
+    # ユニークなボクセルごとにグループ化するための逆インデックスを取得
+    _, inverse_indices = np.unique(voxel_indices, axis=0, return_inverse=True)
+    num_voxels = np.max(inverse_indices) + 1
+
+    # グループごとにソートするためのインデックスを取得
+    sorted_idx = np.argsort(inverse_indices)
+    sorted_groups = inverse_indices[sorted_idx]
+
+    # グループの開始位置と各グループの要素数を計算
+    group_start = np.empty(num_voxels, dtype=np.int64)
+    group_length = np.empty(num_voxels, dtype=np.int64)
+    current_group = sorted_groups[0]
+    group_start[0] = 0
+    count = 1
+    group_idx = 0
+    for i in range(1, sorted_groups.shape[0]):
+        if sorted_groups[i] == current_group:
+            count += 1
+        else:
+            group_length[group_idx] = count
+            group_idx += 1
+            current_group = sorted_groups[i]
+            group_start[group_idx] = i
+            count = 1
+    group_length[group_idx] = count
+
+    # NumPy配列をNumbaで高速に中央値計算
+    integrated_points, integrated_colors = _median_integration_numba(
+        points, colors, sorted_idx, group_start, group_length, num_voxels
+    )
     return integrated_points, integrated_colors
 
 
+@njit(parallel=True)
+def _median_integration_numba(
+    points, colors, sorted_idx, group_start, group_length, num_voxels
+):
+    n_dims = points.shape[1]
+    integrated_points = np.empty((num_voxels, n_dims), dtype=points.dtype)
+    integrated_colors = np.empty((num_voxels, colors.shape[1]), dtype=colors.dtype)
+
+    for i in prange(num_voxels):
+        start = group_start[i]
+        length = group_length[i]
+        # 一時的な配列に該当グループの点と色をコピー
+        group_points = np.empty((length, n_dims), dtype=points.dtype)
+        group_colors = np.empty((length, colors.shape[1]), dtype=colors.dtype)
+        for j in range(length):
+            group_points[j, :] = points[sorted_idx[start + j]]
+            group_colors[j, :] = colors[sorted_idx[start + j]]
+        # 各次元ごとに中央値を計算
+        for d in range(n_dims):
+            sorted_vals = np.sort(group_points[:, d])
+            if length % 2 == 1:
+                integrated_points[i, d] = sorted_vals[length // 2]
+            else:
+                integrated_points[i, d] = (
+                    sorted_vals[length // 2 - 1] + sorted_vals[length // 2]
+                ) / 2.0
+        for d in range(colors.shape[1]):
+            sorted_vals = np.sort(group_colors[:, d])
+            if length % 2 == 1:
+                integrated_colors[i, d] = sorted_vals[length // 2]
+            else:
+                integrated_colors[i, d] = (
+                    sorted_vals[length // 2 - 1] + sorted_vals[length // 2]
+                ) / 2.0
+    return integrated_points, integrated_colors
 
 
 if __name__ == "__main__":
@@ -665,7 +707,9 @@ if __name__ == "__main__":
         pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=4.0)
         logging.info(f"After outlier removal: {len(pcd.points)} points.")
         write_ply(
-            config.OLD_POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors)
+            config.OLD_POINT_CLOUD_FILE_PATH,
+            np.asarray(pcd.points),
+            np.asarray(pcd.colors),
         )
 
         o3d.visualization.draw_geometries([pcd])

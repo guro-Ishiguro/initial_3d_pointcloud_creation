@@ -39,19 +39,19 @@ def quaternion_to_rotation_matrix(qx, qy, qz, qw):
     R = np.array(
         [
             [
-                1 - 2 * (qy ** 2 + qz ** 2),
+                1 - 2 * (qy**2 + qz**2),
                 2 * (qx * qy - qz * qw),
                 2 * (qx * qz + qy * qw),
             ],
             [
                 2 * (qx * qy + qz * qw),
-                1 - 2 * (qx ** 2 + qz ** 2),
+                1 - 2 * (qx**2 + qz**2),
                 2 * (qy * qz - qx * qw),
             ],
             [
                 2 * (qx * qz - qy * qw),
                 2 * (qy * qz + qx * qw),
-                1 - 2 * (qx ** 2 + qy ** 2),
+                1 - 2 * (qx**2 + qy**2),
             ],
         ]
     )
@@ -173,8 +173,8 @@ def create_disparity_image(image_L, image_R, img_id, window_size, min_disp, num_
         minDisparity=min_disp,
         numDisparities=num_disp,
         blockSize=window_size,
-        P1=8 * 3 * window_size ** 2,
-        P2=16 * 3 * window_size ** 2,
+        P1=8 * 3 * window_size**2,
+        P2=16 * 3 * window_size**2,
         disp12MaxDiff=1,
         uniquenessRatio=10,
         speckleWindowSize=100,
@@ -339,7 +339,7 @@ def process_image_pair(image_data):
         ortho_depth, ortho_color, ortho_conf, K, R, T, pixel_size
     )
 
-    world_coords, colors, conf = grid_sampling(world_coords, colors, conf, 0.05)
+    world_coords, colors, conf = grid_sampling(world_coords, colors, conf, 0.1)
 
     return world_coords, colors, conf
 
@@ -537,39 +537,44 @@ def weighted_integration(points, colors, confidences, voxel_size):
     複数の点群を、各ボクセル内で信頼度を用いた重み付き平均で統合する関数。
     ただし、各ボクセル内の平均信頼度が一定の閾値 (ここでは 0.5) より低い場合、そのボクセルは統合結果から除外する。
     """
-    min_avg_conf = 0.5  # 各ボクセル内の平均信頼度の閾値（必要に応じて調整可能）
-    
+    min_avg_conf = 0.9  # 各ボクセル内の平均信頼度の閾値
+
     # 各点のボクセルインデックスを計算
     voxel_indices = np.floor(points / voxel_size).astype(np.int32)
     _, inverse_indices = np.unique(voxel_indices, axis=0, return_inverse=True)
-    
+
     # 各ボクセル内の点数を計算
     counts = np.bincount(inverse_indices)
     # 各ボクセル内の信頼度の合計
     sum_conf = np.bincount(inverse_indices, weights=confidences)
     # 各ボクセル内の平均信頼度
     avg_conf = sum_conf / counts
-    
+
     # 信頼度が低いボクセルを除外するマスク
     good_voxel_mask = avg_conf >= min_avg_conf
-    
+
     # 重み付き和を計算（全ボクセルについて）
     weighted_sum_x = np.bincount(inverse_indices, weights=points[:, 0] * confidences)
     weighted_sum_y = np.bincount(inverse_indices, weights=points[:, 1] * confidences)
     weighted_sum_z = np.bincount(inverse_indices, weights=points[:, 2] * confidences)
-    integrated_points_all = np.column_stack((weighted_sum_x, weighted_sum_y, weighted_sum_z)) / sum_conf[:, np.newaxis]
-    
+    integrated_points_all = (
+        np.column_stack((weighted_sum_x, weighted_sum_y, weighted_sum_z))
+        / sum_conf[:, np.newaxis]
+    )
+
     weighted_sum_r = np.bincount(inverse_indices, weights=colors[:, 0] * confidences)
     weighted_sum_g = np.bincount(inverse_indices, weights=colors[:, 1] * confidences)
     weighted_sum_b = np.bincount(inverse_indices, weights=colors[:, 2] * confidences)
-    integrated_colors_all = np.column_stack((weighted_sum_r, weighted_sum_g, weighted_sum_b)) / sum_conf[:, np.newaxis]
-    
+    integrated_colors_all = (
+        np.column_stack((weighted_sum_r, weighted_sum_g, weighted_sum_b))
+        / sum_conf[:, np.newaxis]
+    )
+
     # 閾値を満たすボクセルのみ抽出
     integrated_points = integrated_points_all[good_voxel_mask]
     integrated_colors = integrated_colors_all[good_voxel_mask]
-    
-    return integrated_points, integrated_colors
 
+    return integrated_points, integrated_colors
 
 
 if __name__ == "__main__":
