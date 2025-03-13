@@ -8,6 +8,7 @@ import time
 import config
 import argparse
 from numba import njit
+import matplotlib.pyplot as plt
 
 # ログ設定
 logging.basicConfig(
@@ -108,9 +109,7 @@ def to_orthographic_projection(depth, color_image, confidence, camera_height):
 
     # 各入力画像の有効領域の値を抽出
     valid_depths = depth[valid_mask]
-    valid_color = color_image[
-        row_indices[valid_mask], col_indices[valid_mask]
-    ]  # shape=(N,3)
+    valid_color = color_image[row_indices[valid_mask], col_indices[valid_mask]]  # shape=(N,3)
     valid_conf = confidence[valid_mask]
 
     # 再配置先の1次元インデックスを計算
@@ -184,6 +183,63 @@ def create_disparity_image(image_L, image_R, img_id, window_size, min_disp, num_
     return disparity
 
 
+# --- 以下、Census変換関連の実装 ---
+
+@njit
+def census_transform_numba(img, window_size=7):
+    """
+    グレースケール画像に対して、Census変換を実行する。
+    各画素の局所ウィンドウ内で、中心画素より小さいかどうかの情報をビット列としてエンコードする。
+    """
+    half = window_size // 2
+    rows, cols = img.shape
+    census = np.zeros((rows, cols), dtype=np.uint64)
+    for y in range(half, rows - half):
+        for x in range(half, cols - half):
+            center = img[y, x]
+            descriptor = 0
+            for i in range(-half, half + 1):
+                for j in range(-half, half + 1):
+                    if i == 0 and j == 0:
+                        continue
+                    descriptor = descriptor << 1
+                    if img[y + i, x + j] < center:
+                        descriptor |= 1
+            census[y, x] = descriptor
+    return census
+
+@njit
+def popcount(x):
+    """
+    単一の整数xのビット中の1の個数（ポップカウント）を計算する
+    """
+    count = 0
+    while x:
+        count += x & 1
+        x = x >> 1
+    return count
+
+@njit
+def compute_census_cost(left, right, disparity, census_left, census_right, window_size):
+    """
+    Census変換を用いて、各画素における左右の一致度をハミング距離として計算する関数
+    """
+    half = window_size // 2
+    rows, cols = left.shape
+    cost_image = np.zeros((rows, cols), dtype=np.float32)
+    for y in range(half, rows - half):
+        for x in range(half, cols - half):
+            d_val = disparity[y, x]
+            d = int(np.round(d_val))
+            if d >= 0:
+                xr = x - d
+                if (xr - half >= 0) and (xr + half < cols):
+                    cost = popcount(census_left[y, x] ^ census_right[y, xr])
+                    cost_image[y, x] = cost
+    return cost_image
+
+# --- ここまでCensus変換関連 ---
+
 # SAD ベースでコスト画像を計算（各ピクセルにおける左右ブロックの差分和）
 @njit
 def compute_disparity_cost(left, right, disparity, block_size):
@@ -200,9 +256,7 @@ def compute_disparity_cost(left, right, disparity, block_size):
                     sad = 0.0
                     for i in range(-half, half):
                         for j in range(-half, half):
-                            diff = abs(
-                                float(left[y + i, x + j]) - float(right[y + i, xr + j])
-                            )
+                            diff = abs(float(left[y + i, x + j]) - float(right[y + i, xr + j]))
                             sad += diff
                     cost_image[y, x] = sad
     return cost_image
@@ -226,14 +280,14 @@ def compute_depth_error_cost(disparity, block_size, B, c):
     return cost_image
 
 
-def compute_confidence(sad_cost, depth_cost, alpha=0.5, beta=0.5):
-    sad_norm = (sad_cost - np.min(sad_cost)) / (
-        np.max(sad_cost) - np.min(sad_cost) + 1e-6
-    )
-    depth_norm = (depth_cost - np.min(depth_cost)) / (
-        np.max(depth_cost) - np.min(depth_cost) + 1e-6
-    )
-    confidence = np.exp(-(alpha * sad_norm + beta * depth_norm))
+def compute_confidence(cost, depth_cost, alpha=0.5, beta=0.5):
+    """
+    コスト画像と深度誤差コスト画像を正規化し、線形結合後に指数関数を適用することで、
+    信頼度（高いほど誤差が小さい）を算出する。
+    """
+    cost_norm = (cost - np.min(cost)) / (np.max(cost) - np.min(cost) + 1e-6)
+    depth_norm = (depth_cost - np.min(depth_cost)) / (np.max(depth_cost) - np.min(depth_cost) + 1e-6)
+    confidence = np.exp(-(alpha * cost_norm + beta * depth_norm))
     return confidence
 
 
@@ -267,6 +321,25 @@ def voxel_downsample_points(points, colors, voxel_size):
     pcd.colors = o3d.utility.Vector3dVector(colors)
     pcd_down = pcd.voxel_down_sample(voxel_size=voxel_size)
     return np.asarray(pcd_down.points), np.asarray(pcd_down.colors)
+
+
+def save_confidence_histogram(confidence, output_filename="confidence_histogram.png"):
+    """
+    信頼度マップのヒストグラムを作成し、画像ファイルに保存する関数
+
+    Parameters:
+        confidence (np.ndarray): 信頼度マップ（0〜1の範囲、画像サイズと同じ形状）
+        output_filename (str): 保存先のファイル名
+    """
+    plt.figure(figsize=(8, 4))
+    plt.hist(confidence.flatten(), bins=50, range=(0, 1), color='skyblue', edgecolor='black')
+    plt.xlabel("Confidence")
+    plt.ylabel("Frequency")
+    plt.title("Confidence Map Distribution")
+    plt.tight_layout()
+    plt.savefig(output_filename)
+    plt.close()
+    print(f"Histogram saved to {output_filename}")
 
 
 def process_image_pair(image_data):
@@ -309,16 +382,18 @@ def process_image_pair(image_data):
         logging.error(f"Disparity computation failed for ID {img_id}")
         return None
 
-    # コスト画像の計算（SAD 値）
-    disparity_cost = compute_disparity_cost(
-        left_image_gray, right_image_gray, disparity, window_size
-    )
+    # --- Census変換によるコスト計算 ---
+    census_left = census_transform_numba(left_image_gray, window_size)
+    census_right = census_transform_numba(right_image_gray, window_size)
+    census_cost = compute_census_cost(left_image_gray, right_image_gray, disparity, census_left, census_right, window_size)
+    # ------------------------------------
 
     # 深度誤差ベースのコスト画像を計算
     depth_cost = compute_depth_error_cost(disparity, window_size, B, focal_length)
-
-    confidence = compute_confidence(disparity_cost, depth_cost)
-
+    
+    # 信頼度はCensusコストと深度誤差コストを組み合わせて計算
+    confidence = compute_confidence(census_cost, depth_cost)
+    
     depth = B * focal_length / (disparity + 1e-6)
     depth[(depth < 10) | (depth > 40)] = 0
 
@@ -335,13 +410,12 @@ def process_image_pair(image_data):
     ortho_depth, ortho_color, ortho_conf = to_orthographic_projection(
         depth, left_image, confidence, camera_height
     )
-    world_coords, colors, conf = depth_to_world(
+    world_coords, ortho_color, ortho_conf = depth_to_world(
         ortho_depth, ortho_color, ortho_conf, K, R, T, pixel_size
     )
 
-    world_coords, colors, conf = grid_sampling(world_coords, colors, conf, 0.1)
-
-    return world_coords, colors, conf
+    world_coords, ortho_color, ortho_conf = grid_sampling(world_coords, ortho_color, ortho_conf, 0.05)
+    return world_coords, ortho_color, ortho_conf
 
 
 def compute_color_difference(image1, image2):
@@ -420,9 +494,7 @@ end_header
         np.savetxt(f, data, fmt="%f %f %f %d %d %d")
 
 
-def compute_support_for_view(
-    points, colors, position, quaternion, K, neighbor_image, color_threshold=30
-):
+def compute_support_for_view(points, colors, position, quaternion, K, neighbor_image, color_threshold=30):
     """
     各点を指定のカメラパラメータ（position, quaternion）から再投影し、
     隣接画像（neighbor_image）上での色差がしきい値以下ならば1を返す配列を返す。
@@ -448,17 +520,11 @@ def compute_support_for_view(
 
     valid_indices = np.where(valid_mask)[0]
     for idx_local, idx in enumerate(valid_indices):
-        if (
-            u[idx_local] < 0
-            or u[idx_local] >= width
-            or v[idx_local] < 0
-            or v[idx_local] >= height
-        ):
+        if (u[idx_local] < 0 or u[idx_local] >= width or 
+            v[idx_local] < 0 or v[idx_local] >= height):
             continue
         # 隣接画像（RGBに変換済み）の該当画素の色
-        neighbor_color = neighbor_image[v[idx_local], u[idx_local], :].astype(
-            np.float32
-        )
+        neighbor_color = neighbor_image[v[idx_local], u[idx_local], :].astype(np.float32)
         # 点の色（0-1の範囲）を255倍して比較
         point_color = colors[idx] * 255.0
         diff = np.linalg.norm(point_color - neighbor_color)
@@ -467,16 +533,7 @@ def compute_support_for_view(
     return support
 
 
-def filter_points_by_support(
-    points,
-    colors,
-    confidences,
-    current_index,
-    camera_data,
-    K,
-    image_dir,
-    support_threshold=3,
-):
+def filter_points_by_support(points, colors, confidences, current_index, camera_data, K, image_dir, support_threshold=3):
     """
     現在の画像ペアから得られた各点について、隣接ビューからの支持数を計算し、
     支持数がしきい値以上の点のみを残す。
@@ -491,7 +548,7 @@ def filter_points_by_support(
     if current_index - 2 >= 0:
         neighbor_indices.append(camera_data[current_index - 2])
     if current_index - 1 >= 0:
-        neighbor_indices.append(camera_data[current_index - 1])
+        neighbor_indices.append(camera_data[current_idx - 1])
     if current_index + 1 < n:
         neighbor_indices.append(camera_data[current_index + 1])
     if current_index + 2 < n:
@@ -508,34 +565,24 @@ def filter_points_by_support(
         neighbor_position = neighbor_cam[1]
         neighbor_quaternion = neighbor_cam[2]
         neighbor_image_path = os.path.join(image_dir, neighbor_cam[0])
-        print(neighbor_image_path)
         neighbor_image = cv2.imread(neighbor_image_path)
         if neighbor_image is None:
             logging.warning(f"Neighbor image not found: {neighbor_image_path}")
             continue
         # 色比較のためRGBに変換
         neighbor_image = cv2.cvtColor(neighbor_image, cv2.COLOR_BGR2RGB)
-        support_view = compute_support_for_view(
-            points, colors, neighbor_position, neighbor_quaternion, K, neighbor_image
-        )
+        support_view = compute_support_for_view(points, colors, neighbor_position, neighbor_quaternion, K, neighbor_image)
         support_counts += support_view
 
     keep_indices = support_counts >= support_threshold
-    logging.info(
-        f"Support filtering: {points.shape[0]} -> {np.sum(keep_indices)} points (threshold: {support_threshold}, neighbor count: {len(neighbor_indices)})"
-    )
-    return (
-        points[keep_indices],
-        colors[keep_indices],
-        confidences[keep_indices],
-        support_counts[keep_indices],
-    )
+    logging.info(f"Support filtering: {points.shape[0]} -> {np.sum(keep_indices)} points (threshold: {support_threshold}, neighbor count: {len(neighbor_indices)})")
+    return points[keep_indices], colors[keep_indices], confidences[keep_indices], support_counts[keep_indices]
 
 
 def weighted_integration(points, colors, confidences, voxel_size):
     """
     複数の点群を、各ボクセル内で信頼度を用いた重み付き平均で統合する関数。
-    ただし、各ボクセル内の平均信頼度が一定の閾値 (ここでは 0.5) より低い場合、そのボクセルは統合結果から除外する。
+    ただし、各ボクセル内の平均信頼度が一定の閾値 (ここでは 0.95) より低い場合、そのボクセルは統合結果から除外する。
     """
     min_avg_conf = 0.9  # 各ボクセル内の平均信頼度の閾値
 
@@ -557,18 +604,12 @@ def weighted_integration(points, colors, confidences, voxel_size):
     weighted_sum_x = np.bincount(inverse_indices, weights=points[:, 0] * confidences)
     weighted_sum_y = np.bincount(inverse_indices, weights=points[:, 1] * confidences)
     weighted_sum_z = np.bincount(inverse_indices, weights=points[:, 2] * confidences)
-    integrated_points_all = (
-        np.column_stack((weighted_sum_x, weighted_sum_y, weighted_sum_z))
-        / sum_conf[:, np.newaxis]
-    )
+    integrated_points_all = np.column_stack((weighted_sum_x, weighted_sum_y, weighted_sum_z)) / sum_conf[:, np.newaxis]
 
     weighted_sum_r = np.bincount(inverse_indices, weights=colors[:, 0] * confidences)
     weighted_sum_g = np.bincount(inverse_indices, weights=colors[:, 1] * confidences)
     weighted_sum_b = np.bincount(inverse_indices, weights=colors[:, 2] * confidences)
-    integrated_colors_all = (
-        np.column_stack((weighted_sum_r, weighted_sum_g, weighted_sum_b))
-        / sum_conf[:, np.newaxis]
-    )
+    integrated_colors_all = np.column_stack((weighted_sum_r, weighted_sum_g, weighted_sum_b)) / sum_conf[:, np.newaxis]
 
     # 閾値を満たすボクセルのみ抽出
     integrated_points = integrated_points_all[good_voxel_mask]
@@ -659,9 +700,7 @@ if __name__ == "__main__":
         all_colors = np.vstack(merged_colors_list)
         all_confidences = np.concatenate(merged_confidences_list)
 
-        logging.info(
-            f"3D map creation completed. Total points before weighted integration: {len(all_points)}"
-        )
+        logging.info(f"3D map creation completed. Total points before weighted integration: {len(all_points)}")
 
         integrated_points, integrated_colors = weighted_integration(
             all_points, all_colors, all_confidences, voxel_size=0.02
@@ -675,9 +714,7 @@ if __name__ == "__main__":
 
         pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=4.0)
         logging.info(f"After outlier removal: {len(pcd.points)} points.")
-        write_ply(
-            config.POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors)
-        )
+        # write_ply(config.POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors))
 
         o3d.visualization.draw_geometries([pcd])
     else:
