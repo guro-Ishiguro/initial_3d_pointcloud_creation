@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 # 距離分解能を計算する関数
 def calc_distance_resolution(z, c, B, S, W):
-    dz = z**2 * S / (B * c * W)
+    dz = z ** 2 * S / (B * c * W)
     return dz
 
 
