@@ -32,6 +32,89 @@ class PointCloudIntegrator:
         self.depth_creator = DepthCreator(self.B, self.focal_length)
         self.pc_creator = PointCloudCreator()
 
+    def compute_support_for_view(self, points, colors, position, quaternion, neighbor_image, color_threshold=30):
+        """
+        各点を指定のカメラパラメータ（position, quaternion）から再投影し、
+        隣接画像（neighbor_image）上での色差がしきい値以下ならば1を返す配列を返す。
+        points: (N,3) 、colors: (N,3) [RGB, 0-1]
+        """
+        N = points.shape[0]
+        support = np.zeros(N, dtype=np.int32)
+        T = np.array(position).reshape(3, 1)
+        R = self.quaternion_to_rotation_matrix(*quaternion)
+        # カメラ座標系に変換
+        p_cam = (R.T @ (points.T - T)).T  # shape (N,3)
+        if np.median(p_cam[:, 2]) < 0:
+            p_cam = -p_cam
+        valid_mask = p_cam[:, 2] > 0
+        if not np.any(valid_mask):
+            return support
+        p_valid = p_cam[valid_mask]
+        u = (self.K[0, 0] * (p_valid[:, 0] / p_valid[:, 2]) + self.K[0, 2]).astype(np.int32)
+        v = (self.K[1, 1] * (p_valid[:, 1] / p_valid[:, 2]) + self.K[1, 2]).astype(np.int32)
+        height, width = neighbor_image.shape[:2]
+        # 画像座標系は上下反転
+        v = height - 1 - v
+
+        valid_indices = np.where(valid_mask)[0]
+        for idx_local, idx in enumerate(valid_indices):
+            if (u[idx_local] < 0 or u[idx_local] >= width or 
+                v[idx_local] < 0 or v[idx_local] >= height):
+                continue
+            # 隣接画像（RGBに変換済み）の該当画素の色
+            neighbor_color = neighbor_image[v[idx_local], u[idx_local], :].astype(np.float32)
+            # 点の色（0-1の範囲）を255倍して比較
+            point_color = colors[idx] * 255.0
+            diff = np.linalg.norm(point_color - neighbor_color)
+            if diff < color_threshold:
+                support[idx] = 1
+        return support
+
+    def filter_points_by_support(self, points, colors, confidences, current_index, camera_data, image_dir, support_threshold=3):
+        """
+        現在の画像ペアから得られた各点について、隣接ビューからの支持数を計算し、
+        支持数がしきい値以上の点のみを残す。
+        - camera_data: ドローン画像ログで、各要素は (file_name, position, quaternion)
+        - current_index: 現在の画像ペアのインデックス
+        - image_dir: 画像ディレクトリパス
+        ここでは、前後2枚ずつ、計4ビューで再投影支持数を計算する。
+        """
+        n = len(camera_data)
+        neighbor_indices = []
+        # 前後2枚ずつ取得（存在する場合）
+        if current_index - 2 >= 0:
+            neighbor_indices.append(camera_data[current_index - 2])
+        if current_index - 1 >= 0:
+            neighbor_indices.append(camera_data[current_index - 1])
+        if current_index + 1 < n:
+            neighbor_indices.append(camera_data[current_index + 1])
+        if current_index + 2 < n:
+            neighbor_indices.append(camera_data[current_index + 2])
+
+        # もし利用可能な隣接ビューが support_threshold 未満なら、thresholdを利用可能枚数に調整
+        if len(neighbor_indices) < support_threshold:
+            support_threshold = len(neighbor_indices)
+
+        # 各点の支持数を初期化
+        support_counts = np.zeros(points.shape[0], dtype=np.int32)
+
+        for neighbor_cam in neighbor_indices:
+            neighbor_position = neighbor_cam[1]
+            neighbor_quaternion = neighbor_cam[2]
+            neighbor_image_path = os.path.join(image_dir, neighbor_cam[0])
+            neighbor_image = cv2.imread(neighbor_image_path)
+            if neighbor_image is None:
+                logging.warning(f"Neighbor image not found: {neighbor_image_path}")
+                continue
+            # 色比較のためRGBに変換
+            neighbor_image = cv2.cvtColor(neighbor_image, cv2.COLOR_BGR2RGB)
+            support_view = self.compute_support_for_view(points, colors, neighbor_position, neighbor_quaternion, neighbor_image)
+            support_counts += support_view
+
+        keep_indices = support_counts >= support_threshold
+        logging.info(f"Support filtering: {points.shape[0]} -> {np.sum(keep_indices)} points (threshold: {support_threshold}, neighbor count: {len(neighbor_indices)})")
+        return points[keep_indices], colors[keep_indices], confidences[keep_indices], support_counts[keep_indices]
+
     def quaternion_to_rotation_matrix(self, qx, qy, qz, qw):
         R = np.array(
             [
@@ -130,20 +213,15 @@ class PointCloudIntegrator:
         left_gray = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY)
         right_gray = cv2.cvtColor(right_image, cv2.COLOR_BGR2GRAY)
 
-        disparity = self.disparity_creator.create_disparity(
-            left_gray, right_gray, img_id
-        )
+        # Disparity計算
+        disparity = self.disparity_creator.create_disparity(left_gray, right_gray, img_id)
         if disparity is None:
             logging.error(f"Disparity computation failed for ID {img_id}")
             return None
 
-        # Census変換によるコスト計算（例）
-        census_left = self.disparity_creator.census_transform_numba(
-            left_gray, window_size
-        )
-        census_right = self.disparity_creator.census_transform_numba(
-            right_gray, window_size
-        )
+        # Census変換によるコスト計算
+        census_left = self.disparity_creator.census_transform_numba(left_gray, window_size)
+        census_right = self.disparity_creator.census_transform_numba(right_gray, window_size)
         census_cost = self.disparity_creator.compute_census_cost(
             left_gray, right_gray, disparity, census_left, census_right, window_size
         )
@@ -151,12 +229,13 @@ class PointCloudIntegrator:
         # 深度計算
         depth = self.depth_creator.compute_depth(disparity)
 
-        # 信頼度はここでは単純にコストを利用（実際は compute_confidence() などを使用）
-        confidence = 1 - (census_cost - np.min(census_cost)) / (
-            np.ptp(census_cost) + 1e-6
-        )
+        # 新たに追加した高速化済みの深度誤差コスト計算を呼び出す
+        depth_cost = self.depth_creator.compute_depth_error_cost(disparity, window_size)
 
-        # 境界除去（例）
+        # コスト画像と深度誤差コスト画像から信頼度を算出する
+        confidence = self.depth_creator.compute_confidence(census_cost, depth_cost)
+
+        # 境界部分の除去（例）
         valid_area = depth > 0
         boundary_mask = valid_area & (
             ~np.roll(valid_area, 10, axis=0)
@@ -166,6 +245,7 @@ class PointCloudIntegrator:
         )
         depth[boundary_mask] = 0
 
+        # 正射投影変換とワールド座標への変換
         ortho_depth, ortho_color, ortho_conf = self.depth_creator.to_orthographic_projection(
             depth, left_image, confidence, camera_height
         )
@@ -175,12 +255,13 @@ class PointCloudIntegrator:
 
         # グリッドサンプリング
         world_coords, ortho_color, ortho_conf = self.pc_creator.grid_sampling(
-            world_coords, ortho_color, ortho_conf, 0.05
+            world_coords, ortho_color, ortho_conf, 0.1
         )
         return world_coords, ortho_color, ortho_conf
 
+
     def weighted_integration(self, points, colors, confidences, voxel_size):
-        min_avg_conf = 0.9
+        min_avg_conf = 0.85
         voxel_indices = np.floor(points / voxel_size).astype(np.int32)
         _, inverse_indices = np.unique(voxel_indices, axis=0, return_inverse=True)
         counts = np.bincount(inverse_indices)
@@ -260,6 +341,15 @@ class PointCloudIntegrator:
             result = self.process_image_pair(data)
             if result is not None:
                 points, colors, conf = result
+                points, colors, conf, support = self.filter_points_by_support(
+                    points,
+                    colors,
+                    conf,
+                    current_idx,
+                    camera_data,
+                    config.IMAGE_DIR,
+                    support_threshold=4,
+                )
                 merged_points_list.append(points)
                 merged_colors_list.append(colors)
                 merged_confidences_list.append(conf)
