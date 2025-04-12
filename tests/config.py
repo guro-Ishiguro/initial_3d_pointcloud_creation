@@ -46,13 +46,14 @@ ORB_SLAM_LOG = os.path.join(TXT_DIR, "KeyFrameTrajectory.txt")
 OUTPUT_DIR = os.path.join(HOME_DIR, "output")
 OUTPUT_TYPE_DIR = os.path.join(OUTPUT_DIR, DATA_TYPE)
 POINT_CLOUD_DIR = os.path.join(OUTPUT_TYPE_DIR, "point_cloud")
-POINT_CLOUD_FILE_PATH = os.path.join(POINT_CLOUD_DIR, "output_weighted.ply")
-OLD_POINT_CLOUD_FILE_PATH = os.path.join(POINT_CLOUD_DIR, "old_output.ply")
+POINT_CLOUD_FILE_PATH = os.path.join(POINT_CLOUD_DIR, "output_weighted_without_filtering.ply")
+OLD_POINT_CLOUD_FILE_PATH = os.path.join(POINT_CLOUD_DIR, "output_median_without_filtering.ply")
 MESH_DIR = os.path.join(OUTPUT_TYPE_DIR, "mesh")
 MESH_FILE_PATH = os.path.join(MESH_DIR, "mesh.ply")
 VIDEO_DIR = os.path.join(OUTPUT_TYPE_DIR, "video")
 DISPARITY_IMAGE_DIR = os.path.join(OUTPUT_TYPE_DIR, "disparity")
 DEPTH_IMAGE_DIR = os.path.join(OUTPUT_TYPE_DIR, "depth")
+HISTGRAM_DIR = os.path.join(OUTPUT_TYPE_DIR, "histgram")
 
 # スケールの設定
 B, fov_h, fov_v, width, height = (

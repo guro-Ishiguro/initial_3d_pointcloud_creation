@@ -393,6 +393,7 @@ def process_image_pair(image_data):
     
     # 信頼度はCensusコストと深度誤差コストを組み合わせて計算
     confidence = compute_confidence(census_cost, depth_cost)
+    save_confidence_histogram(confidence)
     
     depth = B * focal_length / (disparity + 1e-6)
     depth[(depth < 10) | (depth > 40)] = 0
@@ -666,7 +667,7 @@ if __name__ == "__main__":
             min_disp,
             num_disp,
         )
-        for idx in range(len(camera_data))
+        for idx in range(40, 41)
     ]
 
     merged_points_list = []

@@ -668,16 +668,16 @@ if __name__ == "__main__":
         result = process_image_pair(data)
         if result is not None:
             points, colors, conf = result
-            points, colors, conf, support = filter_points_by_support(
-                points,
-                colors,
-                conf,
-                current_idx,
-                camera_data,
-                K,
-                config.IMAGE_DIR,
-                support_threshold=4,
-            )
+            # points, colors, conf, support = filter_points_by_support(
+            #     points,
+            #     colors,
+            #     conf,
+            #     current_idx,
+            #     camera_data,
+            #     K,
+            #     config.IMAGE_DIR,
+            #     support_threshold=4,
+            # )
             merged_points_list.append(points)
             merged_colors_list.append(colors)
             merged_confidences_list.append(conf)

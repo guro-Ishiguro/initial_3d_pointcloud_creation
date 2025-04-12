@@ -4,7 +4,6 @@ import cv2
 import numpy as np
 import open3d as o3d
 import logging
-import time
 import argparse
 import matplotlib.pyplot as plt
 
@@ -164,24 +163,26 @@ class PointCloudIntegrator:
         else:
             logging.info(f"The folder {dir_path} does not exist.")
 
-    def save_confidence_histogram(
-        self, confidence, output_filename="confidence_histogram.png"
+    def save_histogram(
+        self, image, output_filename
     ):
+        output_file_dir = os.path.join(config.HISTGRAM_DIR, output_filename)
         plt.figure(figsize=(8, 4))
+        max_value = np.max(image)
         plt.hist(
-            confidence.flatten(),
+            image.flatten(),
             bins=50,
-            range=(0, 1),
+            range=(0, max_value),
             color="skyblue",
             edgecolor="black",
         )
-        plt.xlabel("Confidence")
+        plt.xlabel(output_filename)
         plt.ylabel("Frequency")
-        plt.title("Confidence Map Distribution")
+        plt.title(f"{output_filename} Map Distribution")
         plt.tight_layout()
-        plt.savefig(output_filename)
+        plt.savefig(output_file_dir)
         plt.close()
-        print(f"Histogram saved to {output_filename}")
+        print(f"Histogram saved to {output_file_dir}")
 
     def process_image_pair(self, image_data):
         (
@@ -226,14 +227,23 @@ class PointCloudIntegrator:
             left_gray, right_gray, disparity, census_left, census_right, window_size
         )
 
+        # 視差コストのヒストグラムの保存
+        self.save_histogram(census_cost, f"cencus_cost_{img_id}.png")
+
         # 深度計算
         depth = self.depth_creator.compute_depth(disparity)
 
         # 新たに追加した高速化済みの深度誤差コスト計算を呼び出す
         depth_cost = self.depth_creator.compute_depth_error_cost(disparity, window_size)
 
+        # 深度誤差コストのヒストグラムの保存
+        self.save_histogram(depth_cost, f"depth_cost_{img_id}.png")
+
         # コスト画像と深度誤差コスト画像から信頼度を算出する
         confidence = self.depth_creator.compute_confidence(census_cost, depth_cost)
+
+        # 信頼度のヒストグラムの保存
+        self.save_histogram(confidence, f"confidence_{img_id}.png")
 
         # 境界部分の除去（例）
         valid_area = depth > 0
@@ -255,13 +265,13 @@ class PointCloudIntegrator:
 
         # グリッドサンプリング
         world_coords, ortho_color, ortho_conf = self.pc_creator.grid_sampling(
-            world_coords, ortho_color, ortho_conf, 0.1
+            world_coords, ortho_color, ortho_conf, 0.05
         )
         return world_coords, ortho_color, ortho_conf
 
 
     def weighted_integration(self, points, colors, confidences, voxel_size):
-        min_avg_conf = 0.85
+        min_avg_conf = 0.95
         voxel_indices = np.floor(points / voxel_size).astype(np.int32)
         _, inverse_indices = np.unique(voxel_indices, axis=0, return_inverse=True)
         counts = np.bincount(inverse_indices)
@@ -329,7 +339,7 @@ class PointCloudIntegrator:
                 self.min_disp,
                 self.num_disp,
             )
-            for idx in range(len(camera_data))
+            for idx in range(130, 131)
         ]
 
         merged_points_list = []
@@ -341,15 +351,15 @@ class PointCloudIntegrator:
             result = self.process_image_pair(data)
             if result is not None:
                 points, colors, conf = result
-                points, colors, conf, support = self.filter_points_by_support(
-                    points,
-                    colors,
-                    conf,
-                    current_idx,
-                    camera_data,
-                    config.IMAGE_DIR,
-                    support_threshold=4,
-                )
+                # points, colors, conf, support = self.filter_points_by_support(
+                #     points,
+                #     colors,
+                #     conf,
+                #     current_idx,
+                #     camera_data,
+                #     config.IMAGE_DIR,
+                #     support_threshold=4,
+                # )
                 merged_points_list.append(points)
                 merged_colors_list.append(colors)
                 merged_confidences_list.append(conf)
@@ -375,7 +385,7 @@ class PointCloudIntegrator:
             pcd.colors = o3d.utility.Vector3dVector(integrated_colors)
             pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=4.0)
             logging.info(f"After outlier removal: {len(pcd.points)} points.")
-
+            #self.pc_creator.write_ply(config.POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors))
             o3d.visualization.draw_geometries([pcd])
         else:
             logging.warning("No points to merge. The point cloud might be empty.")

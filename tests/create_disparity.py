@@ -65,7 +65,6 @@ class DisparityCreator:
                     if (xr - half >= 0) and (xr + half < cols):
                         cost = 0
                         xor_val = census_left[y, x] ^ census_right[y, xr]
-                        # ポップカウント（簡易実装）
                         while xor_val:
                             cost += xor_val & 1
                             xor_val = xor_val >> 1
