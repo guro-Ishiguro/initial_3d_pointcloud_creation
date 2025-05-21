@@ -23,7 +23,7 @@ def load_point_cloud(file_path):
 
 if __name__ == "__main__":
     # PLYファイルのパス
-    input_file = config.POINT_CLOUD_FILE_PATH
+    input_file = config.OLD_POINT_CLOUD_FILE_PATH
 
     # 点群を読み込み
     pcd = load_point_cloud(input_file)

@@ -531,31 +531,6 @@ if __name__ == "__main__":
         write_ply(
             config.OLD_POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors)
         )
-
-        # ---------- テストカメラによる再投影と色不整合点のフィルタリング ----------
-        # logging.info("Starting reprojection-based color consistency filtering...")
-        # for test_camera_param in test_camera_params:
-        #     K = test_camera_param["K"]
-        #     position = test_camera_param["position"]
-        #     quaternion = test_camera_param["quaternion"]
-        #     test_image = test_camera_param["image"]
-        #     image_shape = test_image.shape
-        #     # 再投影画像の生成
-        #     reprojected_image = reproject_point_cloud(
-        #         pcd, position, quaternion, K, image_shape, splat_radius=3
-        #     )
-        #     reprojected_image = cv2.cvtColor(reprojected_image, cv2.COLOR_RGB2BGR)
-        #     # 色差2値画像の計算
-        #     color_diff = compute_color_difference(test_image, reprojected_image)
-        #     # 色差画像を用いた点群フィルタリング
-        #     pcd = filter_point_cloud_by_color_diff_image(
-        #         pcd, position, quaternion, K, color_diff
-        #     )
-        # write_ply(
-        #     config.POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors)
-        # )
-
-        # --- 可視化 ----------
         o3d.visualization.draw_geometries([pcd])
     else:
         logging.warning("No points to merge. The point cloud might be empty.")

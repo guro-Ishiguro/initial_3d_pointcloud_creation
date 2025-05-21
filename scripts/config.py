@@ -76,3 +76,6 @@ pixel_size = scene_width / width
 
 
 window_size, min_disp, num_disp = 5, 0, 216
+
+DEPTH_ERROR_THRESHOLD = 0.1
+DISP_COST_THRESHOLD = 4
