@@ -46,29 +46,20 @@ class DepthEstimator:
         shift_x = np.zeros_like(depth, int)
         shift_y = np.zeros_like(depth, int)
 
-        # 深度に基づいてピクセルシフトを計算
-        shift_x[valid] = (
-            (camera_height - depth[valid]) * (mid_x - ci[valid]) / camera_height
-        ).astype(int)
-        shift_y[valid] = (
-            (camera_height - depth[valid]) * (mid_y - ri[valid]) / camera_height
-        ).astype(int)
+        shift_x[valid] = ((camera_height - depth[valid]) * (mid_x - ci[valid]) / camera_height).astype(int)
+        shift_y[valid] = ((camera_height - depth[valid]) * (mid_y - ri[valid]) / camera_height).astype(int)
 
         nx = ci + shift_x
         ny = ri + shift_y
-
-        # 有効な範囲内のピクセルをマスク
+        
         mask = valid & (nx >= 0) & (nx < cols) & (ny >= 0) & (ny < rows)
-
         depths = depth[mask]
         colors = color_image[ri[mask], ci[mask]]
 
-        # フラットなインデックスに変換してソート（Z順）
         flat = ny[mask] * cols + nx[mask]
-        order = np.lexsort((depths, flat))  # 同じ(ny, nx)の場合、より近い深度を優先
+        order = np.lexsort((depths, flat))
         flat_s, depth_s, col_s = flat[order], depths[order], colors[order]
 
-        # 重複するピクセルを処理（最も近い深度を保持）
         uniq, idx = np.unique(flat_s, return_index=True)
         uy, ux = uniq // cols, uniq % cols
 
@@ -84,23 +75,20 @@ class DepthEstimator:
     def depth_to_world(depth_map, color_image, K, R, T, pixel_size):
         """深度マップとカラー画像をワールド座標の点群に変換する"""
         h, w = depth_map.shape
-        # グリッドのX, Y座標を生成
         i, j = np.meshgrid(np.arange(w), np.arange(h), indexing="xy")
 
-        # ピクセル座標からカメラ座標におけるX, Yに変換
-        x = (i - w // 2) * pixel_size
-        y = -(j - h // 2) * pixel_size  # Y軸は通常、画像では下方向、3Dでは上方向なので反転
-        z = depth_map  # 深度マップの値をZ座標として使用
+        # === START: 修正点 ===
+        # データ型をnp.float32に指定
+        x = (i - w // 2).astype(np.float32) * pixel_size
+        y = -(j - h // 2).astype(np.float32) * pixel_size
+        z = depth_map.astype(np.float32) # depth_mapも念のため型変換
+        # === END: 修正点 ===
 
-        # カメラ座標における3D点 (X, Y, Z)
         loc = np.stack((x, y, z), -1).reshape(-1, 3)
-
-        # ワールド座標への変換: R @ (p_cam) + T
         world = (R @ loc.T).T + T
-        cols = color_image.reshape(-1, 3) / 255.0  # 色を0-1に正規化
+        cols = color_image.reshape(-1, 3) / 255.0
 
-        # 無効な深度や閾値以下の深度の点をNaNとしてマーク
-        valid = np.isfinite(z.flatten()) & (z.flatten() > 5)
+        valid = np.isfinite(z.flatten())
         world[~valid] = np.nan
         cols[~valid] = np.nan
-        return world, cols
+        return world.astype(np.float32), cols.astype(np.float32)

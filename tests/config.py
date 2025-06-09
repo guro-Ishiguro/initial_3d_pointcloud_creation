@@ -48,7 +48,7 @@ OUTPUT_TYPE_DIR = os.path.join(OUTPUT_DIR, DATA_TYPE)
 POINT_CLOUD_DIR = os.path.join(OUTPUT_TYPE_DIR, "point_cloud")
 POINT_CLOUD_FILE_PATH = os.path.join(POINT_CLOUD_DIR, "output.ply")
 OLD_POINT_CLOUD_FILE_PATH = os.path.join(
-    POINT_CLOUD_DIR, "median_integration_pointcloud.ply"
+    POINT_CLOUD_DIR, "old_output.ply"
 )
 MESH_DIR = os.path.join(OUTPUT_TYPE_DIR, "mesh")
 MESH_FILE_PATH = os.path.join(MESH_DIR, "mesh.ply")

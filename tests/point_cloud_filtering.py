@@ -2,332 +2,151 @@ import os
 import numpy as np
 import cv2
 import logging
-from numba import njit
+from numba import njit, prange
 
 from utils import quaternion_to_rotation_matrix, clear_folder
 
+@njit
+def get_patch(image, u, v, patch_radius):
+    h, w = image.shape[:2]
+    u_min, u_max = u - patch_radius, u + patch_radius + 1
+    v_min, v_max = v - patch_radius, v + patch_radius + 1
+    if u_min < 0 or u_max > w or v_min < 0 or v_max > h:
+        return None
+    return image[v_min:v_max, u_min:u_max]
 
-def plot_reprojection_for_debug(
-    neighbors_info,
-    cur_idx,
-    target_p_idx,
-    camera_poses,
-    neighbor_images,
-    candidate_point,
-    z_cand_idx,
-    mid_z_cand_idx,
-    K,
-):
-    # 各近隣画像に投影点を描画
-    for neighbor_idx, _, _, _ in neighbors_info:
-        neighbor_reprojected_image_file = os.path.join(
-            "plotted_z_candidates",
-            f"image_{cur_idx}_point_{target_p_idx}_z_cand_neighbor_{neighbor_idx}.jpg",
-        )
-        neighbor_R, neighbor_T = camera_poses[neighbor_idx]
-        neighbor_image = np.copy(neighbor_images.get(neighbor_idx))
-        if neighbor_image is None:
+
+@njit
+def compute_ncc(patch1, patch2):
+    if patch1 is None or patch2 is None: return -1.0
+    p1_gray = (patch1[:, :, 0] * 0.299 + patch1[:, :, 1] * 0.587 + patch1[:, :, 2] * 0.114).flatten().astype(np.float32)
+    p2_gray = (patch2[:, :, 0] * 0.299 + patch2[:, :, 1] * 0.587 + patch2[:, :, 2] * 0.114).flatten().astype(np.float32)
+    mean1, mean2 = np.mean(p1_gray), np.mean(p2_gray)
+    norm1, norm2 = p1_gray - mean1, p2_gray - mean2
+    numerator = np.sum(norm1 * norm2)
+    denominator = np.sqrt(np.sum(norm1**2) * np.sum(norm2**2))
+    if denominator <= 1e-6: return -1.0
+
+    return numerator / denominator
+
+@njit
+def _compute_photometric_cost_njit(point_3d, ref_patch, K, neighbor_Rs, neighbor_Ts, neighbor_images, patch_radius):
+    total_cost = 0.0
+    valid_views = 0
+    for i in range(len(neighbor_images)):
+        R, T, image = neighbor_Rs[i], neighbor_Ts[i], neighbor_images[i]
+        
+        p_cam = R.T @ (point_3d - T)
+
+        # Z座標がカメラより後ろ、または近すぎる場合はスキップ
+        if p_cam[2] < 0.1:
             continue
 
-        # 点を投影
-        p_cam_debug = (neighbor_R.T @ (candidate_point - neighbor_T).T).T
-        # 描画対象画像の準備
-        if os.path.exists(neighbor_reprojected_image_file):
-            neighbor_image_to_draw = cv2.imread(neighbor_reprojected_image_file)
-            neighbor_image_to_draw = cv2.cvtColor(
-                neighbor_image_to_draw, cv2.COLOR_BGR2RGB
-            )
-        else:
-            neighbor_image_to_draw = neighbor_image.copy()
+        uv_hom = K @ p_cam
+        
+        if abs(uv_hom[2]) < 1e-5:
+            continue
 
-        # 点の投影と描画
-        if p_cam_debug[2] > 0.1:
-            uv_hom_debug = K @ p_cam_debug
-            u_debug, v_debug = int(round(uv_hom_debug[0] / uv_hom_debug[2])), int(
-                round(uv_hom_debug[1] / uv_hom_debug[2])
-            )
-            v_debug = neighbor_image_to_draw.shape[0] - 1 - v_debug  # Y軸反転
+        u, v = uv_hom[0] / uv_hom[2], uv_hom[1] / uv_hom[2]
+        v = image.shape[0] - 1 - v
 
-            if (
-                0 <= u_debug < neighbor_image_to_draw.shape[1]
-                and 0 <= v_debug < neighbor_image_to_draw.shape[0]
-            ):
-                plot_color = (
-                    (255, 0, 0) if z_cand_idx == mid_z_cand_idx else (0, 0, 255)
-                )
-                cv2.circle(
-                    neighbor_image_to_draw,
-                    (u_debug, v_debug),
-                    3,
-                    plot_color,
-                    -1,
-                )
+        neighbor_patch = get_patch(image, int(round(u)), int(round(v)), patch_radius)
+        if neighbor_patch is None: continue
 
-        # 保存
-        cv2.imwrite(
-            neighbor_reprojected_image_file,
-            cv2.cvtColor(neighbor_image_to_draw, cv2.COLOR_RGB2BGR),
-        )
+        ncc = compute_ncc(ref_patch, neighbor_patch)
+        total_cost += (1.0 - ncc) / 2.0
+        valid_views += 1
+
+    return total_cost / valid_views if valid_views > 0 else 1.0
+
+MIN_SEARCH_RANGE = 0.05      # 5cm
+MAX_SEARCH_RANGE = 1.0       # 1m
+SAMPLING_RESOLUTION = 0.01   # 探索の刻み幅 (1cm)
+MIN_NUM_STEPS = 5            # 最小の探索ステップ数
+MAX_NUM_STEPS = 30           # 最大の探索ステップ数
+
+@njit
+def _patchmatch_refinement_step(current_point, ref_patch, R_ref, T_ref, K, neighbors_info_njit,
+                                patch_radius, search_range):
+    best_point = current_point
+    neighbor_Rs, neighbor_Ts, neighbor_images = neighbors_info_njit
+    best_cost = _compute_photometric_cost_njit(current_point, ref_patch, K, neighbor_Rs, neighbor_Ts, neighbor_images, patch_radius)
+    
+    p_cam_ref = R_ref.T @ (best_point - T_ref)
+
+    if p_cam_ref[2] <= 0.1: return best_point
+
+    initial_cam_z = p_cam_ref[2]
+    
+    z_start = max(0.1, initial_cam_z - search_range / 2.0)
+    z_end = initial_cam_z + search_range / 2.0
+
+    num_steps = int(search_range / 0.01) # SAMPLING_RESOLUTION
+    if num_steps < 5: # MIN_NUM_STEPS
+        num_steps = 5
+    elif num_steps > 30: # MAX_NUM_STEPS
+        num_steps = 30
+
+    for _ in range(num_steps):
+        z_cand = np.random.uniform(z_start, z_end)
+        
+        candidate_point_cam = np.array([p_cam_ref[0], p_cam_ref[1], z_cand], dtype=np.float32)
+        candidate_point = (R_ref @ candidate_point_cam) + T_ref
+
+        cost = _compute_photometric_cost_njit(candidate_point, ref_patch, K, neighbor_Rs, neighbor_Ts, neighbor_images, patch_radius)
+        if cost < best_cost:
+            best_cost = cost
+            best_point = candidate_point
+    
+    return best_point
 
 
 class PointCloudFilter:
     def __init__(self, config):
         self.config = config
 
-    @staticmethod
-    def grid_sampling(points, colors, grid_size):
-        """グリッドサンプリングによって点群をダウンサンプリングする"""
-        # NaNまたは無限大の値をポイントから除去
-        valid_mask = np.isfinite(points).all(axis=1)
-
-        filtered_points = points[valid_mask]
-        filtered_colors = colors[valid_mask]
-
-        if filtered_points.shape[0] == 0:
-            logging.warning("No valid points after filtering for grid sampling.")
-            return np.array([]), np.array([])  # 点がない場合は空の配列を返す
-
-        ids = np.floor(filtered_points / grid_size).astype(int)
-        # ユニークなグリッドセルIDごとに最初の点を保持
-        _, idxs = np.unique(ids, axis=0, return_index=True)
-
-        return filtered_points[idxs], filtered_colors[idxs]
-
-    def filter_points_by_depth(self, world_coords, colors, depth_cost, census_cost):
-        """深度コストとCensusコストに基づいて点群をフィルタリングする"""
-        before = world_coords.shape[0]
-        km = depth_cost < self.config.DEPTH_ERROR_THRESHOLD
-        kept = world_coords[km]
-        kcols = colors[km]
-
-        dropped = np.where(~km)[0]
-        revive_mask = census_cost[dropped] < self.config.DISP_COST_THRESHOLD
-        rev = world_coords[dropped][revive_mask]
-        rev_c = colors[dropped][revive_mask]
-
-        merged = np.vstack([kept, rev])
-        return merged, np.vstack([kcols, rev_c])
-
-    @staticmethod
-    @njit
-    def compute_multiview_cost(
-        point_3d,
-        ref_color,
-        camera_K,
-        neighbor_R,
-        neighbor_T,
-        neighbor_image,
-        cost_type="SSD",
-        color_threshold=100,
-    ):
-        """
-        単一の3D点に対する複数視点コストを計算する。
-        Args:
-            point_3d (np.ndarray): 3D点のワールド座標 (x, y, z).
-            ref_color (np.ndarray): 参照画像での3D点の色 (R, G, B) / 255.0.
-            camera_K (np.ndarray): カメラの内部パラメータ行列 K.
-            neighbor_R (np.ndarray): 隣接カメラの回転行列 R.
-            neighbor_T (np.ndarray): 隣接カメラの並進ベクトル T.
-            neighbor_image (np.ndarray): 隣接カメラの画像 (H, W, 3).
-            cost_type (str): 使用する光度コストのタイプ ("SSD", "SAD").
-            color_threshold (int): カラー差の閾値 (0-255).
-
-        Returns:
-            float: 計算されたコスト (小さいほど良い).
-        """
-        # ワールド座標から隣接カメラ座標へ
-        p_cam = (neighbor_R.T @ (point_3d - neighbor_T).T).T
-        if p_cam[2] <= 0.1:  # 非常に小さい正の値でZ > 0を保証
-            return 1e9  # 高いコストと誤差
-
-        # カメラ座標から画像座標へ
-        uv_hom = camera_K @ p_cam
-        u, v = uv_hom[0] / uv_hom[2], uv_hom[1] / uv_hom[2]
-        v = neighbor_image.shape[0] - 1 - v
-
-        # 画像の境界チェック
-        h, w, _ = neighbor_image.shape
-        if not (0 <= u < w and 0 <= v < h):
-            return 1e9  # 範囲外なら高コスト
-
-        # 画像のピクセル値取得
-        v_int, u_int = int(round(v)), int(round(u))
-        neighbor_color = neighbor_image[v_int, u_int].astype(np.float32) / 255.0
-
-        # 光度コスト計算
-        if cost_type == "SSD":
-            photometric_cost = np.sum((ref_color - neighbor_color) ** 2)
-        elif cost_type == "SAD":
-            photometric_cost = np.sum(np.abs(ref_color - neighbor_color))
-        else:
-            photometric_cost = np.sum((ref_color - neighbor_color) ** 2)
-
-        # カラー閾値による追加フィルタリング
-        diff_sq = np.sum(((ref_color - neighbor_color) * 255) ** 2)
-        color_diff_norm = np.sqrt(diff_sq)
-        if color_diff_norm > color_threshold:
-            photometric_cost += 1000
-        else:
-            photometric_cost += color_diff_norm
-
-        return photometric_cost
-
-    def refine_points_with_multiview_cost(
-        self,
-        cur_idx,
-        points,
-        colors,
-        camera_data,
-        K,
-        image_dir,
-        max_search_range=0.5,
-        num_steps=10,
-    ):
-        """
-        複数視点コストに基づいて点群の深度を最適化する。
-        各点について、カメラの視線ベクトル方向に深度を変化させ、最もコストの低い深度を見つけ出す。
-        """
-        clear_folder("plotted_z_candidates")
-        os.makedirs("plotted_z_candidates", exist_ok=True)
-
+    def refine_points_with_patchmatch(self, cur_idx, points, colors, uvs, depth_costs, images, camera_data, K,
+                                      iterations=3, patch_radius=3):
+        logging.info(f"Starting PatchMatch refinement for image {cur_idx} with {len(points)} points...")
+        
         optimized_points = np.copy(points)
-        optimized_colors = np.copy(colors)
-
         num_points = points.shape[0]
-        points_updated_count = 0
+        if num_points == 0: return np.array([]), np.array([])
 
-        if num_points == 0:
-            logging.warning(
-                f"No valid points for multiview refinement at index {cur_idx}."
-            )
-            return np.array([]), np.array([])
+        _, pos_ref, quat_ref = camera_data[cur_idx]
+        R_ref = quaternion_to_rotation_matrix(*quat_ref).astype(np.float32)
+        T_ref = np.array(pos_ref, dtype=np.float32)
 
-        try:
-            fname_ref, pos_ref, quat_ref = camera_data[cur_idx]
-            R_ref = quaternion_to_rotation_matrix(*quat_ref).astype(np.float32)
-            T_ref = np.array(pos_ref, dtype=np.float32)
-        except IndexError:
-            logging.error(f"Could not retrieve camera data for reference index {cur_idx}.")
-            return points, colors  # 処理をスキップして元の点を返す
-
-        # 近隣カメラの情報をキャッシュ
-        camera_poses = {}
-        neighbor_images = {}
-        n = len(camera_data)
-        neighbors_info = []
-
+        neighbor_Rs, neighbor_Ts, neighbor_images = [], [], []
         for off in (-2, -1, 1, 2):
             idx = cur_idx + off
-            if 0 <= idx < n:
-                fname, pos, quat = camera_data[idx]
-                R = quaternion_to_rotation_matrix(*quat).astype(np.float32)
-                T = np.array(pos, dtype=np.float32)
-                camera_poses[idx] = (R, T)
-                neighbor_image_path = os.path.join(image_dir, fname)
-                try:
-                    neighbor_images[idx] = cv2.cvtColor(
-                        cv2.imread(neighbor_image_path), cv2.COLOR_BGR2RGB
-                    )
-                    if neighbor_images[idx] is None:
-                        logging.warning(f"Failed to load image: {neighbor_image_path}")
-                        continue
-                except Exception as e:
-                    logging.error(
-                        f"Error loading neighbor image {neighbor_image_path}: {e}"
-                    )
-                    continue
-                neighbors_info.append((idx, fname, pos, quat))
-
-        if not neighbors_info:
-            logging.warning(
-                f"No valid neighbors found for image {cur_idx}. Skipping multiview refinement."
-            )
-            return optimized_points, optimized_colors
-
-        logging.info(f"{num_points}点ある{cur_idx}番目から生成される点群を複数視点コストに基づいて深度を最適化中...")
+            if 0 <= idx < len(camera_data) and idx in images:
+                _, pos, quat = camera_data[idx]
+                neighbor_Rs.append(quaternion_to_rotation_matrix(*quat).astype(np.float32))
+                neighbor_Ts.append(np.array(pos, dtype=np.float32))
+                neighbor_images.append(images[idx])
         
-        target_p_idx = 17000 # デバッグ用
-
-        # 複数視点最適化のコアロジック
-        for p_idx in range(num_points):
-            current_point = points[p_idx]
-            current_color = colors[p_idx]
+        if not neighbor_images:
+            return points, colors
+        
+        neighbors_info_njit = (np.array(neighbor_Rs), np.array(neighbor_Ts), tuple(neighbor_images))
             
-            p_cam_ref = (R_ref.T @ (current_point - T_ref).T).T
-            initial_cam_z = p_cam_ref[2]
+        ref_image = images[cur_idx]
 
-            search_range = self.config.DEPTH_SEARCH_RANGE
-            best_cost = float("inf")
-            best_point = current_point.copy()
-
-            z_start = initial_cam_z - search_range
-            z_end = initial_cam_z + search_range
-
-            z_candidates = np.linspace(z_start, z_end, num_steps, dtype=np.float32)
-            for z_cand_idx, z_cand in enumerate(z_candidates):
-                
-                # カメラ座標で新しい候補点を作成
-                candidate_point_cam = np.array(
-                    [p_cam_ref[0], p_cam_ref[1], z_cand], dtype=np.float32
-                )
-                # ワールド座標に戻す
-                candidate_point = (R_ref @ candidate_point_cam.T).T + T_ref
-
-                total_current_cost = 0.0
-                valid_neighbor_views = 0
-                
-                # デバッグ用のプロット（この部分は修正不要）
-                if p_idx == target_p_idx:
-                    mid_z_cand_idx = -1 # 元のコードの変数に合わせるためのダミー
-                    plot_reprojection_for_debug(
-                        neighbors_info,
-                        cur_idx,
-                        target_p_idx,
-                        camera_poses,
-                        neighbor_images,
-                        candidate_point,
-                        z_cand_idx,
-                        mid_z_cand_idx,
-                        K,
-                    )
-                
-                # 近隣カメラとのコスト計算（この部分は修正不要）
-                for neighbor_idx, _, _, _ in neighbors_info:
-                    neighbor_R, neighbor_T = camera_poses[neighbor_idx]
-                    neighbor_image = neighbor_images.get(neighbor_idx)
-
-                    if neighbor_image is None:
-                        continue
-
-                    photo_cost = self.compute_multiview_cost(
-                        candidate_point,
-                        current_color,
-                        K,
-                        neighbor_R,
-                        neighbor_T,
-                        neighbor_image,
-                    )
-
-                    if photo_cost < 1e8:
-                        total_current_cost += photo_cost
-                        valid_neighbor_views += 1
-                
-                if valid_neighbor_views > 0:
-                    total_current_cost /= valid_neighbor_views
-                else:
-                    total_current_cost = float("inf")
-
-                if total_current_cost < best_cost:
-                    best_cost = total_current_cost
-                    best_point = candidate_point
-
-            optimized_points[p_idx] = best_point
+        for it in range(iterations):
+            logging.info(f" Iteration {it + 1}/{iterations}")
             
-            if not np.allclose(current_point, optimized_points[p_idx], atol=1e-5):
-                points_updated_count += 1
+            for p_idx in range(num_points):
+                point_search_range = depth_costs[p_idx] / (it + 1)
+                point_search_range = np.clip(point_search_range, 0.05, 1.0) # MIN/MAX_SEARCH_RANGE
 
-        logging.info(f"{num_points}点ある{cur_idx}番目の画像から生成される点群の複数視点最適化が終了")
-        logging.info(
-            f"Optimized {points_updated_count} points out of {num_points} for image {cur_idx} ({points_updated_count/num_points:.2%})."
-        )
-        return optimized_points, optimized_colors
+                ref_u, ref_v = uvs[p_idx]
+                ref_patch = get_patch(ref_image, ref_u, ref_v, patch_radius)
+                if ref_patch is None: continue
+                
+                optimized_points[p_idx] = _patchmatch_refinement_step(
+                    optimized_points[p_idx], ref_patch, R_ref, T_ref, K, neighbors_info_njit,
+                    patch_radius, point_search_range)
+
+        logging.info(f"Finished PatchMatch refinement for image {cur_idx}.")
+        return optimized_points, colors

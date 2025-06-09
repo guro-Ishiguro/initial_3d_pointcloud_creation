@@ -11,144 +11,133 @@ from utils import parse_arguments, clear_folder
 from data_loader import DataLoader
 from image_processing import ImageProcessor
 from depth_estimation import DepthEstimator
-from point_cloud_filtering import PointCloudFilter
+from point_cloud_filtering import PointCloudFilter, MAX_SEARCH_RANGE # MAX_SEARCH_RANGEをインポート
 from point_cloud_integrator import PointCloudIntegrator
 
 
 if __name__ == "__main__":
     args = parse_arguments()
-
-    print("--- Starting 3D Point Cloud Generation ---")
-    print(f"Image directory: {config.IMAGE_DIR}")
-    print(f"Show viewer: {args.show_viewer}")
-    print(f"Record video: {args.record_video}")
-    print("-----------------------------------------")
-
     start_time = time.time()
-
-    # 各クラスのインスタンスをメインプロセスで生成
-    # これらは逐次処理なので、ProcessPoolExecutorのエラーは発生しません
+    
+    subsample_factor = 2 
+    
     data_loader = DataLoader(config.IMAGE_DIR, config.DRONE_IMAGE_LOG)
     image_processor = ImageProcessor(config)
     depth_estimator = DepthEstimator(config)
     point_cloud_filter = PointCloudFilter(config)
     point_cloud_integrator = PointCloudIntegrator(config)
 
-    # 出力ディレクトリの準備
-    os.makedirs(config.VIDEO_DIR, exist_ok=True)
     os.makedirs(config.POINT_CLOUD_DIR, exist_ok=True)
-    clear_folder(config.POINT_CLOUD_DIR)  # 既存の点群をクリア
+    clear_folder(config.POINT_CLOUD_DIR)
 
-    # すべてのカメラペアのデータを準備
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
+    target_indices = list(range(45, 46)) # 処理範囲を少し広げてテスト
+    
+    image_indices_to_load = set()
+    for idx in target_indices:
+        image_indices_to_load.add(idx)
+        for offset in (-2, -1, 1, 2):
+            image_indices_to_load.add(idx + offset)
+            
+    logging.info("Pre-loading images...")
+    loaded_images = {}
+    for idx in image_indices_to_load:
+        if 0 <= idx < len(all_pairs_data):
+            left_path, _ = data_loader.get_image_paths(idx)
+            img = cv2.imread(left_path)
+            if img is not None:
+                loaded_images[idx] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     merged_pts_list, merged_cols_list = [], []
 
-    # ここから逐次処理のループに変更
-    for i, data_tuple in enumerate(all_pairs_data[45:46]):
-        idx, T_pos, left_path, right_path, R_mat = data_tuple
-
+    for idx in target_indices:
+        # プリロードされていない画像インデックスはスキップ
+        if idx not in loaded_images:
+            continue
+            
+        data_tuple = all_pairs_data[idx]
+        _, T_pos, left_path, right_path, R_mat = data_tuple
         logging.info(f"Processing image pair {idx}...")
 
         try:
             li = cv2.imread(left_path)
             ri = cv2.imread(right_path)
+            if li is None or ri is None: continue
 
-            if li is None or ri is None:
-                logging.error(f"Failed to load images for index {idx}. Skipping.")
-                continue  # 次のペアへスキップ
+            li_rgb = loaded_images[idx]
+            li_gray, ri_gray = cv2.cvtColor(li, cv2.COLOR_BGR2GRAY), cv2.cvtColor(ri, cv2.COLOR_BGR2GRAY)
 
-            li_rgb = cv2.cvtColor(li, cv2.COLOR_BGR2RGB)
-            # ri_rgb は使用しないため、変換は不要
-
-            li_gray = cv2.cvtColor(li, cv2.COLOR_BGR2GRAY)
-            ri_gray = cv2.cvtColor(ri, cv2.COLOR_BGR2GRAY)
-
-            # 視差マップ生成
             disp = image_processor.create_disparity(li_gray, ri_gray)
-
-            # Census変換とコスト計算
-            cen_l = image_processor.census_transform_numba(li_gray, config.window_size)
-            cen_r = image_processor.census_transform_numba(ri_gray, config.window_size)
-            cen_cost = image_processor.compute_census_cost(
-                li_gray, ri_gray, disp, cen_l, cen_r, config.window_size
-            ).flatten()
-
-            # 深度マップ生成
             depth = depth_estimator.disparity_to_depth(disp)
-
-            # 深度誤差コスト計算
-            d_cost = depth_estimator.compute_depth_error_cost(
-                disp, depth, config.window_size
-            ).flatten()
-
-            # 深度マップの境界マスク処理
+            d_cost = depth_estimator.compute_depth_error_cost(disp, depth, config.window_size)
+            
             valid = np.isfinite(depth)
-            bmask = valid & (
-                ~np.roll(valid, 10, 0)
-                | ~np.roll(valid, -10, 0)
-                | ~np.roll(valid, 10, 1)
-                | ~np.roll(valid, -10, 1)
-            )
+            bmask = valid & (~np.roll(valid, 10, 0) | ~np.roll(valid, -10, 0) |
+                             ~np.roll(valid, 10, 1) | ~np.roll(valid, -10, 1))
             depth[bmask] = np.nan
 
-            # オルソ画像変換
-            ortho_d, ortho_c = depth_estimator.to_orthographic_projection(
-                depth, li_rgb, config.camera_height
+            ortho_d, ortho_c = depth_estimator.to_orthographic_projection(depth, li_rgb, config.camera_height)
+            d_cost_flat = d_cost.flatten()
+            pts, cols = depth_estimator.depth_to_world(ortho_d, ortho_c, config.K, R_mat, T_pos, config.pixel_size)
+            
+            h, w = ortho_d.shape
+            v_coords, u_coords = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
+            uv_coords = np.stack((u_coords.flatten(), v_coords.flatten()), axis=-1)
+            
+            valid_mask = np.isfinite(ortho_d.flatten())
+            valid_indices = np.where(valid_mask)[0]
+            subsampled_indices = valid_indices[::subsample_factor]
+            
+            final_pts = pts[subsampled_indices]
+            final_cols = cols[subsampled_indices]
+            final_uvs = uv_coords[subsampled_indices]
+            final_depth_costs = d_cost_flat[subsampled_indices]
+
+            # final_depth_costs に含まれる NaN を、最大の探索範囲で置き換える
+            nan_mask = np.isnan(final_depth_costs)
+            final_depth_costs[nan_mask] = MAX_SEARCH_RANGE
+            
+            logging.info(f"Initial point cloud generated. Shape after subsampling: {final_pts.shape[0]}")
+
+            initial_pts = np.copy(final_pts)
+            
+            optimized_pts, optimized_cols = point_cloud_filter.refine_points_with_patchmatch(
+                idx, final_pts, final_cols, final_uvs, final_depth_costs, loaded_images,
+                data_loader.camera_data, config.K
             )
 
-            # ワールド座標への変換
-            pts, cols = depth_estimator.depth_to_world(
-                ortho_d, ortho_c, config.K, R_mat, T_pos, config.pixel_size
+            # 可視化が不要な場合は以下の3行をコメントアウト
+            pcd_initial = o3d.geometry.PointCloud()
+            pcd_initial.points = o3d.utility.Vector3dVector(initial_pts)
+            pcd_initial.paint_uniform_color([1, 0, 0])
+
+            pcd_optimized = o3d.geometry.PointCloud()
+            pcd_optimized.points = o3d.utility.Vector3dVector(optimized_pts)
+            pcd_optimized.paint_uniform_color([0, 1, 0])
+
+            # 可視化が不要な場合は以下のdraw_geometriesの引数を [pcd_optimized] に変更
+            logging.info("Visualizing comparison: Red=Initial, Green=Optimized. Close the window to continue.")
+            o3d.visualization.draw_geometries(
+                [pcd_optimized, pcd_initial],
+                window_name=f"Optimization Result for Image {idx}"
             )
-
-            # grid_samplingによる初期ダウンサンプリング
-            pts, cols = point_cloud_filter.grid_sampling(pts, cols, 0.1)
-
-            logging.info(f"{idx}番目のカメラにおける初期点群が生成されました。形状: {pts.shape[0]}")
-
-            # 複数視点コストに基づく深度最適化
-            pts, cols = point_cloud_filter.refine_points_with_multiview_cost(
-                idx,
-                pts,
-                cols,
-                data_loader.camera_data,  # 全カメラデータが必要
-                config.K,
-                config.IMAGE_DIR,
-            )
-
-            merged_pts_list.append(pts)
-            merged_cols_list.append(cols)
-            logging.info(
-                f"Processed and refined for image {idx}/{len(all_pairs_data)-1}"
-            )
+            
+            merged_pts_list.append(optimized_pts)
+            merged_cols_list.append(optimized_cols)
+            logging.info(f"Processed and refined for image {idx}")
 
         except Exception as e:
-            logging.error(f"Error processing image pair {idx}: {e}")
+            logging.error(f"Error processing image pair {idx}: {e}", exc_info=True)
 
-    # すべての点群が処理された後、統合
     if merged_pts_list:
-        # pts_med, cols_med = point_cloud_integrator.integrate_depth_maps_median(
-        #     merged_pts_list, merged_cols_list, voxel_size=0.1
-        # )
-
-        # 最終点群の処理と保存、可視化
+        all_pts = np.vstack(merged_pts_list)
+        all_cols = np.vstack(merged_cols_list)
         final_pcd = point_cloud_integrator.process_and_save_final_point_cloud(
-            pts, cols, config.POINT_CLOUD_FILE_PATH
+            all_pts, all_cols, config.POINT_CLOUD_FILE_PATH
         )
-
-        o3d.visualization.draw_geometries([final_pcd])
-
-        if args.record_video:
-            logging.warning(
-                "Video recording is not fully implemented in this refactored structure."
-            )
-            logging.warning(
-                "Please refer to Open3D documentation for advanced visualization and recording."
-            )
-
-    else:
-        logging.warning("No points generated to merge.")
+        if final_pcd and len(final_pcd.points) > 0:
+            logging.info("Showing final integrated point cloud.")
+            o3d.visualization.draw_geometries([final_pcd], window_name="Final Integrated Point Cloud")
 
     end_time = time.time()
     logging.info(f"Total point cloud generation time: {end_time - start_time:.2f}s")
