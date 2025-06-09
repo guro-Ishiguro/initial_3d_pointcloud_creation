@@ -4,22 +4,41 @@ import open3d as o3d
 import torch
 import matplotlib.pyplot as plt
 
-# Optional EMD
 try:
     from pytorch3d.loss import emd_loss
+
     EMD_AVAILABLE = True
 except ImportError:
     EMD_AVAILABLE = False
     print("Warning: PyTorch3D not found. EMD will be skipped.")
 
 # ——— Configuration —————————————————————————————————————————————
-RECON_PATH = "/home/geolab/Projects/initial_3d_pointcloud_creation/output/" \
-             "3840_2160_16_74.73365_92_1.0/point_cloud/old_output.ply"
-GT_MESH_PATH = "/home/geolab/Projects/initial_3d_pointcloud_creation/data/" \
-               "3840_2160_16_74.73365_92_1.0/ground_truth.obj"
+RECON_PATH = (
+    "/home/geolab/Projects/initial_3d_pointcloud_creation/output/"
+    "3840_2160_16_74.73365_92_1.0/point_cloud/output.ply"
+)
+GT_MESH_PATH = (
+    "/home/geolab/Projects/initial_3d_pointcloud_creation/data/"
+    "3840_2160_16_74.73365_92_1.0/ground_truth.obj"
+)
 EMD_SAMPLES = 1024
 
+
 # ——— Helper Functions ——————————————————————————————————————————
+def sample_points_from_mesh(mesh_path, num_points):
+    """
+    OBJメッシュから指定された点数の点群を均一にサンプリングします。
+    """
+    mesh = o3d.io.read_triangle_mesh(mesh_path)
+    if not mesh.has_triangles():
+        print("Warning: Mesh has no triangles. Cannot uniformly sample points.")
+        return o3d.geometry.PointCloud(mesh.vertices)
+
+    # 均一サンプリング
+    pcd_sampled = mesh.sample_points_uniformly(number_of_points=num_points)
+    print(f"メッシュから {len(pcd_sampled.points)} 点をサンプリングしました。")
+    return pcd_sampled
+
 
 def compute_chamfer_distance(pcd_p, pcd_q):
     P = np.asarray(pcd_p.points)
@@ -34,11 +53,13 @@ def compute_chamfer_distance(pcd_p, pcd_q):
 def compute_earth_movers_distance(pcd_p, pcd_q, num_samples=EMD_SAMPLES):
     if not EMD_AVAILABLE:
         raise RuntimeError("PyTorch3D not found. Cannot compute EMD.")
+
     def sample_or_pad(arr, n):
         if len(arr) >= n:
             return arr[np.random.choice(len(arr), n, replace=False)]
         pad = arr[np.random.choice(len(arr), n - len(arr), replace=True)]
         return np.vstack([arr, pad])
+
     P = np.asarray(pcd_p.points)
     Q = np.asarray(pcd_q.points)
     P_s = sample_or_pad(P, num_samples)
@@ -70,13 +91,14 @@ def compute_coverage(pcd, mesh, voxel_size=0.02, sample_pts=50000):
     mesh_pcd = mesh.sample_points_uniformly(number_of_points=sample_pts)
     tree = o3d.geometry.KDTreeFlann(pcd)
     covered = sum(
-        1 for p in np.asarray(mesh_pcd.points)
+        1
+        for p in np.asarray(mesh_pcd.points)
         if np.sqrt(tree.search_knn_vector_3d(p, 1)[2][0]) <= voxel_size
     )
     return covered / sample_pts
 
 
-def compute_outlier_ratio(pcd, mesh, threshold=0.02):
+def compute_outlier_ratio(pcd, mesh, threshold=0.1):
     _, _, errors = compute_cloud_to_mesh(pcd, mesh)
     ratio = np.sum(errors > threshold) / len(errors)
     return ratio, errors
@@ -109,18 +131,8 @@ def compute_forward_backward_consistency(pcd_p, pcd_q):
     return dists.mean(), dists.std(), dists
 
 
-def plot_error_histogram(errors, out_path="error_histogram_roi.png", bins=50):
-    plt.figure(figsize=(8, 4))
-    plt.hist(errors, bins=bins, edgecolor='black')
-    plt.title("Point-to-Mesh Error Distribution (ROI)")
-    plt.xlabel('Error (m)')
-    plt.ylabel('Frequency')
-    plt.tight_layout()
-    plt.savefig(out_path)
-    plt.close()
-    print(f"Error histogram saved to {out_path}")
-
 # ——— Main ——————————————————————————————————————————
+
 
 def main():
     # 1) Load reconstructed point cloud
@@ -133,18 +145,20 @@ def main():
     # 2) Load ground-truth mesh
     mesh = o3d.io.read_triangle_mesh(GT_MESH_PATH)
     mesh.compute_triangle_normals()
-    print(f"✔ Ground-truth mesh: {len(mesh.vertices)} vertices, {len(mesh.triangles)} triangles")
+    print(
+        f"✔ Ground-truth mesh: {len(mesh.vertices)} vertices, {len(mesh.triangles)} triangles"
+    )
 
     # 3) Define ROI by point cloud's AABB
-    aabb = pcd.get_axis_aligned_bounding_box()
+    obb = pcd.get_oriented_bounding_box()
 
     # 4) Sample full mesh to point cloud
     num_pts = len(pcd.points)
-    pcd_gt_full = mesh.sample_points_uniformly(number_of_points=num_pts)
+    pcd_gt_full = mesh.sample_points_uniformly(number_of_points=num_pts * 10)
     print(f"✔ Sampled full mesh into {len(pcd_gt_full.points)} points")
 
     # 5) Crop the sampled ground-truth point cloud by ROI
-    pcd_gt_roi = pcd_gt_full.crop(aabb)
+    pcd_gt_roi = pcd_gt_full.crop(obb)
     print(f"✔ Cropped ground-truth point cloud: {len(pcd_gt_roi.points)} points")
 
     # 6) Chamfer Distance (ROI)
@@ -161,6 +175,25 @@ def main():
     # 8) Cloud-to-Mesh (full mesh)
     mean_cm, rmse_cm, errors = compute_cloud_to_mesh(pcd, mesh)
     print(f"Cloud-to-Mesh Mean: {mean_cm:.6f} m, RMSE: {rmse_cm:.6f} m")
+
+    # ヒストグラム
+    N = len(errors)
+    weights = np.ones_like(errors) / N * 100
+    plt.figure(figsize=(8, 4))
+    plt.hist(
+        errors,
+        bins=50,
+        range=(0, 1.0),
+        weights=weights,
+        edgecolor="black",
+    )
+    plt.title("Cloud-to-Mesh Distance Histogram")
+    plt.xlabel("Distance [m]")
+    plt.ylabel("Percentage of points (%)")
+    plt.xlim(0, 1.0)
+    plt.tight_layout()
+    plt.savefig("cloud_to_mesh_histogram.png")
+    plt.close()
 
     # 9) Density
     avg_den, std_den = compute_density(pcd, cell_size=0.1)
@@ -180,20 +213,30 @@ def main():
 
     # 13) Forward-Backward Consistency
     fb_mean, fb_std, fb_dists = compute_forward_backward_consistency(pcd, pcd_gt_roi)
-    print(f"Forward-Backward Consistency (ROI) mean: {fb_mean:.6f} m, std: {fb_std:.6f} m")
+    print(
+        f"Forward-Backward Consistency (ROI) mean: {fb_mean:.6f} m, std: {fb_std:.6f} m"
+    )
 
-    # 14) Histogram
-    plot_error_histogram(errors)
+    obb.color = [0.8, 0.2, 0.2]
+    o3d.visualization.draw_geometries(
+        [pcd, obb],
+        window_name="Reconstruction vs Ground Truth (ROI)",
+        width=1280,
+        height=720,
+        mesh_show_back_face=True,
+    )
 
-    # 15) Visualize ROI comparison
+    # 14) Visualize ROI comparison
     pcd.paint_uniform_color([1.0, 0.706, 0])
     pcd_gt_roi.paint_uniform_color([0.0, 0.651, 0.929])
     o3d.visualization.draw_geometries(
         [pcd, pcd_gt_roi],
         window_name="Reconstruction vs Ground Truth (ROI)",
-        width=1280, height=720,
-        mesh_show_back_face=True
+        width=1280,
+        height=720,
+        mesh_show_back_face=True,
     )
+
 
 if __name__ == "__main__":
     main()

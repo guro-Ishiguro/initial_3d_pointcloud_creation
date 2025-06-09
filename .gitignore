@@ -4,3 +4,6 @@ data
 output
 .vscode
 .env
+.jpg
+.png
+plotted_z_candidates

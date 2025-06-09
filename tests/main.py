@@ -7,11 +7,12 @@ import open3d as o3d
 import numpy as np
 
 # 各モジュールをインポート
-from utils import parse_arguments, clear_folder
+# visualize_reprojection をインポートする
+from point_cloud_filtering import PointCloudFilter, MAX_SEARCH_RANGE, visualize_reprojection
+from utils import parse_arguments, clear_folder, quaternion_to_rotation_matrix # quaternion_to_rotation_matrix を追加
 from data_loader import DataLoader
 from image_processing import ImageProcessor
 from depth_estimation import DepthEstimator
-from point_cloud_filtering import PointCloudFilter, MAX_SEARCH_RANGE # MAX_SEARCH_RANGEをインポート
 from point_cloud_integrator import PointCloudIntegrator
 
 
@@ -19,7 +20,7 @@ if __name__ == "__main__":
     args = parse_arguments()
     start_time = time.time()
     
-    subsample_factor = 2 
+    subsample_factor = 10
     
     data_loader = DataLoader(config.IMAGE_DIR, config.DRONE_IMAGE_LOG)
     image_processor = ImageProcessor(config)
@@ -98,15 +99,54 @@ if __name__ == "__main__":
             final_depth_costs[nan_mask] = MAX_SEARCH_RANGE
             
             logging.info(f"Initial point cloud generated. Shape after subsampling: {final_pts.shape[0]}")
-
-            initial_pts = np.copy(final_pts)
             
+            if config.DEBUG_VISUALIZATION and len(final_pts) > config.DEBUG_POINT_INDEX:
+                logging.info(f"--- Visualizing point {config.DEBUG_POINT_INDEX} BEFORE optimization ---")
+                
+                # 近傍情報を準備
+                neighbor_Rs, neighbor_Ts, neighbor_images_list = [], [], []
+                for off in (-2, -1, 1, 2):
+                    n_idx = idx + off
+                    if 0 <= n_idx < len(data_loader.camera_data) and n_idx in loaded_images:
+                        _, pos, quat = data_loader.camera_data[n_idx]
+                        neighbor_Rs.append(quaternion_to_rotation_matrix(*quat).astype(np.float32))
+                        neighbor_Ts.append(np.array(pos, dtype=np.float32))
+                        neighbor_images_list.append(loaded_images[n_idx])
+                
+                neighbors_info_for_vis = (neighbor_Rs, neighbor_Ts, neighbor_images_list)
+
+                visualize_reprojection(
+                    point_3d=final_pts[config.DEBUG_POINT_INDEX],
+                    ref_image=loaded_images[idx],
+                    ref_uv=final_uvs[config.DEBUG_POINT_INDEX],
+                    K=config.K,
+                    neighbors_info=neighbors_info_for_vis,
+                    patch_radius=3,
+                    window_title_prefix="BEFORE"
+                )
+
             optimized_pts, optimized_cols = point_cloud_filter.refine_points_with_patchmatch(
                 idx, final_pts, final_cols, final_uvs, final_depth_costs, loaded_images,
                 data_loader.camera_data, config.K
             )
 
-            # 可視化が不要な場合は以下の3行をコメントアウト
+            # 最適化後の可視化処理 
+            if config.DEBUG_VISUALIZATION and len(optimized_pts) > config.DEBUG_POINT_INDEX:
+                logging.info(f"--- Visualizing point {config.DEBUG_POINT_INDEX} AFTER optimization ---")
+                visualize_reprojection(
+                    point_3d=optimized_pts[config.DEBUG_POINT_INDEX],
+                    ref_image=loaded_images[idx],
+                    ref_uv=final_uvs[config.DEBUG_POINT_INDEX],
+                    K=config.K,
+                    neighbors_info=neighbors_info_for_vis,
+                    patch_radius=3,
+                    window_title_prefix="AFTER"
+                )
+                # 1点確認したら終了
+                break
+
+            initial_pts = np.copy(final_pts)
+
             pcd_initial = o3d.geometry.PointCloud()
             pcd_initial.points = o3d.utility.Vector3dVector(initial_pts)
             pcd_initial.paint_uniform_color([1, 0, 0])

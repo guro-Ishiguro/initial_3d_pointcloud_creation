@@ -23,9 +23,15 @@ def load_point_cloud(file_path):
 
 if __name__ == "__main__":
     # PLYファイルのパス
-    input_file = config.OLD_POINT_CLOUD_FILE_PATH
+    input_file = config.POINT_CLOUD_FILE_PATH
 
     # 点群を読み込み
     pcd = load_point_cloud(input_file)
 
+    # 点群が読み込まれた場合、その点の数を出力
+    if pcd:
+        point_count = len(pcd.points)
+        logging.info(f"Number of points in the point cloud: {point_count}")
+
+    # 点群を可視化
     o3d.visualization.draw_geometries([pcd])

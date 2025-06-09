@@ -79,3 +79,8 @@ window_size, min_disp, num_disp = 5, 0, 216
 
 DEPTH_ERROR_THRESHOLD = 0.1
 DISP_COST_THRESHOLD = 4
+
+# 複数視点最適化の際のパラメータ
+DEPTH_SEARCH_RANGE = 0.1
+DEPTH_SEARCH_STEPS = 5
+COLOR_THRESHOLD = 30
