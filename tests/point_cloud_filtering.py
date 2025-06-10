@@ -4,6 +4,7 @@ import os
 import numpy as np
 import open3d as o3d
 import logging
+import config
 from numba import njit, prange
 
 from utils import quaternion_to_rotation_matrix
@@ -193,3 +194,58 @@ class PointCloudFilter:
 
         logging.info(f"Finished PatchMatch refinement for image {cur_idx}.")
         return optimized_depth
+    
+    def debug_reprojection(self, cur_idx, pixel_uv, depth, images, camera_data, K):
+        """
+        特定のピクセルと深度の再投影をデバッグする。
+        """
+        u, v = pixel_uv
+        logging.info(f"Debugging reprojection for image {cur_idx}, pixel ({u}, {v}), depth {depth:.2f}")
+
+        # 参照ビューの情報を設定
+        ref_image = images[cur_idx]
+        _, pos_ref, quat_ref = camera_data[cur_idx]
+        R_ref = quaternion_to_rotation_matrix(*quat_ref).astype(np.float32)
+        T_ref = np.array(pos_ref, dtype=np.float32)
+
+        # 1. 参照カメラ座標系での3D点を計算
+        fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
+        print(fx, fy, cx, cy)
+        x_cam = (u - cx).astype(np.float32) * config.pixel_size
+        y_cam = -(v - cy).astype(np.float32) * config.pixel_size
+        p_cam_ref = np.array([x_cam, y_cam, depth], dtype=np.float32)
+
+        # 2. ワールド座標系に変換
+        p_world = (R_ref @ p_cam_ref.T) + T_ref
+        logging.info(f"  - Calculated World Coordinate (p_world): {p_world}")
+
+        # 3. 近傍ビューに再投影
+        reprojection_results = {}
+        for off in (-2, -1, 1, 2):
+            neighbor_idx = cur_idx + off
+            if 0 <= neighbor_idx < len(camera_data) and neighbor_idx in images:
+                _, pos_neighbor, quat_neighbor = camera_data[neighbor_idx]
+                R_neighbor = quaternion_to_rotation_matrix(*quat_neighbor).astype(np.float32)
+                T_neighbor = np.array(pos_neighbor, dtype=np.float32)
+
+                # ワールド座標から近傍カメラ座標へ変換
+                p_cam_neighbor = (R_neighbor.T @ (p_world - T_neighbor).T).T
+                
+                # カメラの後ろにある点は除外
+                if p_cam_neighbor[2] <= 0.1:
+                    logging.warning(f"  - Point is behind neighbor camera {neighbor_idx}. Skipping.")
+                    continue
+
+                # 画像座標へ投影
+                uv_hom = K @ p_cam_neighbor
+                u_proj = uv_hom[0] / uv_hom[2]
+                v_proj = uv_hom[1] / uv_hom[2]
+                
+                h, w = images[neighbor_idx].shape[:2]
+                v_proj = h - 1 - v_proj # Y軸の反転（必要に応じて）
+
+                reprojection_results[neighbor_idx] = (u_proj, v_proj)
+                logging.info(f"  - Reprojected to image {neighbor_idx} at ({u_proj:.2f}, {v_proj:.2f})")
+
+        return p_world, reprojection_results
+    # +++ END: ADDED FOR DEBUGGING +++
