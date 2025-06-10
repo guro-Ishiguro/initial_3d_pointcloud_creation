@@ -45,46 +45,45 @@ class PointCloudIntegrator:
         logging.info(f"Integrated {len(med_pts)} points from multiple depth maps.")
         return np.array(med_pts), np.array(med_cols)
 
-    def process_and_save_final_point_cloud(self, points, colors, file_path):
+    def process_and_save_final_point_cloud(self, points_list, colors_list, file_path):
         """最終的な点群を処理し、PLYファイルとして保存する"""
+        if not points_list:
+            logging.warning("No point clouds to process.")
+            return None
+
+        # リストを結合して単一の配列にする
+        points = np.vstack(points_list)
+        colors = np.vstack(colors_list)
+
         if points.shape[0] == 0:
             logging.warning("No points to process for final point cloud.")
-            return None  # 点がない場合は None を返す
+            return None
 
-        # Z軸の反転（必要に応じて）
+        # Z軸の反転
         points[:, 2] = -points[:, 2]
 
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         pcd.colors = o3d.utility.Vector3dVector(colors)
 
-        logging.info(
-            f"Initial merged point cloud size: {np.asarray(pcd.points).shape[0]}"
-        )
+        logging.info(f"Initial merged point cloud size: {len(pcd.points)}")
 
         # 外れ値除去
-        pcd, ind = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=4.0)
-        logging.info(
-            f"Point cloud size after statistical outlier removal: {np.asarray(pcd.points).shape[0]}"
-        )
+        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=4.0)
+        logging.info(f"Point cloud size after outlier removal: {len(pcd.points)}")
 
         # PLYファイルとして保存
         self.write_ply(file_path, np.asarray(pcd.points), np.asarray(pcd.colors))
-        logging.info(f"Final point cloud saved to {file_path}")
-
-        return pcd  # 可視化のために返す
+        
+        return pcd
 
     @staticmethod
     def write_ply(filename, vertices, colors):
         """点群データをPLYファイルとして書き込む"""
-        assert (
-            vertices.shape[0] == colors.shape[0]
-        ), "Vertices and colors must have the same number of points."
+        assert vertices.shape[0] == colors.shape[0], "Vertices and colors must have the same number of points."
 
-        # 色を0-255の整数に変換
         colors_uchar = (colors * 255).astype(np.uint8)
-
-        # PLYヘッダーの生成
+        
         header = f"""ply
 format ascii 1.0
 element vertex {len(vertices)}
@@ -96,10 +95,9 @@ property uchar green
 property uchar blue
 end_header
 """
-        # データを行ごとに結合
         data = np.hstack((vertices, colors_uchar))
 
         with open(filename, "w") as f:
             f.write(header)
-            # データをファイルに書き込み
             np.savetxt(f, data, fmt="%f %f %f %d %d %d")
+        logging.info(f"Final point cloud saved to {filename}")

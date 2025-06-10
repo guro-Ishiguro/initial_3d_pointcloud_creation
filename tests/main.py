@@ -1,3 +1,5 @@
+# tests/main.py
+
 import os
 import config
 import logging
@@ -5,11 +7,10 @@ import time
 import cv2
 import open3d as o3d
 import numpy as np
+import matplotlib.pyplot as plt
 
-# 各モジュールをインポート
-# visualize_reprojection をインポートする
-from point_cloud_filtering import PointCloudFilter, MAX_SEARCH_RANGE, visualize_reprojection
-from utils import parse_arguments, clear_folder, quaternion_to_rotation_matrix # quaternion_to_rotation_matrix を追加
+from point_cloud_filtering import PointCloudFilter
+from utils import parse_arguments, clear_folder
 from data_loader import DataLoader
 from image_processing import ImageProcessor
 from depth_estimation import DepthEstimator
@@ -19,9 +20,8 @@ from point_cloud_integrator import PointCloudIntegrator
 if __name__ == "__main__":
     args = parse_arguments()
     start_time = time.time()
-    
-    subsample_factor = 10
-    
+
+    # --- 初期化 ---
     data_loader = DataLoader(config.IMAGE_DIR, config.DRONE_IMAGE_LOG)
     image_processor = ImageProcessor(config)
     depth_estimator = DepthEstimator(config)
@@ -32,105 +32,119 @@ if __name__ == "__main__":
     clear_folder(config.POINT_CLOUD_DIR)
 
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
-    target_indices = list(range(45, 46)) # 処理範囲を少し広げてテスト
-    
+    target_indices = list(range(len(all_pairs_data))) 
+
+    # --- パフォーマンス向上のため、必要な画像を事前に一括ロード ---
     image_indices_to_load = set()
     for idx in target_indices:
         image_indices_to_load.add(idx)
-        for offset in (-2, -1, 1, 2):
-            image_indices_to_load.add(idx + offset)
+        for offset in (-2, -1, 1, 2): # 近傍ビューもロード対象
+            neighbor_idx = idx + offset
+            if 0 <= neighbor_idx < len(all_pairs_data):
+                image_indices_to_load.add(neighbor_idx)
             
     logging.info("Pre-loading images...")
     loaded_images = {}
-    for idx in image_indices_to_load:
-        if 0 <= idx < len(all_pairs_data):
-            left_path, _ = data_loader.get_image_paths(idx)
-            img = cv2.imread(left_path)
-            if img is not None:
-                loaded_images[idx] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    for idx in sorted(list(image_indices_to_load)):
+        left_path, _ = data_loader.get_image_paths(idx)
+        img = cv2.imread(left_path)
+        if img is not None:
+            loaded_images[idx] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     merged_pts_list, merged_cols_list = [], []
 
+    # --- 各画像ペアの処理ループ ---
     for idx in target_indices:
         if idx not in loaded_images:
+            logging.warning(f"Image for index {idx} could not be loaded. Skipping.")
             continue
             
-        data_tuple = all_pairs_data[idx]
-        _, T_pos, left_path, right_path, R_mat = data_tuple
+        _, T_pos, left_path, right_path, R_mat = all_pairs_data[idx]
         logging.info(f"Processing image pair {idx}...")
 
         try:
-            li = cv2.imread(left_path)
-            ri = cv2.imread(right_path)
-            if li is None or ri is None: continue
+            li_bgr = cv2.imread(left_path)
+            ri_bgr = cv2.imread(right_path)
+            if li_bgr is None or ri_bgr is None: continue
 
             li_rgb = loaded_images[idx]
-            li_gray, ri_gray = cv2.cvtColor(li, cv2.COLOR_BGR2GRAY), cv2.cvtColor(ri, cv2.COLOR_BGR2GRAY)
+            li_gray = cv2.cvtColor(li_bgr, cv2.COLOR_BGR2GRAY)
+            ri_gray = cv2.cvtColor(ri_bgr, cv2.COLOR_BGR2GRAY)
 
+            # 1. 初期深度マップと深度誤差コストを計算
             disp = image_processor.create_disparity(li_gray, ri_gray)
-            depth = depth_estimator.disparity_to_depth(disp)
-            d_cost = depth_estimator.compute_depth_error_cost(disp, depth, config.window_size)
+            initial_depth = depth_estimator.disparity_to_depth(disp)
+            d_cost = depth_estimator.compute_depth_error_cost(disp, initial_depth, config.window_size)
             
-            valid = np.isfinite(depth)
-            bmask = valid & (~np.roll(valid, 10, 0) | ~np.roll(valid, -10, 0) |
-                             ~np.roll(valid, 10, 1) | ~np.roll(valid, -10, 1))
-            depth[bmask] = np.nan
+            # 境界領域や無効な深度をNaNでマスク
+            valid_mask = np.isfinite(initial_depth)
+            bmask = valid_mask & (~np.roll(valid_mask, 10, 0) | ~np.roll(valid_mask, -10, 0) |
+                                  ~np.roll(valid_mask, 10, 1) | ~np.roll(valid_mask, -10, 1))
+            initial_depth[bmask] = np.nan
             d_cost[bmask] = np.nan
 
-            # PatchMatchMVSで深度マップを深度コストを探索範囲として最適化する
-            optimized_pts, optimized_cols = point_cloud_filter.refine_points_with_patchmatch(
-                idx, final_pts, final_cols, final_uvs, final_depth_costs, loaded_images,
+            # 2. PatchMatchによる深度マップの最適化
+            optimized_depth = point_cloud_filter.refine_depth_with_patchmatch(
+                idx, initial_depth, d_cost, loaded_images,
                 data_loader.camera_data, config.K
             )
 
-            # PatchMatchで最適化された深度マップを元にオルソ化する
+            # 最適化前後の深度マップを可視化して比較
+            if config.DEBUG_VISUALIZATION:
+                plt.figure(figsize=(12, 6))
+                plt.subplot(1, 2, 1)
+                plt.imshow(initial_depth, cmap='jet', vmin=0, vmax=np.nanmax(initial_depth))
+                plt.title(f'Initial Depth {idx}')
+                plt.colorbar()
+                plt.subplot(1, 2, 2)
+                plt.imshow(optimized_depth, cmap='jet', vmin=0, vmax=np.nanmax(initial_depth))
+                plt.title(f'Optimized Depth {idx}')
+                plt.colorbar()
 
-            ortho_d, ortho_c = depth_estimator.to_orthographic_projection(depth, li_rgb, config.camera_height)
-            pts, cols = depth_estimator.depth_to_world(ortho_d, ortho_c, config.K, R_mat, T_pos, config.pixel_size)
-            
-            
-            valid_mask = np.isfinite(ortho_d.flatten())
-            valid_indices = np.where(valid_mask)[0]
-            subsampled_indices = valid_indices[::subsample_factor]
-            
-            final_pts = pts[subsampled_indices]
-            final_cols = cols[subsampled_indices]
-            
-            logging.info(f"Initial point cloud generated. Shape after subsampling: {final_pts.shape[0]}")
+                save_path = os.path.join("depth_comparison", f'depth_comparison_{idx}.png')
+                plt.savefig(save_path)
+                logging.info(f"Saved debug depth comparison image to {save_path}")
+                plt.close() 
 
-            initial_pts = np.copy(final_pts)
-
-            pcd_initial = o3d.geometry.PointCloud()
-            pcd_initial.points = o3d.utility.Vector3dVector(initial_pts)
-            pcd_initial.paint_uniform_color([1, 0, 0])
-
-            pcd_optimized = o3d.geometry.PointCloud()
-            pcd_optimized.points = o3d.utility.Vector3dVector(optimized_pts)
-            pcd_optimized.paint_uniform_color([0, 1, 0])
-
-            # 可視化が不要な場合は以下のdraw_geometriesの引数を [pcd_optimized] に変更
-            logging.info("Visualizing comparison: Red=Initial, Green=Optimized. Close the window to continue.")
-            o3d.visualization.draw_geometries(
-                [pcd_optimized, pcd_initial],
-                window_name=f"Optimization Result for Image {idx}"
+            # 3. 最適化された深度マップをオルソ化し、3D点群に変換
+            ortho_d, ortho_c = depth_estimator.to_orthographic_projection(
+                optimized_depth, li_rgb, config.camera_height
+            )
+            pts, cols = depth_estimator.depth_to_world(
+                ortho_d, ortho_c, config.K, R_mat, T_pos, config.pixel_size
             )
             
-            merged_pts_list.append(optimized_pts)
-            merged_cols_list.append(optimized_cols)
-            logging.info(f"Processed and refined for image {idx}")
+            # 有効な点のみを抽出
+            valid_mask = ~np.isnan(pts).any(axis=1)
+            final_pts = pts[valid_mask]
+            final_cols = cols[valid_mask]
+            
+            logging.info(f"Generated {final_pts.shape[0]} points for image {idx} after refinement.")
+            
+            # 最適化された点群を表示する
+            if config.DEBUG_VISUALIZATION:
+                pcd = o3d.geometry.PointCloud()
+                pcd.points = o3d.utility.Vector3dVector(final_pts)
+                pcd.colors = o3d.utility.Vector3dVector(final_cols)
+                o3d.visualization.draw_geometries([pcd], window_name="Final Integrated Point Cloud")
+
+            merged_pts_list.append(final_pts)
+            merged_cols_list.append(final_cols)
 
         except Exception as e:
             logging.error(f"Error processing image pair {idx}: {e}", exc_info=True)
 
+    # --- 全点群の統合と保存 ---
     if merged_pts_list:
-        all_pts = np.vstack(merged_pts_list)
-        all_cols = np.vstack(merged_cols_list)
+        logging.info("Integrating all point clouds...")
         final_pcd = point_cloud_integrator.process_and_save_final_point_cloud(
-            all_pts, all_cols, config.POINT_CLOUD_FILE_PATH
+            merged_pts_list, merged_cols_list, config.POINT_CLOUD_FILE_PATH
         )
         if final_pcd and len(final_pcd.points) > 0:
-            logging.info("Showing final integrated point cloud.")
+            logging.info("Showing final integrated point cloud. Close the window to exit.")
             o3d.visualization.draw_geometries([final_pcd], window_name="Final Integrated Point Cloud")
+    else:
+        logging.warning("No point clouds were generated.")
 
     end_time = time.time()
     logging.info(f"Total point cloud generation time: {end_time - start_time:.2f}s")
