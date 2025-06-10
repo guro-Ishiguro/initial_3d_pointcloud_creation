@@ -84,27 +84,7 @@ if __name__ == "__main__":
             d_cost[bmask] = np.nan
 
             # 2. PatchMatchによる深度マップの最適化
-            optimized_depth = point_cloud_filter.refine_depth_with_patchmatch(
-                idx, initial_depth, d_cost, loaded_images,
-                data_loader.camera_data, config.K
-            )
-
-            # 最適化前後の深度マップを可視化して比較
-            if config.DEBUG_VISUALIZATION:
-                plt.figure(figsize=(12, 6))
-                plt.subplot(1, 2, 1)
-                plt.imshow(initial_depth, cmap='jet', vmin=0, vmax=np.nanmax(initial_depth))
-                plt.title(f'Initial Depth {idx}')
-                plt.colorbar()
-                plt.subplot(1, 2, 2)
-                plt.imshow(optimized_depth, cmap='jet', vmin=0, vmax=np.nanmax(initial_depth))
-                plt.title(f'Optimized Depth {idx}')
-                plt.colorbar()
-
-                save_path = os.path.join("depth_comparison", f'depth_comparison_{idx}.png')
-                plt.savefig(save_path)
-                logging.info(f"Saved debug depth comparison image to {save_path}")
-                plt.close() 
+            optimized_depth = point_cloud_filter.refine_depth_with_patchmatch()
 
             # 3. 最適化された深度マップをオルソ化し、3D点群に変換
             ortho_d, ortho_c = depth_estimator.to_orthographic_projection(
