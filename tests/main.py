@@ -52,7 +52,6 @@ if __name__ == "__main__":
     merged_pts_list, merged_cols_list = [], []
 
     for idx in target_indices:
-        # プリロードされていない画像インデックスはスキップ
         if idx not in loaded_images:
             continue
             
@@ -76,14 +75,19 @@ if __name__ == "__main__":
             bmask = valid & (~np.roll(valid, 10, 0) | ~np.roll(valid, -10, 0) |
                              ~np.roll(valid, 10, 1) | ~np.roll(valid, -10, 1))
             depth[bmask] = np.nan
+            d_cost[bmask] = np.nan
+
+            # PatchMatchMVSで深度マップを深度コストを探索範囲として最適化する
+            optimized_pts, optimized_cols = point_cloud_filter.refine_points_with_patchmatch(
+                idx, final_pts, final_cols, final_uvs, final_depth_costs, loaded_images,
+                data_loader.camera_data, config.K
+            )
+
+            # PatchMatchで最適化された深度マップを元にオルソ化する
 
             ortho_d, ortho_c = depth_estimator.to_orthographic_projection(depth, li_rgb, config.camera_height)
-            d_cost_flat = d_cost.flatten()
             pts, cols = depth_estimator.depth_to_world(ortho_d, ortho_c, config.K, R_mat, T_pos, config.pixel_size)
             
-            h, w = ortho_d.shape
-            v_coords, u_coords = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
-            uv_coords = np.stack((u_coords.flatten(), v_coords.flatten()), axis=-1)
             
             valid_mask = np.isfinite(ortho_d.flatten())
             valid_indices = np.where(valid_mask)[0]
@@ -91,59 +95,8 @@ if __name__ == "__main__":
             
             final_pts = pts[subsampled_indices]
             final_cols = cols[subsampled_indices]
-            final_uvs = uv_coords[subsampled_indices]
-            final_depth_costs = d_cost_flat[subsampled_indices]
-
-            # final_depth_costs に含まれる NaN を、最大の探索範囲で置き換える
-            nan_mask = np.isnan(final_depth_costs)
-            final_depth_costs[nan_mask] = MAX_SEARCH_RANGE
             
             logging.info(f"Initial point cloud generated. Shape after subsampling: {final_pts.shape[0]}")
-            
-            if config.DEBUG_VISUALIZATION and len(final_pts) > config.DEBUG_POINT_INDEX:
-                logging.info(f"--- Visualizing point {config.DEBUG_POINT_INDEX} BEFORE optimization ---")
-                
-                # 近傍情報を準備
-                neighbor_Rs, neighbor_Ts, neighbor_images_list = [], [], []
-                for off in (-2, -1, 1, 2):
-                    n_idx = idx + off
-                    if 0 <= n_idx < len(data_loader.camera_data) and n_idx in loaded_images:
-                        _, pos, quat = data_loader.camera_data[n_idx]
-                        neighbor_Rs.append(quaternion_to_rotation_matrix(*quat).astype(np.float32))
-                        neighbor_Ts.append(np.array(pos, dtype=np.float32))
-                        neighbor_images_list.append(loaded_images[n_idx])
-                
-                neighbors_info_for_vis = (neighbor_Rs, neighbor_Ts, neighbor_images_list)
-
-                visualize_reprojection(
-                    point_3d=final_pts[config.DEBUG_POINT_INDEX],
-                    ref_image=loaded_images[idx],
-                    ref_uv=final_uvs[config.DEBUG_POINT_INDEX],
-                    K=config.K,
-                    neighbors_info=neighbors_info_for_vis,
-                    patch_radius=3,
-                    window_title_prefix="BEFORE"
-                )
-
-            optimized_pts, optimized_cols = point_cloud_filter.refine_points_with_patchmatch(
-                idx, final_pts, final_cols, final_uvs, final_depth_costs, loaded_images,
-                data_loader.camera_data, config.K
-            )
-
-            # 最適化後の可視化処理 
-            if config.DEBUG_VISUALIZATION and len(optimized_pts) > config.DEBUG_POINT_INDEX:
-                logging.info(f"--- Visualizing point {config.DEBUG_POINT_INDEX} AFTER optimization ---")
-                visualize_reprojection(
-                    point_3d=optimized_pts[config.DEBUG_POINT_INDEX],
-                    ref_image=loaded_images[idx],
-                    ref_uv=final_uvs[config.DEBUG_POINT_INDEX],
-                    K=config.K,
-                    neighbors_info=neighbors_info_for_vis,
-                    patch_radius=3,
-                    window_title_prefix="AFTER"
-                )
-                # 1点確認したら終了
-                break
 
             initial_pts = np.copy(final_pts)
 
