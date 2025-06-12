@@ -76,20 +76,20 @@ class DepthEstimator:
         return ortho_d, ortho_c
 
     @staticmethod
-    def depth_to_world(depth_map, color_image, K, R, T, pixel_size):
+    def depth_to_world(depth_map, color_image, K, R, T):
         """深度マップとカラー画像をワールド座標の点群に変換する"""
         h, w = depth_map.shape
-        i, j = np.meshgrid(np.arange(w), np.arange(h), indexing="xy")
+        i, j = np.meshgrid(np.arange(w), np.arange(h))
 
-        x = (i - K[0, 2]).astype(np.float32) * pixel_size
-        y = (j - K[1, 2]).astype(np.float32) * pixel_size
-        z = depth_map.astype(np.float32)
+        valid = np.isfinite(depth_map)
+        i, j, depth = i[valid], j[valid], depth_map[valid]
+        colors = color_image[j, i]
 
-        loc = np.stack((x, y, z), -1).reshape(-1, 3)
-        world = (R.T @ (loc - T).T).T
-        cols = color_image.reshape(-1, 3) / 255.0
+        x = (i - K[0, 2]).astype(np.float32) * depth / K[0, 0]
+        y = (j - K[1, 2]).astype(np.float32) * depth / K[1, 1]
+        z = depth.astype(np.float32)
 
-        valid = np.isfinite(z.flatten())
-        world[~valid] = np.nan
-        cols[~valid] = np.nan
-        return world.astype(np.float32), cols.astype(np.float32)
+        cam_coords = np.vstack((x, y, z)).T
+
+        world_coords = (R.T @ (cam_coords - T).T).T
+        return world_coords.astype(np.float32), colors.astype(np.float32)

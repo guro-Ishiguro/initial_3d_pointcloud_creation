@@ -141,42 +141,40 @@ if __name__ == "__main__":
                 logging.info(f"Saving optimized depth map to {save_path}")
                 save_depth_map_as_image(optimized_depth, save_path)
 
+            world_points, world_colors = depth_estimator.depth_to_world(initial_depth, li_rgb, config.K, R_mat, T_pos)
+
             # 3. 最適化された深度マップをオルソ化し、3D点群に変換
-            ortho_d, ortho_c = depth_estimator.to_orthographic_projection(
-                optimized_depth, li_rgb, config.camera_height
-            )
+            # ortho_d, ortho_c = depth_estimator.to_orthographic_projection(
+            #     optimized_depth, li_rgb, config.camera_height
+            # )
 
-            if config.DEBUG_SAVE_DEPTH_MAPS:
-                save_path = os.path.join(
-                    config.DEPTH_MAP_DIR, f"ortho_depth_optimized{idx:04d}.png"
-                )
-                logging.info(f"Saving ortho optimized depth map to {save_path}")
-                save_depth_map_as_image(optimized_depth, save_path)
+            # if config.DEBUG_SAVE_DEPTH_MAPS:
+            #     save_path = os.path.join(
+            #         config.DEPTH_MAP_DIR, f"ortho_depth_optimized{idx:04d}.png"
+            #     )
+            #     logging.info(f"Saving ortho optimized depth map to {save_path}")
+            #     save_depth_map_as_image(optimized_depth, save_path)
 
-            pts, cols = depth_estimator.depth_to_world(
-                ortho_d, ortho_c, config.K, R_mat, T_pos, config.pixel_size
-            )
-
-            # 有効な点のみを抽出
-            valid_mask = ~np.isnan(pts).any(axis=1)
-            final_pts = pts[valid_mask]
-            final_cols = cols[valid_mask]
+            # # 有効な点のみを抽出
+            # valid_mask = ~np.isnan(world_points).any(axis=1)
+            # final_pts = world_points[valid_mask]
+            # final_cols = world_colors[valid_mask]
 
             logging.info(
-                f"Generated {final_pts.shape[0]} points for image {idx} after refinement."
+                f"Generated {world_points.shape[0]} points for image {idx} after refinement."
             )
 
             # 修正: 注目しているフレームの点群を常に表示する
             if config.DEBUG_VISUALIZATION or target_indices == [idx]:
                 pcd = o3d.geometry.PointCloud()
-                pcd.points = o3d.utility.Vector3dVector(final_pts)
-                pcd.colors = o3d.utility.Vector3dVector(final_cols)
+                pcd.points = o3d.utility.Vector3dVector(world_points)
+                # pcd.colors = o3d.utility.Vector3dVector(world_colors)
                 o3d.visualization.draw_geometries(
                     [pcd], window_name=f"Refined Point Cloud (from frame {idx})"
                 )
 
-            merged_pts_list.append(final_pts)
-            merged_cols_list.append(final_cols)
+            merged_pts_list.append(world_points)
+            merged_cols_list.append(world_colors)
 
         except Exception as e:
             logging.error(f"Error processing image pair {idx}: {e}", exc_info=True)
