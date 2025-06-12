@@ -59,9 +59,6 @@ class PointCloudIntegrator:
             logging.warning("No points to process for final point cloud.")
             return None
 
-        # Z軸の反転
-        points[:, 2] = -points[:, 2]
-
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         pcd.colors = o3d.utility.Vector3dVector(colors)

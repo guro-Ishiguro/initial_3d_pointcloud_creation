@@ -36,7 +36,7 @@ if __name__ == "__main__":
 
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
 
-    target_indices = [38]
+    target_indices = [10]
     # 元のコード: target_indices = list(range(len(all_pairs_data)))
 
     logging.info(f"Targeting specific image indices for processing: {target_indices}")
@@ -140,20 +140,31 @@ if __name__ == "__main__":
                 )
                 logging.info(f"Saving optimized depth map to {save_path}")
                 save_depth_map_as_image(optimized_depth, save_path)
-            
-            world_points, world_colors = depth_estimator.depth_to_world(optimized_depth, li_rgb, config.K, R_mat, T_pos)
 
-            logging.info(
-                f"Generated {world_points.shape[0]} points for image {idx} after refinement."
+            # 3. 中心投影深度マップを正射投影深度マップに変換
+            logging.info(f"Converting perspective depth map to orthographic for image {idx}...")
+            ortho_depth_map, ortho_color_map = depth_estimator.perspective_to_orthographic(
+                optimized_depth, li_rgb, config.K
             )
-
-            if config.DEBUG_VISUALIZATION or target_indices == [idx]:
-                pcd = o3d.geometry.PointCloud()
-                pcd.points = o3d.utility.Vector3dVector(world_points)
-                pcd.colors = o3d.utility.Vector3dVector(world_colors)
-                o3d.visualization.draw_geometries(
-                    [pcd], window_name=f"Refined Point Cloud (from frame {idx})"
+            if config.DEBUG_SAVE_DEPTH_MAPS:
+                save_path = os.path.join(
+                    config.DEPTH_MAP_DIR, f"depth_orthographic_{idx:04d}.png"
                 )
+                logging.info(f"Saving orthographic depth map to {save_path}")
+                save_depth_map_as_image(ortho_depth_map, save_path)
+            
+            # 4. 正射投影深度マップをワールド座標の点群に変換
+            logging.info(f"Converting orthographic depth map to world coordinates for image {idx}...")
+            world_points, world_colors = depth_estimator.ortho_depth_to_world(
+                ortho_depth_map,
+                ortho_color_map,
+                R_mat,
+                T_pos,
+                config.pixel_size,
+            )
+            logging.info(
+                f"Generated {world_points.shape[0]} points for image {idx} from orthographic map."
+            )
 
             merged_pts_list.append(world_points)
             merged_cols_list.append(world_colors)
@@ -171,7 +182,7 @@ if __name__ == "__main__":
             logging.info(
                 "Showing final integrated point cloud. Close the window to exit."
             )
-            # o3d.visualization.draw_geometries([final_pcd], window_name="Final Integrated Point Cloud")
+            o3d.visualization.draw_geometries([final_pcd])
     else:
         logging.warning("No point clouds were generated.")
 
