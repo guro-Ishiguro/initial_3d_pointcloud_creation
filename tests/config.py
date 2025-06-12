@@ -113,3 +113,5 @@ DEBUG_VISUALIZATION = True
 DEBUG_SAVE_DEPTH_MAPS = True
 # デプスマップの保存先ディレクトリ
 DEPTH_MAP_DIR = "depth_maps"
+
+GROUND_RESOLUTION = 0.01

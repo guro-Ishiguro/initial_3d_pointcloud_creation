@@ -36,46 +36,6 @@ class DepthEstimator:
         )
 
     @staticmethod
-    def to_orthographic_projection(depth, color_image, camera_height):
-        """深度マップとカラー画像をオルソ画像に変換する"""
-        rows, cols = depth.shape
-        mid_x, mid_y = cols // 2, rows // 2
-        ri, ci = np.indices((rows, cols))
-
-        valid = np.isfinite(depth)
-        shift_x = np.zeros_like(depth, int)
-        shift_y = np.zeros_like(depth, int)
-
-        shift_x[valid] = (
-            (camera_height - depth[valid]) * (mid_x - ci[valid]) / camera_height
-        ).astype(int)
-        shift_y[valid] = (
-            (camera_height - depth[valid]) * (mid_y - ri[valid]) / camera_height
-        ).astype(int)
-
-        nx = ci + shift_x
-        ny = ri + shift_y
-
-        mask = valid & (nx >= 0) & (nx < cols) & (ny >= 0) & (ny < rows)
-        depths = depth[mask]
-        colors = color_image[ri[mask], ci[mask]]
-
-        flat = ny[mask] * cols + nx[mask]
-        order = np.lexsort((depths, flat))
-        flat_s, depth_s, col_s = flat[order], depths[order], colors[order]
-
-        uniq, idx = np.unique(flat_s, return_index=True)
-        uy, ux = uniq // cols, uniq % cols
-
-        ortho_d = np.full_like(depth, np.nan, float)
-        ortho_c = np.full_like(color_image, np.nan, float)
-
-        ortho_d[uy, ux] = depth_s[idx]
-        ortho_c[uy, ux] = col_s[idx]
-
-        return ortho_d, ortho_c
-
-    @staticmethod
     def depth_to_world(depth_map, color_image, K, R, T):
         """深度マップとカラー画像をワールド座標の点群に変換する"""
         h, w = depth_map.shape
@@ -83,7 +43,7 @@ class DepthEstimator:
 
         valid = np.isfinite(depth_map)
         i, j, depth = i[valid], j[valid], depth_map[valid]
-        colors = color_image[j, i]
+        colors = color_image[j, i].astype(np.float32) / 255.0
 
         x = (i - K[0, 2]).astype(np.float32) * depth / K[0, 0]
         y = (j - K[1, 2]).astype(np.float32) * depth / K[1, 1]
