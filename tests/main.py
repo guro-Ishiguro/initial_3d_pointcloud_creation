@@ -132,18 +132,17 @@ if __name__ == "__main__":
                 ref_image=li_rgb,
                 ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
                 neighbor_views_data=neighbor_views_data,
+                ref_idx=idx,
             )
 
-            if config.DEBUG_SAVE_DEPTH_MAPS:
-                save_path = os.path.join(
-                    config.DEPTH_MAP_DIR, f"depth_optimized_{idx:04d}.png"
-                )
-                logging.info(f"Saving optimized depth map to {save_path}")
-                save_depth_map_as_image(optimized_depth, save_path)
-
             # 3. 中心投影深度マップを正射投影深度マップに変換
-            logging.info(f"Converting perspective depth map to orthographic for image {idx}...")
-            ortho_depth_map, ortho_color_map = depth_estimator.perspective_to_orthographic(
+            logging.info(
+                f"Converting perspective depth map to orthographic for image {idx}..."
+            )
+            (
+                ortho_depth_map,
+                ortho_color_map,
+            ) = depth_estimator.perspective_to_orthographic(
                 optimized_depth, li_rgb, config.K
             )
             if config.DEBUG_SAVE_DEPTH_MAPS:
@@ -152,9 +151,11 @@ if __name__ == "__main__":
                 )
                 logging.info(f"Saving orthographic depth map to {save_path}")
                 save_depth_map_as_image(ortho_depth_map, save_path)
-            
+
             # 4. 正射投影深度マップをワールド座標の点群に変換
-            logging.info(f"Converting orthographic depth map to world coordinates for image {idx}...")
+            logging.info(
+                f"Converting orthographic depth map to world coordinates for image {idx}..."
+            )
             world_points, world_colors = depth_estimator.ortho_depth_to_world(
                 ortho_depth_map,
                 ortho_color_map,

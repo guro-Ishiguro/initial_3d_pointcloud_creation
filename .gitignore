@@ -7,3 +7,5 @@ output
 .jpg
 .png
 plotted_z_candidates
+depth_comparison
+depth_maps

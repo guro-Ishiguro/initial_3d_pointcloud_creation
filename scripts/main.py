@@ -486,13 +486,10 @@ def refine_points_with_multiview_cost(
             )
             neighbors_info.append((idx, fname, pos, quat))
 
-    logging.info(
-        f"{num_points}点ある{cur_idx}番目から生成される点群を複数視点コストに基づいて深度を最適化中..."
-    )
+    logging.info(f"{num_points}点ある{cur_idx}番目から生成される点群を複数視点コストに基づいて深度を最適化中...")
 
     # 複数視点最適化のコアロジック
     for p_idx in range(num_points):
-
         # 現在の点の情報を取得
         current_point = points[p_idx]
         current_color = colors[p_idx]
@@ -561,9 +558,7 @@ def refine_points_with_multiview_cost(
         optimized_points[p_idx] = best_point
         optimized_colors[p_idx] = current_color
     num_points = optimized_points.shape[0]
-    logging.info(
-        f"{num_points}点ある{cur_idx}番目の画像から生成される点群の複数視点最適化が終了"
-    )
+    logging.info(f"{num_points}点ある{cur_idx}番目の画像から生成される点群の複数視点最適化が終了")
     return optimized_points, optimized_colors
 
 
@@ -640,7 +635,9 @@ if __name__ == "__main__":
         print(np.asarray(pcd.points).shape[0])
         pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=4.0)
         write_ply(
-            config.OLD_POINT_CLOUD_FILE_PATH, np.asarray(pcd.points), np.asarray(pcd.colors)
+            config.OLD_POINT_CLOUD_FILE_PATH,
+            np.asarray(pcd.points),
+            np.asarray(pcd.colors),
         )
         o3d.visualization.draw_geometries([pcd])
     else:

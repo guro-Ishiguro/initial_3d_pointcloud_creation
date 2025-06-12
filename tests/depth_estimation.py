@@ -34,7 +34,7 @@ class DepthEstimator:
         return self.compute_depth_error_cost_jit(
             disparity, depth, self.config.B, self.config.focal_length, block_size
         )
-    
+
     def to_orthographic_projection(self, depth, color_image, camera_height):
         """中心投影の深度マップを正射投影に変換する"""
         rows, cols = depth.shape

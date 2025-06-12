@@ -5,6 +5,8 @@ import cv2
 from numba import njit, prange
 import logging
 import config
+import os
+from utils import save_depth_map_as_image
 
 
 # --- JITコンパイルされるコア関数群 (変更なし) ---
@@ -437,6 +439,7 @@ class PointCloudFilter:
         ref_image,
         ref_pose,
         neighbor_views_data,
+        ref_idx=0,
     ):
         logging.info("Starting PatchMatch MVS depth refinement...")
 
@@ -543,7 +546,10 @@ class PointCloudFilter:
         )
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
 
+        depth_map_prev = np.zeros_like(depth_map)
+        convergence_threshold = 0.001
         for i in range(self.config.PATCHMATCH_ITERATIONS):
+            np.copyto(depth_map_prev, depth_map)
             logging.info(
                 f"PatchMatch Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
             )
@@ -569,5 +575,25 @@ class PointCloudFilter:
                 src_T,
             )
 
+            # --- イテレーションごとのデプスマップ保存処理 ---
+            if self.config.DEBUG_SAVE_DEPTH_MAPS:
+                save_path = os.path.join(
+                    self.config.DEPTH_MAP_DIR,
+                    f"depth_iter_{ref_idx:04d}_{i+1:02d}.png",
+                )
+                logging.info(f"Saving intermediate depth map to {save_path}")
+                save_depth_map_as_image(depth_map.copy(), save_path)
+
+            # --- 収束チェック ---
+            diff = np.abs(depth_map_prev - depth_map)
+            valid_pixels = np.isfinite(depth_map_prev)
+            if np.sum(valid_pixels) > 0:
+                mean_change = np.mean(diff[valid_pixels] / depth_map_prev[valid_pixels])
+                logging.info(f"Average depth change: {mean_change:.5f}")
+                if mean_change < convergence_threshold:
+                    logging.info(
+                        f"Convergence reached at iteration {i+1}. Stopping early."
+                    )
+                    break
         logging.info("PatchMatch MVS refinement finished.")
         return depth_map
