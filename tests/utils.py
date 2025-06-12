@@ -3,6 +3,7 @@ import shutil
 import numpy as np
 import logging
 import argparse
+import cv2
 
 # ログ設定はここで一元的に行う
 logging.basicConfig(
@@ -62,3 +63,43 @@ def clear_folder(dir_path):
                 logging.error(f"Error deleting {file_path}: {e}")
     else:
         logging.info(f"The folder {dir_path} does not exist.")
+
+def save_depth_map_as_image(depth_map, file_path):
+    """
+    デプスマップ（float配列）を視覚的に確認可能なカラー画像として保存する。
+    NaN（無効な深度）のピクセルは黒色で表示される。
+    """
+    try:
+        # 有効な深度値のマスクを作成
+        valid_mask = np.isfinite(depth_map)
+        
+        # 有効な深度値が存在しない場合は、黒い画像を保存
+        if not valid_mask.any():
+            h, w = depth_map.shape
+            black_image = np.zeros((h, w, 3), dtype=np.uint8)
+            cv2.imwrite(file_path, black_image)
+            return
+
+        min_val = np.min(depth_map[valid_mask])
+        max_val = np.max(depth_map[valid_mask])
+
+        # 0-255の範囲に正規化
+        if max_val - min_val > 1e-6:
+            # 深度が遠いほど値が大きくなるように正規化 (near=255, far=1)
+            normalized_map = 255.0 * (1.0 - (depth_map - min_val) / (max_val - min_val))
+        else:
+            # 全ての深度が同じ値の場合
+            normalized_map = np.full(depth_map.shape, 128, dtype=np.float32)
+
+        # uint8に変換
+        vis_map = normalized_map.astype(np.uint8)
+        
+        # カラーマップを適用
+        colored_map = cv2.applyColorMap(vis_map, cv2.COLORMAP_JET)
+        
+        # 無効な深度（NaN）を持つピクセルを黒にする
+        colored_map[~valid_mask] = [0, 0, 0]
+
+        cv2.imwrite(file_path, colored_map)
+    except Exception as e:
+        logging.error(f"Failed to save depth map to {file_path}: {e}")

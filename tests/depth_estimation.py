@@ -77,12 +77,12 @@ class DepthEstimator:
         h, w = depth_map.shape
         i, j = np.meshgrid(np.arange(w), np.arange(h), indexing="xy")
 
-        x = (i - w // 2).astype(np.float32) * pixel_size
-        y = -(j - h // 2).astype(np.float32) * pixel_size
-        z = depth_map.astype(np.float32) # depth_mapも念のため型変換
+        x = (i - K[0, 2]).astype(np.float32) * pixel_size
+        y = (j - K[1, 2]).astype(np.float32) * pixel_size
+        z = depth_map.astype(np.float32) 
 
         loc = np.stack((x, y, z), -1).reshape(-1, 3)
-        world = (R @ loc.T).T + T
+        world = R.T @ (loc - T.T)
         cols = color_image.reshape(-1, 3) / 255.0
 
         valid = np.isfinite(z.flatten())

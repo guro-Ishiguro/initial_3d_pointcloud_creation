@@ -7,10 +7,9 @@ import time
 import cv2
 import open3d as o3d
 import numpy as np
-import matplotlib.pyplot as plt
 
 from point_cloud_filtering import PointCloudFilter
-from utils import parse_arguments, clear_folder
+from utils import parse_arguments, clear_folder, save_depth_map_as_image
 from data_loader import DataLoader
 from image_processing import ImageProcessor
 from depth_estimation import DepthEstimator
@@ -31,8 +30,16 @@ if __name__ == "__main__":
     os.makedirs(config.POINT_CLOUD_DIR, exist_ok=True)
     clear_folder(config.POINT_CLOUD_DIR)
 
+    if config.DEBUG_SAVE_DEPTH_MAPS:
+        os.makedirs(config.DEPTH_MAP_DIR, exist_ok=True)
+        clear_folder(config.DEPTH_MAP_DIR)
+
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
-    target_indices = list(range(len(all_pairs_data))) 
+    
+    target_indices = [38]
+    # 元のコード: target_indices = list(range(len(all_pairs_data))) 
+    
+    logging.info(f"Targeting specific image indices for processing: {target_indices}")
 
     # --- パフォーマンス向上のため、必要な画像を事前に一括ロード ---
     image_indices_to_load = set()
@@ -82,14 +89,49 @@ if __name__ == "__main__":
                                   ~np.roll(valid_mask, 10, 1) | ~np.roll(valid_mask, -10, 1))
             initial_depth[bmask] = np.nan
             d_cost[bmask] = np.nan
+            # NaNのコストを大きな値に置き換える
+            d_cost[np.isnan(d_cost)] = 1.0 
+
+            if config.DEBUG_SAVE_DEPTH_MAPS:
+                save_path = os.path.join(config.DEPTH_MAP_DIR, f"depth_initial_{idx:04d}.png")
+                logging.info(f"Saving initial depth map to {save_path}")
+                save_depth_map_as_image(initial_depth, save_path)
 
             # 2. PatchMatchによる深度マップの最適化
-            optimized_depth = point_cloud_filter.refine_depth_with_patchmatch()
+            #    近傍ビューのデータを準備する
+            neighbor_views_data = []
+            for offset in (-2, -1, 1, 2):
+                neighbor_idx = idx + offset
+                if 0 <= neighbor_idx < len(all_pairs_data) and neighbor_idx in loaded_images:
+                    _, T_n, _, _, R_n = all_pairs_data[neighbor_idx]
+                    neighbor_views_data.append({
+                        "image": loaded_images[neighbor_idx],
+                        "R": R_n, "T": T_n, "K": config.K
+                    })
+            
+            # PatchMatchを実行
+            optimized_depth = point_cloud_filter.refine_depth_with_patchmatch(
+                initial_depth=initial_depth,
+                initial_depth_error=d_cost,
+                ref_image=li_rgb,
+                ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
+                neighbor_views_data=neighbor_views_data
+            )
+
+            if config.DEBUG_SAVE_DEPTH_MAPS:
+                save_path = os.path.join(config.DEPTH_MAP_DIR, f"depth_optimized_{idx:04d}.png")
+                logging.info(f"Saving optimized depth map to {save_path}")
+                save_depth_map_as_image(optimized_depth, save_path)
 
             # 3. 最適化された深度マップをオルソ化し、3D点群に変換
             ortho_d, ortho_c = depth_estimator.to_orthographic_projection(
                 optimized_depth, li_rgb, config.camera_height
             )
+
+            if config.DEBUG_SAVE_DEPTH_MAPS:
+                save_path = os.path.join(config.DEPTH_MAP_DIR, f"ortho_depth_optimized{idx:04d}.png")
+                logging.info(f"Saving ortho optimized depth map to {save_path}")
+                save_depth_map_as_image(ortho_d, save_path)
             pts, cols = depth_estimator.depth_to_world(
                 ortho_d, ortho_c, config.K, R_mat, T_pos, config.pixel_size
             )
@@ -101,12 +143,12 @@ if __name__ == "__main__":
             
             logging.info(f"Generated {final_pts.shape[0]} points for image {idx} after refinement.")
             
-            # 最適化された点群を表示する
-            if config.DEBUG_VISUALIZATION:
+            # 修正: 注目しているフレームの点群を常に表示する
+            if config.DEBUG_VISUALIZATION or target_indices == [idx]:
                 pcd = o3d.geometry.PointCloud()
                 pcd.points = o3d.utility.Vector3dVector(final_pts)
                 pcd.colors = o3d.utility.Vector3dVector(final_cols)
-                o3d.visualization.draw_geometries([pcd], window_name="Final Integrated Point Cloud")
+                o3d.visualization.draw_geometries([pcd], window_name=f"Refined Point Cloud (from frame {idx})")
 
             merged_pts_list.append(final_pts)
             merged_cols_list.append(final_cols)
@@ -122,7 +164,7 @@ if __name__ == "__main__":
         )
         if final_pcd and len(final_pcd.points) > 0:
             logging.info("Showing final integrated point cloud. Close the window to exit.")
-            o3d.visualization.draw_geometries([final_pcd], window_name="Final Integrated Point Cloud")
+            #o3d.visualization.draw_geometries([final_pcd], window_name="Final Integrated Point Cloud")
     else:
         logging.warning("No point clouds were generated.")
 

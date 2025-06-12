@@ -78,11 +78,40 @@ pixel_size = scene_width / width
 
 window_size, min_disp, num_disp = 5, 0, 216
 
-DEPTH_ERROR_THRESHOLD = 0.1
-DISP_COST_THRESHOLD = 10
-DEPTH_SEARCH_RANGE = 1.0
-COLOR_THRESHOLD = 30
+DEBUG_PATCH_MATCH_VISUALIZATION = True
+# rows, colums
+DEBUG_PIXEL_COORDS = (230, 490)
 
+# =================================================
+# PatchMatch MVSによる深度最適化のためのパラメータ
+# =================================================
+# PatchMatchの反復回数
+PATCHMATCH_ITERATIONS = 3
+# パッチサイズ (奇数)
+PATCHMATCH_PATCH_SIZE = 3
+# 法線推定に使う近傍のサイズ
+NORMAL_ESTIMATION_NEIGHBORHOOD = 7
+# ZNCCコスト計算時の小さな値
+ZNCC_EPSILON = 1e-6
+# 複数視点コストを集計する際の上位何個を考慮するか
+TOP_K_COSTS = 3
+
+# --- 適応的ランダム探索のパラメータ ---
+# 探索範囲のイテレーションごとの減衰率
+PATCHMATCH_DECAY_RATE = 0.8
+# 深度探索範囲の基底値 (m)
+PATCHMATCH_BASE_ERROR = 0.01
+# 深度誤差を探索範囲に変換する際の重み
+PATCHMATCH_ERROR_WEIGHT = 0.5
+# 法線探索の角度範囲(degree)の初期値
+PATCHMATCH_NORMAL_SEARCH_ANGLE = 20.0
+
+# =================================================
+# デバッグと可視化のための設定
+# =================================================
+# 処理中の点群などをウィンドウで表示するか
 DEBUG_VISUALIZATION = True
-DEBUG_VISUALIZE_PATCHES = True
-DEBUG_PIXEL = (1920, 1080)
+# 最適化前後のデプスマップを画像として保存するか
+DEBUG_SAVE_DEPTH_MAPS = True
+# デプスマップの保存先ディレクトリ
+DEPTH_MAP_DIR = "depth_maps"
