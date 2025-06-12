@@ -47,9 +47,7 @@ OUTPUT_DIR = os.path.join(HOME_DIR, "output")
 OUTPUT_TYPE_DIR = os.path.join(OUTPUT_DIR, DATA_TYPE)
 POINT_CLOUD_DIR = os.path.join(OUTPUT_TYPE_DIR, "point_cloud")
 POINT_CLOUD_FILE_PATH = os.path.join(POINT_CLOUD_DIR, "output.ply")
-OLD_POINT_CLOUD_FILE_PATH = os.path.join(
-    POINT_CLOUD_DIR, "old_output.ply"
-)
+OLD_POINT_CLOUD_FILE_PATH = os.path.join(POINT_CLOUD_DIR, "old_output.ply")
 MESH_DIR = os.path.join(OUTPUT_TYPE_DIR, "mesh")
 MESH_FILE_PATH = os.path.join(MESH_DIR, "mesh.ply")
 VIDEO_DIR = os.path.join(OUTPUT_TYPE_DIR, "video")
@@ -78,7 +76,7 @@ pixel_size = scene_width / width
 
 window_size, min_disp, num_disp = 5, 0, 216
 
-DEBUG_PATCH_MATCH_VISUALIZATION = True
+DEBUG_PATCH_MATCH_VISUALIZATION = False
 # rows, colums
 DEBUG_PIXEL_COORDS = (230, 490)
 
@@ -86,9 +84,9 @@ DEBUG_PIXEL_COORDS = (230, 490)
 # PatchMatch MVSによる深度最適化のためのパラメータ
 # =================================================
 # PatchMatchの反復回数
-PATCHMATCH_ITERATIONS = 3
+PATCHMATCH_ITERATIONS = 10
 # パッチサイズ (奇数)
-PATCHMATCH_PATCH_SIZE = 3
+PATCHMATCH_PATCH_SIZE = 9
 # 法線推定に使う近傍のサイズ
 NORMAL_ESTIMATION_NEIGHBORHOOD = 7
 # ZNCCコスト計算時の小さな値

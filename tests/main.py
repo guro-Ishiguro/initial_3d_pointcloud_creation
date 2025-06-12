@@ -35,21 +35,21 @@ if __name__ == "__main__":
         clear_folder(config.DEPTH_MAP_DIR)
 
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
-    
+
     target_indices = [38]
-    # 元のコード: target_indices = list(range(len(all_pairs_data))) 
-    
+    # 元のコード: target_indices = list(range(len(all_pairs_data)))
+
     logging.info(f"Targeting specific image indices for processing: {target_indices}")
 
     # --- パフォーマンス向上のため、必要な画像を事前に一括ロード ---
     image_indices_to_load = set()
     for idx in target_indices:
         image_indices_to_load.add(idx)
-        for offset in (-2, -1, 1, 2): # 近傍ビューもロード対象
+        for offset in (-2, -1, 1, 2):  # 近傍ビューもロード対象
             neighbor_idx = idx + offset
             if 0 <= neighbor_idx < len(all_pairs_data):
                 image_indices_to_load.add(neighbor_idx)
-            
+
     logging.info("Pre-loading images...")
     loaded_images = {}
     for idx in sorted(list(image_indices_to_load)):
@@ -65,14 +65,15 @@ if __name__ == "__main__":
         if idx not in loaded_images:
             logging.warning(f"Image for index {idx} could not be loaded. Skipping.")
             continue
-            
+
         _, T_pos, left_path, right_path, R_mat = all_pairs_data[idx]
         logging.info(f"Processing image pair {idx}...")
 
         try:
             li_bgr = cv2.imread(left_path)
             ri_bgr = cv2.imread(right_path)
-            if li_bgr is None or ri_bgr is None: continue
+            if li_bgr is None or ri_bgr is None:
+                continue
 
             li_rgb = loaded_images[idx]
             li_gray = cv2.cvtColor(li_bgr, cv2.COLOR_BGR2GRAY)
@@ -81,19 +82,27 @@ if __name__ == "__main__":
             # 1. 初期深度マップと深度誤差コストを計算
             disp = image_processor.create_disparity(li_gray, ri_gray)
             initial_depth = depth_estimator.disparity_to_depth(disp)
-            d_cost = depth_estimator.compute_depth_error_cost(disp, initial_depth, config.window_size)
-            
+            d_cost = depth_estimator.compute_depth_error_cost(
+                disp, initial_depth, config.window_size
+            )
+
             # 境界領域や無効な深度をNaNでマスク
             valid_mask = np.isfinite(initial_depth)
-            bmask = valid_mask & (~np.roll(valid_mask, 10, 0) | ~np.roll(valid_mask, -10, 0) |
-                                  ~np.roll(valid_mask, 10, 1) | ~np.roll(valid_mask, -10, 1))
+            bmask = valid_mask & (
+                ~np.roll(valid_mask, 10, 0)
+                | ~np.roll(valid_mask, -10, 0)
+                | ~np.roll(valid_mask, 10, 1)
+                | ~np.roll(valid_mask, -10, 1)
+            )
             initial_depth[bmask] = np.nan
             d_cost[bmask] = np.nan
             # NaNのコストを大きな値に置き換える
-            d_cost[np.isnan(d_cost)] = 1.0 
+            d_cost[np.isnan(d_cost)] = 1.0
 
             if config.DEBUG_SAVE_DEPTH_MAPS:
-                save_path = os.path.join(config.DEPTH_MAP_DIR, f"depth_initial_{idx:04d}.png")
+                save_path = os.path.join(
+                    config.DEPTH_MAP_DIR, f"depth_initial_{idx:04d}.png"
+                )
                 logging.info(f"Saving initial depth map to {save_path}")
                 save_depth_map_as_image(initial_depth, save_path)
 
@@ -102,24 +111,33 @@ if __name__ == "__main__":
             neighbor_views_data = []
             for offset in (-2, -1, 1, 2):
                 neighbor_idx = idx + offset
-                if 0 <= neighbor_idx < len(all_pairs_data) and neighbor_idx in loaded_images:
+                if (
+                    0 <= neighbor_idx < len(all_pairs_data)
+                    and neighbor_idx in loaded_images
+                ):
                     _, T_n, _, _, R_n = all_pairs_data[neighbor_idx]
-                    neighbor_views_data.append({
-                        "image": loaded_images[neighbor_idx],
-                        "R": R_n, "T": T_n, "K": config.K
-                    })
-            
+                    neighbor_views_data.append(
+                        {
+                            "image": loaded_images[neighbor_idx],
+                            "R": R_n,
+                            "T": T_n,
+                            "K": config.K,
+                        }
+                    )
+
             # PatchMatchを実行
             optimized_depth = point_cloud_filter.refine_depth_with_patchmatch(
                 initial_depth=initial_depth,
                 initial_depth_error=d_cost,
                 ref_image=li_rgb,
                 ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
-                neighbor_views_data=neighbor_views_data
+                neighbor_views_data=neighbor_views_data,
             )
 
             if config.DEBUG_SAVE_DEPTH_MAPS:
-                save_path = os.path.join(config.DEPTH_MAP_DIR, f"depth_optimized_{idx:04d}.png")
+                save_path = os.path.join(
+                    config.DEPTH_MAP_DIR, f"depth_optimized_{idx:04d}.png"
+                )
                 logging.info(f"Saving optimized depth map to {save_path}")
                 save_depth_map_as_image(optimized_depth, save_path)
 
@@ -129,26 +147,33 @@ if __name__ == "__main__":
             )
 
             if config.DEBUG_SAVE_DEPTH_MAPS:
-                save_path = os.path.join(config.DEPTH_MAP_DIR, f"ortho_depth_optimized{idx:04d}.png")
+                save_path = os.path.join(
+                    config.DEPTH_MAP_DIR, f"ortho_depth_optimized{idx:04d}.png"
+                )
                 logging.info(f"Saving ortho optimized depth map to {save_path}")
-                save_depth_map_as_image(ortho_d, save_path)
+                save_depth_map_as_image(optimized_depth, save_path)
+
             pts, cols = depth_estimator.depth_to_world(
                 ortho_d, ortho_c, config.K, R_mat, T_pos, config.pixel_size
             )
-            
+
             # 有効な点のみを抽出
             valid_mask = ~np.isnan(pts).any(axis=1)
             final_pts = pts[valid_mask]
             final_cols = cols[valid_mask]
-            
-            logging.info(f"Generated {final_pts.shape[0]} points for image {idx} after refinement.")
-            
+
+            logging.info(
+                f"Generated {final_pts.shape[0]} points for image {idx} after refinement."
+            )
+
             # 修正: 注目しているフレームの点群を常に表示する
             if config.DEBUG_VISUALIZATION or target_indices == [idx]:
                 pcd = o3d.geometry.PointCloud()
                 pcd.points = o3d.utility.Vector3dVector(final_pts)
                 pcd.colors = o3d.utility.Vector3dVector(final_cols)
-                o3d.visualization.draw_geometries([pcd], window_name=f"Refined Point Cloud (from frame {idx})")
+                o3d.visualization.draw_geometries(
+                    [pcd], window_name=f"Refined Point Cloud (from frame {idx})"
+                )
 
             merged_pts_list.append(final_pts)
             merged_cols_list.append(final_cols)
@@ -163,8 +188,10 @@ if __name__ == "__main__":
             merged_pts_list, merged_cols_list, config.POINT_CLOUD_FILE_PATH
         )
         if final_pcd and len(final_pcd.points) > 0:
-            logging.info("Showing final integrated point cloud. Close the window to exit.")
-            #o3d.visualization.draw_geometries([final_pcd], window_name="Final Integrated Point Cloud")
+            logging.info(
+                "Showing final integrated point cloud. Close the window to exit."
+            )
+            # o3d.visualization.draw_geometries([final_pcd], window_name="Final Integrated Point Cloud")
     else:
         logging.warning("No point clouds were generated.")
 

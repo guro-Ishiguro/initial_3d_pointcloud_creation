@@ -64,6 +64,7 @@ def clear_folder(dir_path):
     else:
         logging.info(f"The folder {dir_path} does not exist.")
 
+
 def save_depth_map_as_image(depth_map, file_path):
     """
     デプスマップ（float配列）を視覚的に確認可能なカラー画像として保存する。
@@ -72,7 +73,7 @@ def save_depth_map_as_image(depth_map, file_path):
     try:
         # 有効な深度値のマスクを作成
         valid_mask = np.isfinite(depth_map)
-        
+
         # 有効な深度値が存在しない場合は、黒い画像を保存
         if not valid_mask.any():
             h, w = depth_map.shape
@@ -92,11 +93,11 @@ def save_depth_map_as_image(depth_map, file_path):
             normalized_map = np.full(depth_map.shape, 128, dtype=np.float32)
 
         # uint8に変換
-        vis_map = normalized_map.astype(np.uint8)
-        
+        vis_map = np.nan_to_num(normalized_map).astype(np.uint8)
+
         # カラーマップを適用
         colored_map = cv2.applyColorMap(vis_map, cv2.COLORMAP_JET)
-        
+
         # 無効な深度（NaN）を持つピクセルを黒にする
         colored_map[~valid_mask] = [0, 0, 0]
 

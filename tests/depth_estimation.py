@@ -46,12 +46,16 @@ class DepthEstimator:
         shift_x = np.zeros_like(depth, int)
         shift_y = np.zeros_like(depth, int)
 
-        shift_x[valid] = ((camera_height - depth[valid]) * (mid_x - ci[valid]) / camera_height).astype(int)
-        shift_y[valid] = ((camera_height - depth[valid]) * (mid_y - ri[valid]) / camera_height).astype(int)
+        shift_x[valid] = (
+            (camera_height - depth[valid]) * (mid_x - ci[valid]) / camera_height
+        ).astype(int)
+        shift_y[valid] = (
+            (camera_height - depth[valid]) * (mid_y - ri[valid]) / camera_height
+        ).astype(int)
 
         nx = ci + shift_x
         ny = ri + shift_y
-        
+
         mask = valid & (nx >= 0) & (nx < cols) & (ny >= 0) & (ny < rows)
         depths = depth[mask]
         colors = color_image[ri[mask], ci[mask]]
@@ -79,10 +83,10 @@ class DepthEstimator:
 
         x = (i - K[0, 2]).astype(np.float32) * pixel_size
         y = (j - K[1, 2]).astype(np.float32) * pixel_size
-        z = depth_map.astype(np.float32) 
+        z = depth_map.astype(np.float32)
 
         loc = np.stack((x, y, z), -1).reshape(-1, 3)
-        world = R.T @ (loc - T.T)
+        world = (R.T @ (loc - T).T).T
         cols = color_image.reshape(-1, 3) / 255.0
 
         valid = np.isfinite(z.flatten())

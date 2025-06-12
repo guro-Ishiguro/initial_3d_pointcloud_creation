@@ -74,16 +74,18 @@ class PointCloudIntegrator:
 
         # PLYファイルとして保存
         self.write_ply(file_path, np.asarray(pcd.points), np.asarray(pcd.colors))
-        
+
         return pcd
 
     @staticmethod
     def write_ply(filename, vertices, colors):
         """点群データをPLYファイルとして書き込む"""
-        assert vertices.shape[0] == colors.shape[0], "Vertices and colors must have the same number of points."
+        assert (
+            vertices.shape[0] == colors.shape[0]
+        ), "Vertices and colors must have the same number of points."
 
         colors_uchar = (colors * 255).astype(np.uint8)
-        
+
         header = f"""ply
 format ascii 1.0
 element vertex {len(vertices)}
