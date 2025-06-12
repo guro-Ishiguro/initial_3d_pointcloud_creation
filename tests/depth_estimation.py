@@ -43,7 +43,7 @@ class DepthEstimator:
 
         valid = np.isfinite(depth_map)
         i, j, depth = i[valid], j[valid], depth_map[valid]
-        colors = color_image[j, i].astype(np.float32) / 255.0
+        colors = color_image.reshape(-1, 3)[valid.flatten()] / 255.0
 
         x = (i - K[0, 2]).astype(np.float32) * depth / K[0, 0]
         y = (j - K[1, 2]).astype(np.float32) * depth / K[1, 1]

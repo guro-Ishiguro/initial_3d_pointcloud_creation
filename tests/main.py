@@ -134,24 +134,14 @@ if __name__ == "__main__":
                 neighbor_views_data=neighbor_views_data,
             )
 
-            # if config.DEBUG_SAVE_DEPTH_MAPS:
-            #     save_path = os.path.join(
-            #         config.DEPTH_MAP_DIR, f"depth_optimized_{idx:04d}.png"
-            #     )
-            #     logging.info(f"Saving optimized depth map to {save_path}")
-            #     save_depth_map_as_image(optimized_depth, save_path)
-
-            # 最適化された深度マップをオルソ化処理する
-            logging.info("Generating orthographic projection from the integrated point cloud...")
-            depth_estimator.create_orthographic_projection()
             if config.DEBUG_SAVE_DEPTH_MAPS:
                 save_path = os.path.join(
-                    config.DEPTH_MAP_DIR, f"ortho_depth_optimized{idx:04d}.png"
+                    config.DEPTH_MAP_DIR, f"depth_optimized_{idx:04d}.png"
                 )
-                logging.info(f"Saving ortho optimized depth map to {save_path}")
-                save_depth_map_as_image(, save_path)
+                logging.info(f"Saving optimized depth map to {save_path}")
+                save_depth_map_as_image(optimized_depth, save_path)
             
-            world_points, world_colors = depth_estimator.depth_to_world(initial_depth, li_rgb, config.K, R_mat, T_pos)
+            world_points, world_colors = depth_estimator.depth_to_world(optimized_depth, li_rgb, config.K, R_mat, T_pos)
 
             logging.info(
                 f"Generated {world_points.shape[0]} points for image {idx} after refinement."

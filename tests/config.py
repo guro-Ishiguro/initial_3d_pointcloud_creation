@@ -84,9 +84,9 @@ DEBUG_PIXEL_COORDS = (230, 490)
 # PatchMatch MVSによる深度最適化のためのパラメータ
 # =================================================
 # PatchMatchの反復回数
-PATCHMATCH_ITERATIONS = 10
+PATCHMATCH_ITERATIONS = 4
 # パッチサイズ (奇数)
-PATCHMATCH_PATCH_SIZE = 9
+PATCHMATCH_PATCH_SIZE = 11
 # 法線推定に使う近傍のサイズ
 NORMAL_ESTIMATION_NEIGHBORHOOD = 7
 # ZNCCコスト計算時の小さな値
@@ -114,4 +114,3 @@ DEBUG_SAVE_DEPTH_MAPS = True
 # デプスマップの保存先ディレクトリ
 DEPTH_MAP_DIR = "depth_maps"
 
-GROUND_RESOLUTION = 0.01
