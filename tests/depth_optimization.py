@@ -310,7 +310,7 @@ def _initialize_normals_from_depth_jit(depth_map, K):
     return normals
 
 
-class PointCloudFilter:
+class DepthOptimization:
     def __init__(self, config):
         self.config = config
         if not hasattr(self.config, "ADAPTIVE_WEIGHT_SIGMA_COLOR"):

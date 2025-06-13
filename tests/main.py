@@ -8,7 +8,7 @@ import cv2
 import open3d as o3d
 import numpy as np
 
-from point_cloud_filtering import PointCloudFilter
+from tests.depth_optimization import DepthOptimization
 from utils import parse_arguments, clear_folder, save_depth_map_as_image
 from data_loader import DataLoader
 from image_processing import ImageProcessor
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     data_loader = DataLoader(config.IMAGE_DIR, config.DRONE_IMAGE_LOG)
     image_processor = ImageProcessor(config)
     depth_estimator = DepthEstimator(config)
-    point_cloud_filter = PointCloudFilter(config)
+    depth_optimization = DepthOptimization(config)
     point_cloud_integrator = PointCloudIntegrator(config)
 
     os.makedirs(config.POINT_CLOUD_DIR, exist_ok=True)
@@ -125,7 +125,7 @@ if __name__ == "__main__":
                     )
 
             # PatchMatchを実行
-            optimized_depth = point_cloud_filter.refine_depth_with_patchmatch(
+            optimized_depth = depth_optimization.refine_depth_with_patchmatch(
                 initial_depth=initial_depth,
                 initial_depth_error=d_cost,
                 ref_image=li_rgb,
