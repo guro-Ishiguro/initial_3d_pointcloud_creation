@@ -36,7 +36,7 @@ if __name__ == "__main__":
 
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
 
-    target_indices = [76]
+    target_indices = [38]
     # target_indices = list(range(len(all_pairs_data)))
 
     logging.info(f"Targeting specific image indices for processing: {target_indices}")

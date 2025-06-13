@@ -26,7 +26,7 @@ class DepthEstimator:
             for x in range(half, cols - half):
                 d = disparity[y, x]
                 if not np.isnan(depth[y, x]):
-                    cost[y, x] = (B * focal) / (d * d + 1e-6)  # 深度の二乗誤差
+                    cost[y, x] = (B * focal) / (d * d + 1e-6)  
         return cost
 
     def compute_depth_error_cost(self, disparity, depth, block_size):

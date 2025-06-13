@@ -182,11 +182,14 @@ def _patchmatch_iteration_jit(
     src_R,
     src_T,
     adaptive_weight_sigma_color,
+    optimization_mask,
 ):
     h, w = depth_map.shape
     for color in (0, 1):  # 空間伝播
         for r in prange(1, h - 1):
             for c in range(1, w - 1):
+                if not optimization_mask[r, c]:
+                    continue
                 if (r + c) % 2 != color:
                     continue
                 if not np.isfinite(depth_map[r, c]):
@@ -585,13 +588,33 @@ class DepthOptimization:
         )
 
         h, w = initial_depth.shape
+
+        # --- 最適化対象のマスクを生成 ---
+        cost_threshold = self.config.PATCHMATCH_COST_THRESHOLD
+        optimization_mask = (initial_depth_error > cost_threshold) & np.isfinite(initial_depth)
+        num_optimized_pixels = np.sum(optimization_mask)
+        total_valid_pixels = np.sum(np.isfinite(initial_depth))
+
+        if total_valid_pixels == 0:
+            logging.warning("No valid initial depth pixels. Skipping optimization.")
+            return initial_depth
+
+        optimization_ratio = (num_optimized_pixels / total_valid_pixels) * 100
+        logging.info(
+            f"Optimizing {num_optimized_pixels}/{total_valid_pixels} pixels ({optimization_ratio:.2f}%) "
+            f"with cost > {cost_threshold}"
+        )
+
+        if num_optimized_pixels == 0:
+            logging.info("No pixels exceeded the cost threshold. Returning initial depth map.")
+            return initial_depth
+        
         depth_map = initial_depth.astype(np.float32)
         normal_map = _initialize_normals_from_depth_jit(
             depth_map, ref_pose["K"].astype(np.float32)
         )
 
         if self.config.DEBUG_PATCH_MATCH_VISUALIZATION:
-            # デバッグ部分は変更なし
             debug_r, debug_c = self.config.DEBUG_PIXEL_COORDS
             if not (
                 0 <= debug_r < h
@@ -715,6 +738,7 @@ class DepthOptimization:
                 src_R,
                 src_T,
                 self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                optimization_mask,
             )
 
             # --- イテレーションごとのデプスマップ保存処理 ---
