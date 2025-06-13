@@ -36,8 +36,8 @@ if __name__ == "__main__":
 
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
 
-    target_indices = [10]
-    # 元のコード: target_indices = list(range(len(all_pairs_data)))
+    target_indices = [38]
+    # target_indices = list(range(len(all_pairs_data)))
 
     logging.info(f"Targeting specific image indices for processing: {target_indices}")
 
@@ -49,11 +49,10 @@ if __name__ == "__main__":
             neighbor_idx = idx + offset
             if 0 <= neighbor_idx < len(all_pairs_data):
                 image_indices_to_load.add(neighbor_idx)
-
     logging.info("Pre-loading images...")
     loaded_images = {}
     for idx in sorted(list(image_indices_to_load)):
-        left_path, _ = data_loader.get_image_paths(idx)
+        left_path, right_path = data_loader.get_image_paths(idx)
         img = cv2.imread(left_path)
         if img is not None:
             loaded_images[idx] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -142,8 +141,8 @@ if __name__ == "__main__":
             (
                 ortho_depth_map,
                 ortho_color_map,
-            ) = depth_estimator.perspective_to_orthographic(
-                optimized_depth, li_rgb, config.K
+            ) = depth_estimator.to_orthographic_projection(
+                optimized_depth, li_rgb, config.camera_height
             )
             if config.DEBUG_SAVE_DEPTH_MAPS:
                 save_path = os.path.join(
@@ -151,6 +150,10 @@ if __name__ == "__main__":
                 )
                 logging.info(f"Saving orthographic depth map to {save_path}")
                 save_depth_map_as_image(ortho_depth_map, save_path)
+                color_path = os.path.join(
+                    config.DEPTH_MAP_DIR, f"depth_orthographic_color{idx:04d}.png"
+                )
+                cv2.imwrite(color_path, ortho_color_map)
 
             # 4. 正射投影深度マップをワールド座標の点群に変換
             logging.info(

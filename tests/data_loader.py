@@ -43,8 +43,8 @@ class DataLoader:
         if 0 <= idx < len(self.camera_data):
             base_fn, _, _ = self.camera_data[idx]  # e.g., "left_000000.png"
             right_fn = base_fn.replace("left_", "right_")
-            left_path = os.path.join(self.image_dir, base_fn)
             right_path = os.path.join(self.image_dir, right_fn)
+            left_path = os.path.join(self.image_dir, base_fn)
             return left_path, right_path
         return None, None
 

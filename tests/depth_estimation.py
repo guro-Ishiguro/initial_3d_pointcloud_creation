@@ -36,46 +36,31 @@ class DepthEstimator:
         )
 
     def to_orthographic_projection(self, depth, color_image, camera_height):
-        """中心投影の深度マップを正射投影に変換する"""
         rows, cols = depth.shape
         mid_x, mid_y = cols // 2, rows // 2
         ri, ci = np.indices((rows, cols))
-
         valid = np.isfinite(depth)
-        shift_x = np.zeros_like(depth, dtype=int)
-        shift_y = np.zeros_like(depth, dtype=int)
-
-        shift_x[valid] = (
+        shift_x = (
             (camera_height - depth[valid]) * (mid_x - ci[valid]) / camera_height
         ).astype(int)
-        shift_y[valid] = (
+        shift_y = (
             (camera_height - depth[valid]) * (mid_y - ri[valid]) / camera_height
         ).astype(int)
-
-        nx = ci + shift_x
-        ny = ri + shift_y
-
+        nx, ny = ci.copy(), ri.copy()
+        nx[valid] += shift_x
+        ny[valid] += shift_y
         mask = valid & (nx >= 0) & (nx < cols) & (ny >= 0) & (ny < rows)
-
-        # マスクされた有効なピクセル情報のみを抽出
-        depths = depth[mask]
-        colors = color_image[ri[mask], ci[mask]]
         flat = ny[mask] * cols + nx[mask]
-
-        # 深度が浅い（手前にある）点を優先するためにソート
+        depths = depth[mask]
+        cols_masked = color_image[ri[mask], ci[mask]]
         order = np.lexsort((depths, flat))
-        flat_s, depth_s, col_s = flat[order], depths[order], colors[order]
-
-        # 新しい座標で重複する点を削除（手前の点を保持）
+        flat_s, depth_s, col_s = flat[order], depths[order], cols_masked[order]
         uniq, idx = np.unique(flat_s, return_index=True)
         uy, ux = uniq // cols, uniq % cols
-
-        # 正射投影された深度マップとカラー画像を生成
-        ortho_d = np.full_like(depth, np.nan, dtype=float)
-        ortho_c = np.full_like(color_image, np.nan, dtype=float)
+        ortho_d = np.full_like(depth, np.nan)
+        ortho_c = np.full_like(color_image, np.nan)
         ortho_d[uy, ux] = depth_s[idx]
         ortho_c[uy, ux] = col_s[idx]
-
         return ortho_d, ortho_c
 
     def perspective_to_orthographic(self, depth_map, color_image, K):
@@ -104,7 +89,7 @@ class DepthEstimator:
 
         # 正射投影の画像座標に変換 (画像中心が原点)
         ortho_u = (x_cam / pixel_size) + (w / 2)
-        ortho_v = (y_cam / pixel_size) + (h / 2)  # Y軸は上下反転
+        ortho_v = (y_cam / pixel_size) + (h / 2)
 
         # 画像範囲内の座標のみを対象とする
         coord_mask = (ortho_u >= 0) & (ortho_u < w) & (ortho_v >= 0) & (ortho_v < h)
@@ -149,7 +134,7 @@ class DepthEstimator:
         u, v = np.meshgrid(np.arange(w), np.arange(h))
         valid_mask = np.isfinite(depth_map)
 
-        # ローカルな正射投影座標系での3D点（カメラ視点基準）
+        # ローカルな正射投影座標系での3D点
         x_local = (u[valid_mask] - w / 2) * pixel_size
         y_local = (v[valid_mask] - h / 2) * pixel_size
         z_local = depth_map[valid_mask]

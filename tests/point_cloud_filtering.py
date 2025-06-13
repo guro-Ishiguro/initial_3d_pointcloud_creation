@@ -9,7 +9,7 @@ import os
 from utils import save_depth_map_as_image
 
 
-# --- JITコンパイルされるコア関数群 (変更なし) ---
+# --- JITコンパイルされるコア関数群 ---
 @njit(fastmath=True)
 def _bilinear_interpolate_jit(image, y, x):
     h, w = image.shape
@@ -49,13 +49,46 @@ def _compute_homography_jit(
 
 
 @njit(fastmath=True)
-def _compute_zncc_cost_jit(patch_ref, warped_patch_src):
-    mean_ref, mean_src = np.mean(patch_ref), np.mean(warped_patch_src)
-    std_ref, std_src = np.std(patch_ref), np.std(warped_patch_src)
+def _compute_weighted_zncc_cost_jit(patch_ref, warped_patch_src, sigma_color):
+    """
+    適応的支持領域重み付けを用いてZNCCコストを計算する。
+    パッチ中心との色の近さに応じて重みを付け、境界領域での頑健性を高める。
+    """
+    patch_size = patch_ref.shape[0]
+    half = patch_size // 2
+    center_val = patch_ref[half, half]
+
+    # 1. 重みカーネルを計算
+    weights = np.zeros_like(patch_ref, dtype=np.float32)
+    for r in range(patch_size):
+        for c in range(patch_size):
+            color_diff_sq = (patch_ref[r, c] - center_val) ** 2
+            weights[r, c] = np.exp(-color_diff_sq / (2 * sigma_color**2))
+
+    # 2. 重み付き統計量を計算
+    sum_w = np.sum(weights)
+    if sum_w < 1e-6:
+        return 1.0
+
+    mean_ref = np.sum(patch_ref * weights) / sum_w
+    mean_src = np.sum(warped_patch_src * weights) / sum_w
+
+    var_ref = np.sum(weights * (patch_ref - mean_ref) ** 2) / sum_w
+    var_src = np.sum(weights * (warped_patch_src - mean_src) ** 2) / sum_w
+
+    std_ref = np.sqrt(var_ref)
+    std_src = np.sqrt(var_src)
+
     if std_ref < config.ZNCC_EPSILON or std_src < config.ZNCC_EPSILON:
         return 1.0
-    numerator = np.mean((patch_ref - mean_ref) * (warped_patch_src - mean_src))
+
+    # 3. 重み付きZNCCを計算
+    numerator = (
+        np.sum(weights * (patch_ref - mean_ref) * (warped_patch_src - mean_src)) / sum_w
+    )
     denominator = std_ref * std_src
+
+    # ZNCC値は-1から1なので、コストを0から1の範囲に変換
     return (1.0 - (numerator / denominator)) / 2.0
 
 
@@ -75,6 +108,7 @@ def _evaluate_cost_jit(
     src_R,
     src_T,
     top_k_costs,
+    adaptive_weight_sigma_color,
 ):
     h, w = ref_image_gray.shape
     half = patch_size // 2
@@ -114,7 +148,10 @@ def _evaluate_cost_jit(
                 warped_patch[pr, pc] = _bilinear_interpolate_jit(
                     src_images_gray[i], v_src, u_src
                 )
-        costs[i] = _compute_zncc_cost_jit(patch_ref, warped_patch)
+        costs[i] = _compute_weighted_zncc_cost_jit(
+            patch_ref, warped_patch, adaptive_weight_sigma_color
+        )
+
     costs = np.sort(costs)
     top_k = min(top_k_costs, len(costs))
     return np.mean(costs[:top_k])
@@ -130,8 +167,6 @@ def _patchmatch_iteration_jit(
     patch_size,
     top_k_costs,
     decay_rate,
-    base_error,
-    error_weight,
     normal_search_angle,
     ref_image_gray,
     ref_pose_K,
@@ -141,9 +176,10 @@ def _patchmatch_iteration_jit(
     src_K,
     src_R,
     src_T,
+    adaptive_weight_sigma_color,
 ):
     h, w = depth_map.shape
-    for color in (0, 1):
+    for color in (0, 1):  # 空間伝播
         for r in prange(1, h - 1):
             for c in range(1, w - 1):
                 if (r + c) % 2 != color:
@@ -154,6 +190,7 @@ def _patchmatch_iteration_jit(
                     nr, nc = r + dr, c + dc
                     if not np.isfinite(depth_map[nr, nc]):
                         continue
+
                     new_cost = _evaluate_cost_jit(
                         r,
                         c,
@@ -169,20 +206,21 @@ def _patchmatch_iteration_jit(
                         src_R,
                         src_T,
                         top_k_costs,
+                        adaptive_weight_sigma_color,
                     )
                     if new_cost < cost_map[r, c]:
                         depth_map[r, c] = depth_map[nr, nc]
                         normal_map[r, c] = normal_map[nr, nc]
                         cost_map[r, c] = new_cost
+
+    # --- ランダムサンプル探索 ---
     current_decay = decay_rate**iteration
     for r in prange(h):
         for c in range(w):
             if not np.isfinite(depth_map[r, c]):
                 continue
             d_current = depth_map[r, c]
-            d_range = (
-                base_error + error_weight * depth_error_map[r, c]
-            ) * current_decay
+            d_range = (depth_error_map[r, c]) * current_decay
             d_new = d_current + (np.random.rand() * 2 - 1) * d_range
             if d_new <= 0:
                 continue
@@ -200,6 +238,7 @@ def _patchmatch_iteration_jit(
                 + rand_axis * np.dot(rand_axis, n_current) * one_minus_cos_a
             )
             n_new /= np.linalg.norm(n_new)
+
             new_cost = _evaluate_cost_jit(
                 r,
                 c,
@@ -215,6 +254,7 @@ def _patchmatch_iteration_jit(
                 src_R,
                 src_T,
                 top_k_costs,
+                adaptive_weight_sigma_color,
             )
             if new_cost < cost_map[r, c]:
                 depth_map[r, c], normal_map[r, c], cost_map[r, c] = (
@@ -273,6 +313,11 @@ def _initialize_normals_from_depth_jit(depth_map, K):
 class PointCloudFilter:
     def __init__(self, config):
         self.config = config
+        if not hasattr(self.config, "ADAPTIVE_WEIGHT_SIGMA_COLOR"):
+            logging.warning(
+                "ADAPTIVE_WEIGHT_SIGMA_COLOR not found in config. Using default value 10.0."
+            )
+            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR = 10.0
 
     def _debug_patch_visualization(
         self,
@@ -297,8 +342,6 @@ class PointCloudFilter:
         full_image_display_size = (target_w, target_h)
 
         K_ref, R_ref, T_ref = ref_pose["K"], ref_pose["R"], ref_pose["T"]
-        # rが注目画素の画像座標系におけるy座標、cがx座標で原点は左上
-        # カメラ座標系における注目画素の三次元位置を求める
         x_cam = (c - K_ref[0, 2]) * depth / K_ref[0, 0]
         y_cam = (r - K_ref[1, 2]) * depth / K_ref[1, 1]
         point_3d_cam = np.array([x_cam, y_cam, depth])
@@ -441,7 +484,9 @@ class PointCloudFilter:
         neighbor_views_data,
         ref_idx=0,
     ):
-        logging.info("Starting PatchMatch MVS depth refinement...")
+        logging.info(
+            "Starting PatchMatch MVS depth refinement with Adaptive Weighting..."
+        )
 
         h, w = initial_depth.shape
         depth_map = initial_depth.astype(np.float32)
@@ -450,6 +495,7 @@ class PointCloudFilter:
         )
 
         if self.config.DEBUG_PATCH_MATCH_VISUALIZATION:
+            # デバッグ部分は変更なし
             debug_r, debug_c = self.config.DEBUG_PIXEL_COORDS
             if not (
                 0 <= debug_r < h
@@ -553,6 +599,7 @@ class PointCloudFilter:
             logging.info(
                 f"PatchMatch Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
             )
+
             _patchmatch_iteration_jit(
                 depth_map,
                 normal_map,
@@ -562,8 +609,6 @@ class PointCloudFilter:
                 self.config.PATCHMATCH_PATCH_SIZE,
                 self.config.TOP_K_COSTS,
                 self.config.PATCHMATCH_DECAY_RATE,
-                self.config.PATCHMATCH_BASE_ERROR,
-                self.config.PATCHMATCH_ERROR_WEIGHT,
                 self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE,
                 ref_image_gray,
                 ref_pose_K,
@@ -573,6 +618,7 @@ class PointCloudFilter:
                 src_K,
                 src_R,
                 src_T,
+                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
             )
 
             # --- イテレーションごとのデプスマップ保存処理 ---

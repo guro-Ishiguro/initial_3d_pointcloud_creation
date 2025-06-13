@@ -69,7 +69,6 @@ cx, cy = int(DATA_TYPE.split("_")[0]) / 2, int(DATA_TYPE.split("_")[1]) / 2
 K = np.array(
     [[focal_length, 0, cx], [0, focal_length, cy], [0, 0, 1]], dtype=np.float32
 )
-R = np.eye(3, dtype=np.float32)
 scene_width = 2 * camera_height * np.tan(np.radians(fov_h) / 2)
 scene_height = 2 * camera_height * np.tan(np.radians(fov_v) / 2)
 pixel_size = scene_width / width
@@ -80,13 +79,10 @@ DEBUG_PATCH_MATCH_VISUALIZATION = False
 # rows, colums
 DEBUG_PIXEL_COORDS = (230, 490)
 
-# =================================================
-# PatchMatch MVSによる深度最適化のためのパラメータ
-# =================================================
 # PatchMatchの反復回数
-PATCHMATCH_ITERATIONS = 3
+PATCHMATCH_ITERATIONS = 5
 # パッチサイズ (奇数)
-PATCHMATCH_PATCH_SIZE = 16
+PATCHMATCH_PATCH_SIZE = 9
 # 法線推定に使う近傍のサイズ
 NORMAL_ESTIMATION_NEIGHBORHOOD = 7
 # ZNCCコスト計算時の小さな値
@@ -96,17 +92,12 @@ TOP_K_COSTS = 3
 
 # --- 適応的ランダム探索のパラメータ ---
 # 探索範囲のイテレーションごとの減衰率
-PATCHMATCH_DECAY_RATE = 0.8
-# 深度探索範囲の基底値 (m)
-PATCHMATCH_BASE_ERROR = 0.01
-# 深度誤差を探索範囲に変換する際の重み
-PATCHMATCH_ERROR_WEIGHT = 0.5
+PATCHMATCH_DECAY_RATE = 0.9
 # 法線探索の角度範囲(degree)の初期値
 PATCHMATCH_NORMAL_SEARCH_ANGLE = 20.0
 
-# =================================================
-# デバッグと可視化のための設定
-# =================================================
+ADAPTIVE_WEIGHT_SIGMA_COLOR = 10
+
 # 処理中の点群などをウィンドウで表示するか
 DEBUG_VISUALIZATION = True
 # 最適化前後のデプスマップを画像として保存するか
