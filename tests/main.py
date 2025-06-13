@@ -31,8 +31,8 @@ if __name__ == "__main__":
     clear_folder(config.POINT_CLOUD_DIR)
 
     if config.DEBUG_SAVE_DEPTH_MAPS:
-        os.makedirs(config.DEPTH_MAP_DIR, exist_ok=True)
-        clear_folder(config.DEPTH_MAP_DIR)
+        os.makedirs(config.DEPTH_IMAGE_DIR, exist_ok=True)
+        clear_folder(config.DEPTH_IMAGE_DIR)
 
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
 
@@ -98,13 +98,6 @@ if __name__ == "__main__":
             # NaNのコストを大きな値に置き換える
             d_cost[np.isnan(d_cost)] = 1.0
 
-            if config.DEBUG_SAVE_DEPTH_MAPS:
-                save_path = os.path.join(
-                    config.DEPTH_MAP_DIR, f"depth_initial_{idx:04d}.png"
-                )
-                logging.info(f"Saving initial depth map to {save_path}")
-                save_depth_map_as_image(initial_depth, save_path)
-
             # 2. PatchMatchによる深度マップの最適化
             #    近傍ビューのデータを準備する
             neighbor_views_data = []
@@ -123,6 +116,18 @@ if __name__ == "__main__":
                             "K": config.K,
                         }
                     )
+
+            if config.DEBUG_SAVE_DEPTH_MAPS:
+                save_each_depth_dir = os.path.join(
+                    config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}"
+                )
+                os.makedirs(save_each_depth_dir, exist_ok=True)
+                clear_folder(save_each_depth_dir)
+                save_initial_depth_path = os.path.join(
+                    save_each_depth_dir, f"initial_depth.png"
+                )
+                logging.info(f"Saving initial depth map to {save_initial_depth_path}")
+                save_depth_map_as_image(initial_depth, save_initial_depth_path)
 
             # PatchMatchを実行
             optimized_depth = depth_optimization.refine_depth_with_patchmatch(
@@ -150,16 +155,15 @@ if __name__ == "__main__":
             ) = depth_estimator.to_orthographic_projection(
                 optimized_depth, li_rgb, config.camera_height
             )
+
             if config.DEBUG_SAVE_DEPTH_MAPS:
-                save_path = os.path.join(
-                    config.DEPTH_MAP_DIR, f"depth_orthographic_{idx:04d}.png"
+                save_ortho_optimized_depth = os.path.join(
+                    save_each_depth_dir, f"depth_orthographic.png"
                 )
-                logging.info(f"Saving orthographic depth map to {save_path}")
-                save_depth_map_as_image(ortho_depth_map, save_path)
-                color_path = os.path.join(
-                    config.DEPTH_MAP_DIR, f"depth_orthographic_color{idx:04d}.png"
+                logging.info(
+                    f"Saving orthographic depth map to {save_ortho_optimized_depth}"
                 )
-                cv2.imwrite(color_path, ortho_color_map)
+                save_depth_map_as_image(ortho_depth_map, save_ortho_optimized_depth)
 
             # 4. 正射投影深度マップをワールド座標の点群に変換
             logging.info(
