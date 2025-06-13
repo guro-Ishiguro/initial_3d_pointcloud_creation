@@ -104,3 +104,9 @@ DEBUG_VISUALIZATION = True
 DEBUG_SAVE_DEPTH_MAPS = True
 # デプスマップの保存先ディレクトリ
 DEPTH_MAP_DIR = "depth_maps"
+
+# 深度をランダムに初期化する際の範囲
+PATCHMATCH_VANILLA_MIN_DEPTH = 5.0  # meters
+PATCHMATCH_VANILLA_MAX_DEPTH = 50.0 # meters
+# ランダム探索の初期探索幅
+PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE = 50.0 # meters

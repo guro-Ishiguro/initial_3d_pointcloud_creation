@@ -112,6 +112,11 @@ def _evaluate_cost_jit(
 ):
     h, w = ref_image_gray.shape
     half = patch_size // 2
+
+    if (r - half < 0 or r + half + 1 > h or
+        c - half < 0 or c + half + 1 > w):
+        return 1.0 
+    
     x_cam = (c - ref_pose_K[0, 2]) * depth / ref_pose_K[0, 0]
     y_cam = (r - ref_pose_K[1, 2]) * depth / ref_pose_K[1, 1]
     point_3d_cam = np.array([x_cam, y_cam, depth], dtype=np.float32)
@@ -263,6 +268,97 @@ def _patchmatch_iteration_jit(
                     new_cost,
                 )
 
+@njit(parallel=True)
+def _patchmatch_iteration_vanilla_jit(
+    depth_map,
+    normal_map,
+    cost_map,
+    iteration,
+    patch_size,
+    top_k_costs,
+    initial_search_range,
+    decay_rate,
+    normal_search_angle,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
+    adaptive_weight_sigma_color,
+):
+    """
+    通常のPatchMatchの反復処理。
+    探索範囲は深度誤差に依存せず、固定の初期値から減衰する。
+    """
+    h, w = depth_map.shape
+    # --- 空間伝播 (変更なし) ---
+    for color in (0, 1):
+        for r in prange(1, h - 1):
+            for c in range(1, w - 1):
+                if (r + c) % 2 != color:
+                    continue
+                if not np.isfinite(depth_map[r, c]):
+                    continue
+                for dr, dc in [(-1, 0), (0, -1)]:
+                    nr, nc = r + dr, c + dc
+                    if not np.isfinite(depth_map[nr, nc]):
+                        continue
+
+                    new_cost = _evaluate_cost_jit(
+                        r, c, depth_map[nr, nc], normal_map[nr, nc], patch_size,
+                        ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
+                        src_images_gray, src_K, src_R, src_T, top_k_costs,
+                        adaptive_weight_sigma_color,
+                    )
+                    if new_cost < cost_map[r, c]:
+                        depth_map[r, c] = depth_map[nr, nc]
+                        normal_map[r, c] = normal_map[nr, nc]
+                        cost_map[r, c] = new_cost
+
+    # --- ランダムサンプル探索 (探索範囲の計算方法を変更) ---
+    current_decay = decay_rate**iteration
+    for r in prange(h):
+        for c in range(w):
+            if not np.isfinite(depth_map[r, c]):
+                continue
+            
+            d_current = depth_map[r, c]
+            # 深度誤差マップを使わず、固定の探索範囲を使用
+            d_range = initial_search_range * current_decay
+            d_new = d_current + (np.random.rand() * 2 - 1) * d_range
+            if d_new <= 0:
+                continue
+
+            n_current = normal_map[r, c]
+            angle_rad = np.radians(
+                (np.random.rand() * 2 - 1) * normal_search_angle * current_decay
+            )
+            rand_axis = np.random.randn(3).astype(np.float32)
+            rand_axis /= np.linalg.norm(rand_axis)
+            cos_a, sin_a = np.float32(np.cos(angle_rad)), np.float32(np.sin(angle_rad))
+            one_minus_cos_a = np.float32(1.0) - cos_a
+            n_new = (
+                n_current * cos_a
+                + np.cross(rand_axis, n_current) * sin_a
+                + rand_axis * np.dot(rand_axis, n_current) * one_minus_cos_a
+            )
+            n_new /= np.linalg.norm(n_new)
+
+            new_cost = _evaluate_cost_jit(
+                r, c, d_new, n_new, patch_size,
+                ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
+                src_images_gray, src_K, src_R, src_T, top_k_costs,
+                adaptive_weight_sigma_color,
+            )
+            if new_cost < cost_map[r, c]:
+                depth_map[r, c], normal_map[r, c], cost_map[r, c] = (
+                    d_new,
+                    n_new,
+                    new_cost,
+                )
 
 @njit(parallel=True)
 def _initialize_normals_from_depth_jit(depth_map, K):
@@ -642,4 +738,92 @@ class DepthOptimization:
                     )
                     break
         logging.info("PatchMatch MVS refinement finished.")
+        return depth_map
+
+    def refine_depth_with_patchmatch_vanilla(
+        self,
+        ref_image,
+        ref_pose,
+        neighbor_views_data,
+        ref_idx=0
+    ):
+        """
+        通常のPatchMatch MVSを実行。深度は一様乱数で初期化し、探索範囲は固定値から減衰させる。
+        """
+        logging.info(
+            "Starting VANILLA PatchMatch MVS depth refinement (random initialization)..."
+        )
+        h, w, _ = ref_image.shape
+
+        # 1. 深度マップを一様乱数で初期化
+        min_depth = self.config.PATCHMATCH_VANILLA_MIN_DEPTH
+        max_depth = self.config.PATCHMATCH_VANILLA_MAX_DEPTH
+        depth_map = np.random.uniform(min_depth, max_depth, (h, w)).astype(np.float32)
+
+        # 2. 法線マップを初期化
+        normal_map = _initialize_normals_from_depth_jit(
+            depth_map, ref_pose["K"].astype(np.float32)
+        )
+        
+        # 3. JITコンパイル用にデータを準備
+        ref_image_gray = cv2.cvtColor(ref_image, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        ref_pose_K, ref_pose_R, ref_pose_T = (
+            ref_pose["K"].astype(np.float32),
+            ref_pose["R"].astype(np.float32),
+            ref_pose["T"].astype(np.float32),
+        )
+        src_images_gray = np.stack(
+            [cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY).astype(np.float32) for view in neighbor_views_data],
+            axis=0,
+        )
+        src_K = np.stack([view["K"].astype(np.float32) for view in neighbor_views_data], axis=0)
+        src_R = np.stack([view["R"].astype(np.float32) for view in neighbor_views_data], axis=0)
+        src_T = np.stack([view["T"].astype(np.float32) for view in neighbor_views_data], axis=0)
+        cost_map = np.full((h, w), np.inf, dtype=np.float32)
+
+        # (オプション) 初期デプスマップを保存
+        if self.config.DEBUG_SAVE_DEPTH_MAPS:
+            save_path = os.path.join(
+                self.config.DEPTH_MAP_DIR, f"depth_vanilla_initial_{ref_idx:04d}.png"
+            )
+            logging.info(f"Saving vanilla initial depth map to {save_path}")
+            save_depth_map_as_image(depth_map.copy(), save_path)
+
+        # 4. PatchMatch反復ループ
+        for i in range(self.config.PATCHMATCH_ITERATIONS):
+            logging.info(
+                f"Vanilla PatchMatch Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
+            )
+            
+            _patchmatch_iteration_vanilla_jit(
+                depth_map,
+                normal_map,
+                cost_map,
+                i,
+                self.config.PATCHMATCH_PATCH_SIZE,
+                self.config.TOP_K_COSTS,
+                self.config.PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE,
+                self.config.PATCHMATCH_DECAY_RATE,
+                self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE,
+                ref_image_gray,
+                ref_pose_K,
+                ref_pose_R,
+                ref_pose_T,
+                src_images_gray,
+                src_K,
+                src_R,
+                src_T,
+                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+            )
+
+            # イテレーションごとのデプスマップ保存
+            if self.config.DEBUG_SAVE_DEPTH_MAPS:
+                save_path = os.path.join(
+                    self.config.DEPTH_MAP_DIR,
+                    f"depth_vanilla_iter_{ref_idx:04d}_{i+1:02d}.png",
+                )
+                logging.info(f"Saving vanilla intermediate depth map to {save_path}")
+                save_depth_map_as_image(depth_map.copy(), save_path)
+        
+        logging.info("Vanilla PatchMatch MVS refinement finished.")
         return depth_map

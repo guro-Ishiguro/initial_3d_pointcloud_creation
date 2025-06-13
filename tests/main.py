@@ -8,7 +8,7 @@ import cv2
 import open3d as o3d
 import numpy as np
 
-from tests.depth_optimization import DepthOptimization
+from depth_optimization import DepthOptimization
 from utils import parse_arguments, clear_folder, save_depth_map_as_image
 from data_loader import DataLoader
 from image_processing import ImageProcessor
@@ -36,7 +36,7 @@ if __name__ == "__main__":
 
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
 
-    target_indices = [38]
+    target_indices = [76]
     # target_indices = list(range(len(all_pairs_data)))
 
     logging.info(f"Targeting specific image indices for processing: {target_indices}")
@@ -133,6 +133,12 @@ if __name__ == "__main__":
                 neighbor_views_data=neighbor_views_data,
                 ref_idx=idx,
             )
+
+            # optimized_depth = depth_optimization.refine_depth_with_patchmatch_vanilla(
+            #     ref_image=li_rgb,
+            #     ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
+            #     neighbor_views_data=neighbor_views_data,
+            # )
 
             # 3. 中心投影深度マップを正射投影深度マップに変換
             logging.info(
