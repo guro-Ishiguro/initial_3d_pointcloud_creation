@@ -47,7 +47,7 @@ class PointCloudIntegrator:
 
     def process_and_save_final_point_cloud(self, points_list, colors_list, file_path):
         """最終的な点群を処理し、PLYファイルとして保存する"""
-        if not points_list:
+        if points_list is None or points_list.size == 0:
             logging.warning("No point clouds to process.")
             return None
 

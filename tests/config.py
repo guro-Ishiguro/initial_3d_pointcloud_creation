@@ -64,6 +64,7 @@ B, fov_h, fov_v, width, height = (
     int(DATA_TYPE.split("_")[1]),
 )
 focal_length = width / (2 * np.tan(fov_h * np.pi / 180 / 2))
+print(focal_length)
 camera_height = int(DATA_TYPE.split("_")[2])
 cx, cy = int(DATA_TYPE.split("_")[0]) / 2, int(DATA_TYPE.split("_")[1]) / 2
 K = np.array(
@@ -102,13 +103,11 @@ ADAPTIVE_WEIGHT_SIGMA_COLOR = 10
 DEBUG_VISUALIZATION = True
 # 最適化前後のデプスマップを画像として保存するか
 DEBUG_SAVE_DEPTH_MAPS = True
-# デプスマップの保存先ディレクトリ
-DEPTH_MAP_DIR = "depth_maps"
 
 # 深度をランダムに初期化する際の範囲
 PATCHMATCH_VANILLA_MIN_DEPTH = 5.0  # meters
-PATCHMATCH_VANILLA_MAX_DEPTH = 50.0 # meters
+PATCHMATCH_VANILLA_MAX_DEPTH = 50.0  # meters
 # ランダム探索の初期探索幅
 PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE = 50.0 # meters
 
-PATCHMATCH_COST_THRESHOLD = 1
+PATCHMATCH_COST_THRESHOLD = 0.3

@@ -11,7 +11,6 @@ class DepthEstimator:
     def disparity_to_depth(self, disparity):
         """視差マップを深度マップに変換する"""
         depth = self.config.B * self.config.focal_length / (disparity + 1e-6)
-        # 不適切な深度値をNaNに設定
         depth[(depth < 0) | (depth > 50) | ((depth > 8.5) & (depth < 9.5))] = np.nan
         return depth
 
@@ -27,6 +26,7 @@ class DepthEstimator:
                 d = disparity[y, x]
                 if not np.isnan(depth[y, x]):
                     cost[y, x] = (B * focal) / (d * d + 1e-6)  
+                    print((B * focal) / (d * d + 1e-6))
         return cost
 
     def compute_depth_error_cost(self, disparity, depth, block_size):

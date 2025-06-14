@@ -150,6 +150,32 @@ def integrate_depth_maps_median(points_list, colors_list, voxel_size=0.1):
     return np.array(med_pts), np.array(med_cols)
 
 
+def save_depth_map_as_image(depth_map, file_path):
+    """
+    デプスマップ（float配列）を視覚的に確認可能なカラー画像として保存する。
+    """
+    try:
+        valid_mask = np.isfinite(depth_map)
+        if not valid_mask.any():
+            h, w = depth_map.shape
+            black_image = np.zeros((h, w, 3), dtype=np.uint8)
+            cv2.imwrite(file_path, black_image)
+            return
+        min_val = np.min(depth_map[valid_mask])
+        max_val = np.max(depth_map[valid_mask])
+        if max_val - min_val > 1e-6:
+            normalized_map = 255.0 * (1.0 - (depth_map - min_val) / (max_val - min_val))
+        else:
+            normalized_map = np.full(depth_map.shape, 128, dtype=np.float32)
+        vis_map = np.nan_to_num(normalized_map).astype(np.uint8)
+        colored_map = cv2.applyColorMap(vis_map, cv2.COLORMAP_JET)
+        colored_map[~valid_mask] = [0, 0, 0]
+
+        cv2.imwrite(file_path, colored_map)
+    except Exception as e:
+        logging.error(f"Failed to save depth map to {file_path}: {e}")
+
+
 def process_image_pair(data):
     img_id, T, lpath, rpath, B, focal, K, R, cam_h, pix_sz, w_size, min_d, num_d = data
     logger.info(f"Processing pair {img_id}...")
@@ -232,6 +258,7 @@ def main():
         for i, cam in enumerate(camera_data)
     ]
     pts_list, cols_list = [], []
+    pairs = [pair for pair in pairs if pair[0] in [39]]
     with concurrent.futures.ProcessPoolExecutor(max_workers=6) as exe:
         for res in exe.map(process_image_pair, pairs):
             if res:
