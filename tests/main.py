@@ -189,6 +189,12 @@ if __name__ == "__main__":
     # --- 全点群の統合と保存 ---
     if merged_pts_list:
         logging.info("Integrating all point clouds...")
+        (
+            merged_pts_list,
+            merged_cols_list,
+        ) = point_cloud_integrator.integrate_depth_maps_median(
+            merged_pts_list, merged_cols_list
+        )
         final_pcd = point_cloud_integrator.process_and_save_final_point_cloud(
             merged_pts_list, merged_cols_list, config.POINT_CLOUD_FILE_PATH
         )
