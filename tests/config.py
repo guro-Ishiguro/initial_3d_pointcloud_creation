@@ -64,7 +64,6 @@ B, fov_h, fov_v, width, height = (
     int(DATA_TYPE.split("_")[1]),
 )
 focal_length = width / (2 * np.tan(fov_h * np.pi / 180 / 2))
-print(focal_length)
 camera_height = int(DATA_TYPE.split("_")[2])
 cx, cy = int(DATA_TYPE.split("_")[0]) / 2, int(DATA_TYPE.split("_")[1]) / 2
 K = np.array(
@@ -81,9 +80,9 @@ DEBUG_PATCH_MATCH_VISUALIZATION = False
 DEBUG_PIXEL_COORDS = (230, 490)
 
 # PatchMatchの反復回数
-PATCHMATCH_ITERATIONS = 5
+PATCHMATCH_ITERATIONS = 10
 # パッチサイズ (奇数)
-PATCHMATCH_PATCH_SIZE = 9
+PATCHMATCH_PATCH_SIZE = 11
 # 法線推定に使う近傍のサイズ
 NORMAL_ESTIMATION_NEIGHBORHOOD = 7
 # ZNCCコスト計算時の小さな値

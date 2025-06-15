@@ -7,6 +7,7 @@ import time
 import cv2
 import open3d as o3d
 import numpy as np
+import matplotlib.pyplot as plt
 
 from depth_optimization import DepthOptimization
 from utils import parse_arguments, clear_folder, save_depth_map_as_image
@@ -84,8 +85,6 @@ if __name__ == "__main__":
             d_cost = depth_estimator.compute_depth_error_cost(
                 disp, initial_depth, config.window_size
             )
-
-            # 境界領域や無効な深度をNaNでマスク
             valid_mask = np.isfinite(initial_depth)
             bmask = valid_mask & (
                 ~np.roll(valid_mask, 10, 0)
@@ -95,8 +94,30 @@ if __name__ == "__main__":
             )
             initial_depth[bmask] = np.nan
             d_cost[bmask] = np.nan
-            # NaNのコストを大きな値に置き換える
-            d_cost[np.isnan(d_cost)] = 1.0
+            #d_cost[np.isnan(d_cost)] = 1.0
+
+            logging.info(f"Generating histogram for d_cost of image {idx}...")
+            try:
+                d_cost_valid = d_cost[np.isfinite(d_cost)]
+                if d_cost_valid.size > 0:
+                    os.makedirs(config.HISTGRAM_DIR, exist_ok=True)
+                    plt.figure(figsize=(12, 7))
+                    plt.hist(d_cost_valid, bins=50, log=True, color='skyblue', edgecolor='black')
+                    plt.title(f'Distribution of Depth Error Cost (d_cost) for Image {idx}')
+                    plt.xlabel('Depth Error Cost (Lower is more certain)')
+                    plt.ylabel('Frequency (log scale)')
+                    plt.grid(True, which="both", ls="--", alpha=0.6)
+                    p99 = np.percentile(d_cost_valid, 99)
+                    plt.xlim(0, p99)
+                    histogram_path = os.path.join(config.HISTGRAM_DIR, f'd_cost_histogram_{idx:04d}.png')
+                    plt.savefig(histogram_path)
+                    plt.close() 
+                    logging.info(f"d_cost histogram saved to {histogram_path}")
+                else:
+                    logging.warning(f"No valid d_cost values found for image {idx} to generate a histogram.")
+
+            except Exception as e:
+                logging.error(f"Failed to generate d_cost histogram for image {idx}: {e}")
 
             # 2. PatchMatchによる深度マップの最適化
             #    近傍ビューのデータを準備する
