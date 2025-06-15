@@ -36,8 +36,8 @@ if __name__ == "__main__":
 
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
 
-    # target_indices = [76]
-    target_indices = list(range(len(all_pairs_data)))
+    target_indices = [42]
+    # target_indices = list(range(len(all_pairs_data)))
 
     logging.info(f"Targeting specific image indices for processing: {target_indices}")
 
@@ -143,6 +143,7 @@ if __name__ == "__main__":
             #     ref_image=li_rgb,
             #     ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
             #     neighbor_views_data=neighbor_views_data,
+            #     ref_idx=idx,
             # )
 
             # 3. 中心投影深度マップを正射投影深度マップに変換
