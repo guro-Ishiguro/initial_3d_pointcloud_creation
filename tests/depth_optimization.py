@@ -183,41 +183,54 @@ def _patchmatch_iteration_jit(
     adaptive_weight_sigma_color,
 ):
     h, w = depth_map.shape
-    for color in (0, 1):  # 空間伝播
-        for r in prange(1, h - 1):
-            for c in range(1, w - 1):
-                if (r + c) % 2 != color:
-                    continue
-                if not np.isfinite(depth_map[r, c]):
-                    continue
-                for dr, dc in [(-1, 0), (0, -1)]:
-                    nr, nc = r + dr, c + dc
-                    if not np.isfinite(depth_map[nr, nc]):
+
+    # --- 空間伝播 ---
+    # イテレーションごとに伝播方向を反転させる (偶数回:順方向, 奇数回:逆方向)
+    if iteration % 2 == 0:
+        # 順方向パス: 左上から右下へ (並列化)
+        neighbors = [(-1, 0), (0, -1)]
+        for color in (0, 1):
+            for r in prange(1, h - 1):
+                for c in range(1, w - 1):
+                    if (r + c) % 2 != color:
+                        continue
+                    if not np.isfinite(depth_map[r, c]):
+                        continue
+                    
+                    for dr, dc in neighbors:
+                        nr, nc = r + dr, c + dc
+                        if not np.isfinite(depth_map[nr, nc]):
+                            continue
+
+                        new_cost = _evaluate_cost_jit(r, c, depth_map[nr, nc], normal_map[nr, nc], patch_size, ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T, src_images_gray, src_K, src_R, src_T, top_k_costs, adaptive_weight_sigma_color)
+                        if new_cost < cost_map[r, c]:
+                            depth_map[r, c] = depth_map[nr, nc]
+                            normal_map[r, c] = normal_map[nr, nc]
+                            cost_map[r, c] = new_cost
+    else:
+        # 逆方向パス: 右下から左上へ (逐次実行)
+        # prangeは逆順ループをサポートしないため、通常のrangeを使用
+        neighbors = [(1, 0), (0, 1)]
+        for color in (0, 1):
+            for r in range(h - 2, 0, -1):
+                for c in range(w - 2, 0, -1):
+                    if (r + c) % 2 != color:
+                        continue
+                    if not np.isfinite(depth_map[r, c]):
                         continue
 
-                    new_cost = _evaluate_cost_jit(
-                        r,
-                        c,
-                        depth_map[nr, nc],
-                        normal_map[nr, nc],
-                        patch_size,
-                        ref_image_gray,
-                        ref_pose_K,
-                        ref_pose_R,
-                        ref_pose_T,
-                        src_images_gray,
-                        src_K,
-                        src_R,
-                        src_T,
-                        top_k_costs,
-                        adaptive_weight_sigma_color,
-                    )
-                    if new_cost < cost_map[r, c]:
-                        depth_map[r, c] = depth_map[nr, nc]
-                        normal_map[r, c] = normal_map[nr, nc]
-                        cost_map[r, c] = new_cost
+                    for dr, dc in neighbors:
+                        nr, nc = r + dr, c + dc
+                        if not np.isfinite(depth_map[nr, nc]):
+                            continue
 
-    # --- ランダムサンプル探索 ---
+                        new_cost = _evaluate_cost_jit(r, c, depth_map[nr, nc], normal_map[nr, nc], patch_size, ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T, src_images_gray, src_K, src_R, src_T, top_k_costs, adaptive_weight_sigma_color)
+                        if new_cost < cost_map[r, c]:
+                            depth_map[r, c] = depth_map[nr, nc]
+                            normal_map[r, c] = normal_map[nr, nc]
+                            cost_map[r, c] = new_cost
+
+    # --- ランダムサンプル探索 (並列化) ---
     current_decay = decay_rate**iteration
     for r in prange(h):
         for c in range(w):
@@ -289,47 +302,51 @@ def _patchmatch_iteration_vanilla_jit(
     src_T,
     adaptive_weight_sigma_color,
 ):
-    """
-    通常のPatchMatchの反復処理。
-    探索範囲は深度誤差に依存せず、固定の初期値から減衰する。
-    """
     h, w = depth_map.shape
-    # --- 空間伝播 (変更なし) ---
-    for color in (0, 1):
-        for r in prange(1, h - 1):
-            for c in range(1, w - 1):
-                if (r + c) % 2 != color:
-                    continue
-                if not np.isfinite(depth_map[r, c]):
-                    continue
-                for dr, dc in [(-1, 0), (0, -1)]:
-                    nr, nc = r + dr, c + dc
-                    if not np.isfinite(depth_map[nr, nc]):
+    
+    # --- 空間伝播 ---
+    if iteration % 2 == 0:
+        # 順方向パス (並列化)
+        neighbors = [(-1, 0), (0, -1)]
+        for color in (0, 1):
+            for r in prange(1, h - 1):
+                for c in range(1, w - 1):
+                    if (r + c) % 2 != color:
                         continue
+                    if not np.isfinite(depth_map[r, c]):
+                        continue
+                    for dr, dc in neighbors:
+                        nr, nc = r + dr, c + dc
+                        if not np.isfinite(depth_map[nr, nc]):
+                            continue
 
-                    new_cost = _evaluate_cost_jit(
-                        r,
-                        c,
-                        depth_map[nr, nc],
-                        normal_map[nr, nc],
-                        patch_size,
-                        ref_image_gray,
-                        ref_pose_K,
-                        ref_pose_R,
-                        ref_pose_T,
-                        src_images_gray,
-                        src_K,
-                        src_R,
-                        src_T,
-                        top_k_costs,
-                        adaptive_weight_sigma_color,
-                    )
-                    if new_cost < cost_map[r, c]:
-                        depth_map[r, c] = depth_map[nr, nc]
-                        normal_map[r, c] = normal_map[nr, nc]
-                        cost_map[r, c] = new_cost
+                        new_cost = _evaluate_cost_jit(r, c, depth_map[nr, nc], normal_map[nr, nc], patch_size, ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T, src_images_gray, src_K, src_R, src_T, top_k_costs, adaptive_weight_sigma_color)
+                        if new_cost < cost_map[r, c]:
+                            depth_map[r, c] = depth_map[nr, nc]
+                            normal_map[r, c] = normal_map[nr, nc]
+                            cost_map[r, c] = new_cost
+    else:
+        # 逆方向パス (逐次実行)
+        neighbors = [(1, 0), (0, 1)]
+        for color in (0, 1):
+            for r in range(h - 2, 0, -1):
+                for c in range(w - 2, 0, -1):
+                    if (r + c) % 2 != color:
+                        continue
+                    if not np.isfinite(depth_map[r, c]):
+                        continue
+                    for dr, dc in neighbors:
+                        nr, nc = r + dr, c + dc
+                        if not np.isfinite(depth_map[nr, nc]):
+                            continue
 
-    # --- ランダムサンプル探索 (探索範囲の計算方法を変更) ---
+                        new_cost = _evaluate_cost_jit(r, c, depth_map[nr, nc], normal_map[nr, nc], patch_size, ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T, src_images_gray, src_K, src_R, src_T, top_k_costs, adaptive_weight_sigma_color)
+                        if new_cost < cost_map[r, c]:
+                            depth_map[r, c] = depth_map[nr, nc]
+                            normal_map[r, c] = normal_map[nr, nc]
+                            cost_map[r, c] = new_cost
+
+    # --- ランダムサンプル探索 (並列化) ---
     current_decay = decay_rate**iteration
     for r in prange(h):
         for c in range(w):
@@ -337,7 +354,6 @@ def _patchmatch_iteration_vanilla_jit(
                 continue
 
             d_current = depth_map[r, c]
-            # 深度誤差マップを使わず、固定の探索範囲を使用
             d_range = initial_search_range * current_decay
             d_new = d_current + (np.random.rand() * 2 - 1) * d_range
             if d_new <= 0:
@@ -811,14 +827,6 @@ class DepthOptimization:
         )
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
 
-        # (オプション) 初期デプスマップを保存
-        if self.config.DEBUG_SAVE_DEPTH_MAPS:
-            save_path = os.path.join(
-                self.config.DEPTH_MAP_DIR, f"depth_vanilla_initial_{ref_idx:04d}.png"
-            )
-            logging.info(f"Saving vanilla initial depth map to {save_path}")
-            save_depth_map_as_image(depth_map.copy(), save_path)
-
         # 4. PatchMatch反復ループ
         for i in range(self.config.PATCHMATCH_ITERATIONS):
             logging.info(
@@ -848,11 +856,14 @@ class DepthOptimization:
 
             # イテレーションごとのデプスマップ保存
             if self.config.DEBUG_SAVE_DEPTH_MAPS:
-                save_path = os.path.join(
-                    self.config.DEPTH_MAP_DIR,
-                    f"depth_vanilla_iter_{ref_idx:04d}_{i+1:02d}.png",
+                save_each_depth_dir = os.path.join(
+                    config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}"
                 )
-                logging.info(f"Saving vanilla intermediate depth map to {save_path}")
+                save_path = os.path.join(
+                    save_each_depth_dir,
+                    f"depth_iter_{i+1:02d}.png",
+                )
+                logging.info(f"Saving intermediate depth map to {save_path}")
                 save_depth_map_as_image(depth_map.copy(), save_path)
 
         logging.info("Vanilla PatchMatch MVS refinement finished.")
