@@ -36,7 +36,7 @@ if __name__ == "__main__":
 
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
 
-    target_indices = [38]
+    target_indices = [42]
     # target_indices = list(range(len(all_pairs_data)))
 
     logging.info(f"Targeting specific image indices for processing: {target_indices}")
@@ -130,20 +130,21 @@ if __name__ == "__main__":
                 save_depth_map_as_image(initial_depth, save_initial_depth_path)
 
             # PatchMatchを実行
-            # optimized_depth = depth_optimization.refine_depth_with_patchmatch(
-            #     initial_depth=initial_depth,
-            #     initial_depth_error=d_cost,
+            optimized_depth = depth_optimization.refine_depth_with_patchmatch(
+                initial_depth=initial_depth,
+                initial_depth_error=d_cost,
+                ref_image=li_rgb,
+                ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
+                neighbor_views_data=neighbor_views_data,
+                ref_idx=idx,
+            )
+
+            # optimized_depth = depth_optimization.refine_depth_with_patchmatch_vanilla(
             #     ref_image=li_rgb,
             #     ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
             #     neighbor_views_data=neighbor_views_data,
             #     ref_idx=idx,
             # )
-
-            optimized_depth = depth_optimization.refine_depth_with_patchmatch_vanilla(
-                ref_image=li_rgb,
-                ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
-                neighbor_views_data=neighbor_views_data,
-            )
 
             # 3. 中心投影深度マップを正射投影深度マップに変換
             logging.info(
