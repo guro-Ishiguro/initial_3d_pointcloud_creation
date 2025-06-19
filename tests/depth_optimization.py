@@ -9,7 +9,6 @@ import os
 from utils import save_depth_map_as_image
 
 
-# --- JITコンパイルされるコア関数群 ---
 @njit(fastmath=True)
 def _bilinear_interpolate_jit(image, y, x):
     h, w = image.shape
@@ -52,7 +51,6 @@ def _compute_homography_jit(
 def _compute_weighted_zncc_cost_jit(patch_ref, warped_patch_src, sigma_color):
     """
     適応的支持領域重み付けを用いてZNCCコストを計算する。
-    パッチ中心との色の近さに応じて重みを付け、境界領域での頑健性を高める。
     """
     patch_size = patch_ref.shape[0]
     half = patch_size // 2
@@ -217,34 +215,31 @@ def _propagate_spatial_one_color_jit(
 
 
 @njit(parallel=True)
-def _patchmatch_iteration_jit(
-    depth_map, normal_map, cost_map, depth_error_map, iteration, patch_size,
-    top_k_costs, decay_rate, normal_search_angle, ref_image_gray,
-    ref_pose_K, ref_pose_R, ref_pose_T, src_images_gray, src_K, src_R, src_T,
-    adaptive_weight_sigma_color
+def _patchmatch_iteration_common_jit(
+    depth_map, normal_map, cost_map,
+    iteration, patch_size, top_k_costs,
+    decay_rate, normal_search_angle,
+    ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
+    src_images_gray, src_K, src_R, src_T,
+    adaptive_weight_sigma_color,
+    depth_range_map  # ← 追加: 各ピクセルごとの深度サンプリング幅
 ):
     h, w = depth_map.shape
 
     # --- 1. 空間伝播 ---
-    # イテレーション毎に伝播方向を反転（順方向/逆方向）
     if iteration % 2 == 0:
-        # 順方向パス: 左上から伝播
         neighbors_dr = np.array([-1, 0], dtype=np.int8)
         neighbors_dc = np.array([0, -1], dtype=np.int8)
     else:
-        # 逆方向パス: 右下から伝播
         neighbors_dr = np.array([1, 0], dtype=np.int8)
         neighbors_dc = np.array([0, 1], dtype=np.int8)
 
-    # a) Redピクセル((r+c)%2 == 0)を並列更新
     _propagate_spatial_one_color_jit(
         depth_map, normal_map, cost_map, neighbors_dr, neighbors_dc, 0,
         patch_size, top_k_costs, adaptive_weight_sigma_color,
         ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
         src_images_gray, src_K, src_R, src_T
     )
-
-    # b) Blackピクセル((r+c)%2 == 1)を並列更新
     _propagate_spatial_one_color_jit(
         depth_map, normal_map, cost_map, neighbors_dr, neighbors_dc, 1,
         patch_size, top_k_costs, adaptive_weight_sigma_color,
@@ -252,21 +247,20 @@ def _patchmatch_iteration_jit(
         src_images_gray, src_K, src_R, src_T
     )
 
-    # --- 2. ランダムサンプル探索 (並列化) ---
-    current_decay = decay_rate**iteration
+    # --- 2. ランダムサンプル探索 ---
     for r in prange(h):
         for c in range(w):
             if not np.isfinite(depth_map[r, c]):
                 continue
             d_current = depth_map[r, c]
-            d_range = (depth_error_map[r, c]) * current_decay
+            d_range = depth_range_map[r, c]
             d_new = d_current + (np.random.rand() * 2 - 1) * d_range
             if d_new <= 0:
                 continue
-            
+
             n_current = normal_map[r, c]
             angle_rad = np.radians(
-                (np.random.rand() * 2 - 1) * normal_search_angle * current_decay
+                (np.random.rand() * 2 - 1) * normal_search_angle * (decay_rate ** iteration)
             )
             rand_axis = np.random.randn(3).astype(np.float32)
             rand_axis /= np.linalg.norm(rand_axis)
@@ -291,77 +285,37 @@ def _patchmatch_iteration_jit(
 
 
 @njit(parallel=True)
+def _patchmatch_iteration_jit(
+    depth_map, normal_map, cost_map, depth_error_map, iteration, patch_size,
+    top_k_costs, decay_rate, normal_search_angle, ref_image_gray,
+    ref_pose_K, ref_pose_R, ref_pose_T, src_images_gray, src_K, src_R, src_T,
+    adaptive_weight_sigma_color
+):
+    depth_range_map = (depth_error_map * (decay_rate ** iteration)).astype(np.float32)
+    _patchmatch_iteration_common_jit(
+        depth_map, normal_map, cost_map, iteration, patch_size, top_k_costs,
+        decay_rate, normal_search_angle, ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
+        src_images_gray, src_K, src_R, src_T, adaptive_weight_sigma_color,
+        depth_range_map
+    )
+
+
+@njit
 def _patchmatch_iteration_vanilla_jit(
     depth_map, normal_map, cost_map, iteration, patch_size, top_k_costs,
     initial_search_range, decay_rate, normal_search_angle, ref_image_gray,
     ref_pose_K, ref_pose_R, ref_pose_T, src_images_gray, src_K, src_R, src_T,
     adaptive_weight_sigma_color
 ):
+    # 全ピクセル同じ範囲
     h, w = depth_map.shape
-    
-    # --- 1. 空間伝播 ---
-    if iteration % 2 == 0:
-        # 順方向パス
-        neighbors_dr = np.array([-1, 0], dtype=np.int8)
-        neighbors_dc = np.array([0, -1], dtype=np.int8)
-    else:
-        # 逆方向パス
-        neighbors_dr = np.array([1, 0], dtype=np.int8)
-        neighbors_dc = np.array([0, 1], dtype=np.int8)
-
-    # a) Redピクセルを並列更新
-    _propagate_spatial_one_color_jit(
-        depth_map, normal_map, cost_map, neighbors_dr, neighbors_dc, 0,
-        patch_size, top_k_costs, adaptive_weight_sigma_color,
-        ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
-        src_images_gray, src_K, src_R, src_T
+    depth_range_map = np.full((h, w), initial_search_range * (decay_rate ** iteration), dtype=np.float32)
+    _patchmatch_iteration_common_jit(
+        depth_map, normal_map, cost_map, iteration, patch_size, top_k_costs,
+        decay_rate, normal_search_angle, ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
+        src_images_gray, src_K, src_R, src_T, adaptive_weight_sigma_color,
+        depth_range_map
     )
-
-    # b) Blackピクセルを並列更新
-    _propagate_spatial_one_color_jit(
-        depth_map, normal_map, cost_map, neighbors_dr, neighbors_dc, 1,
-        patch_size, top_k_costs, adaptive_weight_sigma_color,
-        ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
-        src_images_gray, src_K, src_R, src_T
-    )
-
-    # --- 2. ランダムサンプル探索 (並列化) ---
-    current_decay = decay_rate**iteration
-    for r in prange(h):
-        for c in range(w):
-            if not np.isfinite(depth_map[r, c]):
-                continue
-
-            d_current = depth_map[r, c]
-            d_range = initial_search_range * current_decay
-            d_new = d_current + (np.random.rand() * 2 - 1) * d_range
-            if d_new <= 0:
-                continue
-
-            n_current = normal_map[r, c]
-            angle_rad = np.radians(
-                (np.random.rand() * 2 - 1) * normal_search_angle * current_decay
-            )
-            rand_axis = np.random.randn(3).astype(np.float32)
-            rand_axis /= np.linalg.norm(rand_axis)
-            cos_a, sin_a = np.float32(np.cos(angle_rad)), np.float32(np.sin(angle_rad))
-            one_minus_cos_a = np.float32(1.0) - cos_a
-            n_new = (
-                n_current * cos_a
-                + np.cross(rand_axis, n_current) * sin_a
-                + rand_axis * np.dot(rand_axis, n_current) * one_minus_cos_a
-            )
-            n_new /= np.linalg.norm(n_new)
-
-            new_cost = _evaluate_cost_jit(
-                r, c, d_new, n_new, patch_size, ref_image_gray,
-                ref_pose_K, ref_pose_R, ref_pose_T, src_images_gray,
-                src_K, src_R, src_T, top_k_costs, adaptive_weight_sigma_color
-            )
-            if new_cost < cost_map[r, c]:
-                depth_map[r, c], normal_map[r, c], cost_map[r, c] = (
-                    d_new, n_new, new_cost
-                )
 
 
 @njit(parallel=True)
