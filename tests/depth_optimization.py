@@ -161,24 +161,38 @@ def _evaluate_cost_jit(
 
 @njit(parallel=True, fastmath=True)
 def _propagate_spatial_one_color_jit(
-    depth_map, normal_map, cost_map,  # 更新対象のマップ
-    neighbors_dr, neighbors_dc,       # 伝播方向 (NumPy配列に修正)
-    color,                           # 対象の色
+    depth_map,
+    normal_map,
+    cost_map,  # 更新対象のマップ
+    neighbors_dr,
+    neighbors_dc,  # 伝播方向 (NumPy配列に修正)
+    color,  # 対象の色
+    r_min,
+    r_max,
+    c_min,
+    c_max,  # 処理範囲
     # パラメータ
-    patch_size, top_k_costs, adaptive_weight_sigma_color,
+    patch_size,
+    top_k_costs,
+    adaptive_weight_sigma_color,
     # 参照ビューのデータ
-    ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
     # ソースビューのデータ
-    src_images_gray, src_K, src_R, src_T
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
 ):
     """
-    チェッカーボードの一つの色（赤または黒）のピクセルに対して空間伝播を実行する。
-    この関数は完全に並列化可能。
+    指定された範囲のチェッカーボードの一つの色（赤または黒）のピクセルに対して空間伝播を実行する。
     """
     h, w = depth_map.shape
-    # 全てのピクセルを並列で処理
-    for r in prange(1, h - 1):
-        for c in range(1, w - 1):
+    # 指定された範囲のピクセルを並列で処理
+    for r in prange(max(1, r_min), min(h - 1, r_max)):
+        for c in range(max(1, c_min), min(w - 1, c_max)):
             # 対象の色（赤 or 黒）のピクセルのみを処理
             if (r + c) % 2 != color:
                 continue
@@ -187,11 +201,16 @@ def _propagate_spatial_one_color_jit(
                 continue
 
             # 隣接ピクセルからより良い平面（深度と法線）を伝播させる
-            # (修正点) NumPy配列を使ってループ
             for i in range(len(neighbors_dr)):
                 dr = neighbors_dr[i]
                 dc = neighbors_dc[i]
                 nr, nc = r + dr, c + dc
+
+                # 【改善点①】グリッド境界チェックを削除。伝播がグリッドを越えて広がるようにする。
+                # 画像境界のチェックはループ範囲(max(1, r_min)など)で暗黙的に行われているため、
+                # ここでの明示的なチェックは不要。
+                # if not (r_min <= nr < r_max and c_min <= nc < c_max):
+                #     continue
 
                 neighbor_depth = depth_map[nr, nc]
                 if not np.isfinite(neighbor_depth):
@@ -200,11 +219,21 @@ def _propagate_spatial_one_color_jit(
                 # 現在のピクセル(r, c)の位置で、隣接ピクセル(nr, nc)の平面を評価
                 neighbor_normal = normal_map[nr, nc]
                 new_cost = _evaluate_cost_jit(
-                    r, c, neighbor_depth, neighbor_normal,
-                    patch_size, ref_image_gray,
-                    ref_pose_K, ref_pose_R, ref_pose_T,
-                    src_images_gray, src_K, src_R, src_T,
-                    top_k_costs, adaptive_weight_sigma_color
+                    r,
+                    c,
+                    neighbor_depth,
+                    neighbor_normal,
+                    patch_size,
+                    ref_image_gray,
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_images_gray,
+                    src_K,
+                    src_R,
+                    src_T,
+                    top_k_costs,
+                    adaptive_weight_sigma_color,
                 )
 
                 # コストが改善されれば、現在のピクセルの平面を更新
@@ -214,40 +243,29 @@ def _propagate_spatial_one_color_jit(
                     cost_map[r, c] = new_cost
 
 
-@njit(parallel=True)
-def _patchmatch_iteration_common_jit(
-    depth_map, normal_map, cost_map,
-    iteration, patch_size, top_k_costs,
-    decay_rate, normal_search_angle,
-    ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
-    src_images_gray, src_K, src_R, src_T,
+@njit(parallel=True, fastmath=True)
+def _random_search_jit(
+    depth_map,
+    normal_map,
+    cost_map,
+    iteration,
+    patch_size,
+    top_k_costs,
+    decay_rate,
+    normal_search_angle,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
     adaptive_weight_sigma_color,
-    depth_range_map  # ← 追加: 各ピクセルごとの深度サンプリング幅
+    depth_range_map,
 ):
+    """画像全体に対してランダム探索を実行する"""
     h, w = depth_map.shape
-
-    # --- 1. 空間伝播 ---
-    if iteration % 2 == 0:
-        neighbors_dr = np.array([-1, 0], dtype=np.int8)
-        neighbors_dc = np.array([0, -1], dtype=np.int8)
-    else:
-        neighbors_dr = np.array([1, 0], dtype=np.int8)
-        neighbors_dc = np.array([0, 1], dtype=np.int8)
-
-    _propagate_spatial_one_color_jit(
-        depth_map, normal_map, cost_map, neighbors_dr, neighbors_dc, 0,
-        patch_size, top_k_costs, adaptive_weight_sigma_color,
-        ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
-        src_images_gray, src_K, src_R, src_T
-    )
-    _propagate_spatial_one_color_jit(
-        depth_map, normal_map, cost_map, neighbors_dr, neighbors_dc, 1,
-        patch_size, top_k_costs, adaptive_weight_sigma_color,
-        ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
-        src_images_gray, src_K, src_R, src_T
-    )
-
-    # --- 2. ランダムサンプル探索 ---
     for r in prange(h):
         for c in range(w):
             if not np.isfinite(depth_map[r, c]):
@@ -260,7 +278,9 @@ def _patchmatch_iteration_common_jit(
 
             n_current = normal_map[r, c]
             angle_rad = np.radians(
-                (np.random.rand() * 2 - 1) * normal_search_angle * (decay_rate ** iteration)
+                (np.random.rand() * 2 - 1)
+                * normal_search_angle
+                * (decay_rate**iteration)
             )
             rand_axis = np.random.randn(3).astype(np.float32)
             rand_axis /= np.linalg.norm(rand_axis)
@@ -274,48 +294,28 @@ def _patchmatch_iteration_common_jit(
             n_new /= np.linalg.norm(n_new)
 
             new_cost = _evaluate_cost_jit(
-                r, c, d_new, n_new, patch_size, ref_image_gray,
-                ref_pose_K, ref_pose_R, ref_pose_T, src_images_gray,
-                src_K, src_R, src_T, top_k_costs, adaptive_weight_sigma_color
+                r,
+                c,
+                d_new,
+                n_new,
+                patch_size,
+                ref_image_gray,
+                ref_pose_K,
+                ref_pose_R,
+                ref_pose_T,
+                src_images_gray,
+                src_K,
+                src_R,
+                src_T,
+                top_k_costs,
+                adaptive_weight_sigma_color,
             )
             if new_cost < cost_map[r, c]:
                 depth_map[r, c], normal_map[r, c], cost_map[r, c] = (
-                    d_new, n_new, new_cost
+                    d_new,
+                    n_new,
+                    new_cost,
                 )
-
-
-@njit(parallel=True)
-def _patchmatch_iteration_jit(
-    depth_map, normal_map, cost_map, depth_error_map, iteration, patch_size,
-    top_k_costs, decay_rate, normal_search_angle, ref_image_gray,
-    ref_pose_K, ref_pose_R, ref_pose_T, src_images_gray, src_K, src_R, src_T,
-    adaptive_weight_sigma_color
-):
-    depth_range_map = (depth_error_map * (decay_rate ** iteration)).astype(np.float32)
-    _patchmatch_iteration_common_jit(
-        depth_map, normal_map, cost_map, iteration, patch_size, top_k_costs,
-        decay_rate, normal_search_angle, ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
-        src_images_gray, src_K, src_R, src_T, adaptive_weight_sigma_color,
-        depth_range_map
-    )
-
-
-@njit
-def _patchmatch_iteration_vanilla_jit(
-    depth_map, normal_map, cost_map, iteration, patch_size, top_k_costs,
-    initial_search_range, decay_rate, normal_search_angle, ref_image_gray,
-    ref_pose_K, ref_pose_R, ref_pose_T, src_images_gray, src_K, src_R, src_T,
-    adaptive_weight_sigma_color
-):
-    # 全ピクセル同じ範囲
-    h, w = depth_map.shape
-    depth_range_map = np.full((h, w), initial_search_range * (decay_rate ** iteration), dtype=np.float32)
-    _patchmatch_iteration_common_jit(
-        depth_map, normal_map, cost_map, iteration, patch_size, top_k_costs,
-        decay_rate, normal_search_angle, ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
-        src_images_gray, src_K, src_R, src_T, adaptive_weight_sigma_color,
-        depth_range_map
-    )
 
 
 @njit(parallel=True)
@@ -539,7 +539,7 @@ class DepthOptimization:
         ref_idx=0,
     ):
         logging.info(
-            "Starting PatchMatch MVS depth refinement with Adaptive Weighting..."
+            f"Starting PatchMatch MVS depth refinement using '{self.config.CHOICED_PROPAGATION_METHOD}' method..."
         )
 
         h, w = initial_depth.shape
@@ -548,79 +548,7 @@ class DepthOptimization:
             depth_map, ref_pose["K"].astype(np.float32)
         )
 
-        if self.config.DEBUG_PATCH_MATCH_VISUALIZATION:
-            debug_r, debug_c = self.config.DEBUG_PIXEL_COORDS
-            if not (
-                0 <= debug_r < h
-                and 0 <= debug_c < w
-                and np.isfinite(depth_map[debug_r, debug_c])
-            ):
-                logging.error(
-                    f"Debug pixel ({debug_r}, {debug_c}) is out of bounds or has invalid depth. Aborting debug."
-                )
-                return initial_depth
-
-            logging.warning(
-                f"--- RUNNING IN DEBUG VISUALIZATION MODE FOR PIXEL ({debug_r}, {debug_c}) ---"
-            )
-
-            d_init, n_init = depth_map[debug_r, debug_c], normal_map[debug_r, debug_c]
-
-            print("\n--- [DEBUG] 1. Initial State ---")
-            self._debug_patch_visualization(
-                debug_r,
-                debug_c,
-                d_init,
-                n_init,
-                ref_image,
-                ref_pose,
-                neighbor_views_data,
-                "Initial State",
-            )
-            print(
-                ">>> Press any key in a visualization window to continue to random samples..."
-            )
-            cv2.waitKey(0)
-
-            print("\n--- [DEBUG] 2. Random Samples ---")
-            d_range = (
-                self.config.PATCHMATCH_BASE_ERROR
-                + self.config.PATCHMATCH_ERROR_WEIGHT
-                * initial_depth_error[debug_r, debug_c]
-            )
-            d_new = d_init + (np.random.rand() * 2 - 1) * d_range
-            angle_rad = np.radians(
-                (np.random.rand() * 2 - 1) * self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE
-            )
-            rand_axis = np.random.randn(3)
-            rand_axis /= np.linalg.norm(rand_axis)
-            cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
-            n_new = (
-                n_init * cos_a
-                + np.cross(rand_axis, n_init) * sin_a
-                + rand_axis * np.dot(rand_axis, n_init) * (1 - cos_a)
-            )
-
-            self._debug_patch_visualization(
-                debug_r,
-                debug_c,
-                d_new,
-                n_new,
-                ref_image,
-                ref_pose,
-                neighbor_views_data,
-                f"Random Sample",
-            )
-            print(">>> Press any key to see the next sample...")
-            cv2.waitKey(0)
-
-            cv2.destroyAllWindows()
-            logging.warning(
-                "--- Exiting after debug visualization. Full optimization was SKIPPED. ---"
-            )
-            return initial_depth
-
-        # --- 通常の高速な最適化処理 ---
+        # --- JITコンパイル用にデータを準備 ---
         ref_image_gray = cv2.cvtColor(ref_image, cv2.COLOR_RGB2GRAY).astype(np.float32)
         ref_pose_K, ref_pose_R, ref_pose_T = (
             ref_pose["K"].astype(np.float32),
@@ -644,20 +572,162 @@ class DepthOptimization:
             [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
         )
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
-
         depth_map_prev = np.zeros_like(depth_map)
         convergence_threshold = 0.001
+
+        # --- 優先度伝播のための前計算 ---
+        sorted_grid_indices = None
+        if self.config.CHOICED_PROPAGATION_METHOD == "priority":
+            logging.info("Calculating grid costs for priority propagation...")
+            grid_rows = self.config.PROPAGATION_GRID_ROWS
+            grid_cols = self.config.PROPAGATION_GRID_COLS
+            grid_h = h // grid_rows
+            grid_w = w // grid_cols
+            grid_costs = np.full((grid_rows, grid_cols), np.inf, dtype=np.float32)
+
+            for r_idx in range(grid_rows):
+                for c_idx in range(grid_cols):
+                    r_start = r_idx * grid_h
+                    r_end = (r_idx + 1) * grid_h
+                    c_start = c_idx * grid_w
+                    c_end = (c_idx + 1) * grid_w
+                    grid_patch = initial_depth_error[r_start:r_end, c_start:c_end]
+                    valid_costs = grid_patch[np.isfinite(grid_patch)]
+                    if len(valid_costs) > 0:
+                        grid_costs[r_idx, c_idx] = np.median(valid_costs)
+
+            sorted_grid_indices = np.argsort(grid_costs.flatten())
+
+        # --- PatchMatch反復ループ ---
         for i in range(self.config.PATCHMATCH_ITERATIONS):
             np.copyto(depth_map_prev, depth_map)
             logging.info(
                 f"PatchMatch Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
             )
 
-            _patchmatch_iteration_jit(
+            # --- 1. 空間伝播 ---
+            if i % 2 == 0:
+                neighbors_dr = np.array([-1, 0], dtype=np.int8)
+                neighbors_dc = np.array([0, -1], dtype=np.int8)
+            else:
+                neighbors_dr = np.array([1, 0], dtype=np.int8)
+                neighbors_dc = np.array([0, 1], dtype=np.int8)
+
+            if self.config.CHOICED_PROPAGATION_METHOD == "checkerboard":
+                _propagate_spatial_one_color_jit(
+                    depth_map,
+                    normal_map,
+                    cost_map,
+                    neighbors_dr,
+                    neighbors_dc,
+                    0,
+                    0,
+                    h,
+                    0,
+                    w,
+                    self.config.PATCHMATCH_PATCH_SIZE,
+                    self.config.TOP_K_COSTS,
+                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                    ref_image_gray,
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_images_gray,
+                    src_K,
+                    src_R,
+                    src_T,
+                )
+                _propagate_spatial_one_color_jit(
+                    depth_map,
+                    normal_map,
+                    cost_map,
+                    neighbors_dr,
+                    neighbors_dc,
+                    1,
+                    0,
+                    h,
+                    0,
+                    w,
+                    self.config.PATCHMATCH_PATCH_SIZE,
+                    self.config.TOP_K_COSTS,
+                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                    ref_image_gray,
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_images_gray,
+                    src_K,
+                    src_R,
+                    src_T,
+                )
+            elif self.config.CHOICED_PROPAGATION_METHOD == "priority":
+                grid_rows, grid_cols = (
+                    self.config.PROPAGATION_GRID_ROWS,
+                    self.config.PROPAGATION_GRID_COLS,
+                )
+                grid_h, grid_w = h // grid_rows, w // grid_cols
+                for grid_flat_idx in sorted_grid_indices:
+                    r_idx, c_idx = np.unravel_index(
+                        grid_flat_idx, (grid_rows, grid_cols)
+                    )
+                    r_start, r_end = r_idx * grid_h, (r_idx + 1) * grid_h
+                    c_start, c_end = c_idx * grid_w, (c_idx + 1) * grid_w
+
+                    _propagate_spatial_one_color_jit(
+                        depth_map,
+                        normal_map,
+                        cost_map,
+                        neighbors_dr,
+                        neighbors_dc,
+                        0,
+                        r_start,
+                        r_end,
+                        c_start,
+                        c_end,
+                        self.config.PATCHMATCH_PATCH_SIZE,
+                        self.config.TOP_K_COSTS,
+                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                        ref_image_gray,
+                        ref_pose_K,
+                        ref_pose_R,
+                        ref_pose_T,
+                        src_images_gray,
+                        src_K,
+                        src_R,
+                        src_T,
+                    )
+                    _propagate_spatial_one_color_jit(
+                        depth_map,
+                        normal_map,
+                        cost_map,
+                        neighbors_dr,
+                        neighbors_dc,
+                        1,
+                        r_start,
+                        r_end,
+                        c_start,
+                        c_end,
+                        self.config.PATCHMATCH_PATCH_SIZE,
+                        self.config.TOP_K_COSTS,
+                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                        ref_image_gray,
+                        ref_pose_K,
+                        ref_pose_R,
+                        ref_pose_T,
+                        src_images_gray,
+                        src_K,
+                        src_R,
+                        src_T,
+                    )
+
+            # --- 2. ランダム探索 ---
+            depth_range_map = (
+                initial_depth_error * (self.config.PATCHMATCH_DECAY_RATE**i)
+            ).astype(np.float32)
+            _random_search_jit(
                 depth_map,
                 normal_map,
                 cost_map,
-                initial_depth_error.astype(np.float32),
                 i,
                 self.config.PATCHMATCH_PATCH_SIZE,
                 self.config.TOP_K_COSTS,
@@ -672,6 +742,7 @@ class DepthOptimization:
                 src_R,
                 src_T,
                 self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                depth_range_map,
             )
 
             if self.config.DEBUG_SAVE_DEPTH_MAPS:
@@ -687,7 +758,11 @@ class DepthOptimization:
 
             # --- 収束チェック ---
             diff = np.abs(depth_map_prev - depth_map)
-            valid_mask = np.isfinite(depth_map_prev) & (depth_map_prev != 0) & np.isfinite(depth_map)
+            valid_mask = (
+                np.isfinite(depth_map_prev)
+                & (depth_map_prev != 0)
+                & np.isfinite(depth_map)
+            )
             if np.sum(valid_mask) > 0:
                 mean_change = np.mean(diff[valid_mask] / depth_map_prev[valid_mask])
                 logging.info(f"Average depth change: {mean_change:.5f}")
@@ -698,7 +773,6 @@ class DepthOptimization:
                     break
             else:
                 logging.warning("No valid pixels for convergence check.")
-
 
         logging.info("PatchMatch MVS refinement finished.")
         return depth_map
@@ -755,14 +829,75 @@ class DepthOptimization:
                 f"Vanilla PatchMatch Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
             )
 
-            _patchmatch_iteration_vanilla_jit(
+            # --- 空間伝播 ---
+            if i % 2 == 0:
+                neighbors_dr = np.array([-1, 0], dtype=np.int8)
+                neighbors_dc = np.array([0, -1], dtype=np.int8)
+            else:
+                neighbors_dr = np.array([1, 0], dtype=np.int8)
+                neighbors_dc = np.array([0, 1], dtype=np.int8)
+
+            _propagate_spatial_one_color_jit(
+                depth_map,
+                normal_map,
+                cost_map,
+                neighbors_dr,
+                neighbors_dc,
+                0,
+                0,
+                h,
+                0,
+                w,
+                self.config.PATCHMATCH_PATCH_SIZE,
+                self.config.TOP_K_COSTS,
+                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                ref_image_gray,
+                ref_pose_K,
+                ref_pose_R,
+                ref_pose_T,
+                src_images_gray,
+                src_K,
+                src_R,
+                src_T,
+            )
+            _propagate_spatial_one_color_jit(
+                depth_map,
+                normal_map,
+                cost_map,
+                neighbors_dr,
+                neighbors_dc,
+                1,
+                0,
+                h,
+                0,
+                w,
+                self.config.PATCHMATCH_PATCH_SIZE,
+                self.config.TOP_K_COSTS,
+                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                ref_image_gray,
+                ref_pose_K,
+                ref_pose_R,
+                ref_pose_T,
+                src_images_gray,
+                src_K,
+                src_R,
+                src_T,
+            )
+
+            # --- ランダム探索 ---
+            depth_range_map = np.full(
+                (h, w),
+                self.config.PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE
+                * (self.config.PATCHMATCH_DECAY_RATE**i),
+                dtype=np.float32,
+            )
+            _random_search_jit(
                 depth_map,
                 normal_map,
                 cost_map,
                 i,
                 self.config.PATCHMATCH_PATCH_SIZE,
                 self.config.TOP_K_COSTS,
-                self.config.PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE,
                 self.config.PATCHMATCH_DECAY_RATE,
                 self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE,
                 ref_image_gray,
@@ -774,6 +909,7 @@ class DepthOptimization:
                 src_R,
                 src_T,
                 self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                depth_range_map,
             )
 
             # イテレーションごとのデプスマップ保存
