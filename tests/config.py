@@ -91,9 +91,7 @@ ZNCC_EPSILON = 1e-6
 TOP_K_COSTS = 3
 
 # --- 適応的ランダム探索のパラメータ ---
-# 探索範囲のイテレーションごとの減衰率
 PATCHMATCH_DECAY_RATE = 0.9
-# 法線探索の角度範囲(degree)の初期値
 PATCHMATCH_NORMAL_SEARCH_ANGLE = 20.0
 
 ADAPTIVE_WEIGHT_SIGMA_COLOR = 10
@@ -109,6 +107,10 @@ PATCHMATCH_VANILLA_MAX_DEPTH = 50.0  # meters
 # ランダム探索の初期探索幅
 PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE = 50.0  # meters
 
-# 伝播の方法
+# --- 伝播の方法の選択 ---
 PROPAGATION_METHOD = ["checkerboard", "priority"]
-CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[0]
+CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[1]
+
+# --- 優先度付き伝播のパラメータ ---
+PROPAGATION_GRID_ROWS = 5  # グリッドの行数
+PROPAGATION_GRID_COLS = 5  # グリッドの列数
