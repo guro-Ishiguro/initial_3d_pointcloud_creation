@@ -36,16 +36,20 @@ if __name__ == "__main__":
 
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
 
-    target_indices = [38]
-    # target_indices = list(range(len(all_pairs_data)))
+    # config.pyでTARGET_INDICESが定義されていればそれを使う
+    if hasattr(config, "TARGET_INDICES") and config.TARGET_INDICES:
+        target_indices = config.TARGET_INDICES
+    else:
+        target_indices = list(range(len(all_pairs_data)))
 
     logging.info(f"Targeting specific image indices for processing: {target_indices}")
 
     # --- パフォーマンス向上のため、必要な画像を事前に一括ロード ---
     image_indices_to_load = set()
+    neighbor_view_offsets = (-2, -1, 1, 2)  # 近傍ビューのオフセット
     for idx in target_indices:
         image_indices_to_load.add(idx)
-        for offset in (-2, -1, 1, 2):  # 近傍ビューもロード対象
+        for offset in neighbor_view_offsets:
             neighbor_idx = idx + offset
             if 0 <= neighbor_idx < len(all_pairs_data):
                 image_indices_to_load.add(neighbor_idx)
@@ -57,16 +61,19 @@ if __name__ == "__main__":
         if img is not None:
             loaded_images[idx] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    merged_pts_list, merged_cols_list = [], []
+    # --- ステップ1: 各ビューの深度マップを最適化 & 光度フィルタリング ---
+    logging.info(
+        "\n--- Step 1: Optimizing depth maps and applying photometric filter ---"
+    )
+    all_optimized_depths = {}
 
-    # --- 各画像ペアの処理ループ ---
     for idx in target_indices:
         if idx not in loaded_images:
             logging.warning(f"Image for index {idx} could not be loaded. Skipping.")
             continue
 
         _, T_pos, left_path, right_path, R_mat = all_pairs_data[idx]
-        logging.info(f"Processing image pair {idx}...")
+        logging.info(f"Optimizing depth map for image pair {idx}...")
 
         try:
             li_bgr = cv2.imread(left_path)
@@ -95,13 +102,11 @@ if __name__ == "__main__":
             )
             initial_depth[bmask] = np.nan
             d_cost[bmask] = np.nan
-            # NaNのコストを大きな値に置き換える
             d_cost[np.isnan(d_cost)] = 1.0
 
             # 2. PatchMatchによる深度マップの最適化
-            #    近傍ビューのデータを準備する
             neighbor_views_data = []
-            for offset in (-2, -1, 1, 2):
+            for offset in neighbor_view_offsets:
                 neighbor_idx = idx + offset
                 if (
                     0 <= neighbor_idx < len(all_pairs_data)
@@ -111,6 +116,7 @@ if __name__ == "__main__":
                     neighbor_views_data.append(
                         {
                             "image": loaded_images[neighbor_idx],
+                            "image_idx": neighbor_idx,  # 幾何学フィルタで使うためインデックスを追加
                             "R": R_n,
                             "T": T_n,
                             "K": config.K,
@@ -139,36 +145,103 @@ if __name__ == "__main__":
                 ref_idx=idx,
             )
 
-            # optimized_depth = depth_optimization.refine_depth_with_patchmatch_vanilla(
-            #     ref_image=li_rgb,
-            #     ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
-            #     neighbor_views_data=neighbor_views_data,
-            #     ref_idx=idx,
-            # )
-
-            optimized_depth = depth_optimization.filter_depth_map(
+            # 3. 光度一貫性フィルタリング
+            photometrically_filtered_depth = depth_optimization.filter_depth_map(
                 optimized_depth,
                 li_rgb,
                 {"R": R_mat, "T": T_pos, "K": config.K},
-                neighbor_views_data
+                neighbor_views_data,
             )
 
             if config.DEBUG_SAVE_DEPTH_MAPS:
-                save_filtered_depth_path = os.path.join(
-                    save_each_depth_dir, f"filtered_depth.png"
+                save_photometric_filtered_depth_path = os.path.join(
+                    save_each_depth_dir, f"photometric_filtered_depth.png"
                 )
-                logging.info(f"Saving filtered depth map to {save_filtered_depth_path}")
-                save_depth_map_as_image(optimized_depth, save_filtered_depth_path)
+                logging.info(
+                    f"Saving photometrically filtered depth map to {save_photometric_filtered_depth_path}"
+                )
+                save_depth_map_as_image(
+                    photometrically_filtered_depth,
+                    save_photometric_filtered_depth_path,
+                )
 
-            # 3. 中心投影深度マップを正射投影深度マップに変換
-            logging.info(
-                f"Converting perspective depth map to orthographic for image {idx}..."
+            all_optimized_depths[idx] = photometrically_filtered_depth
+            logging.info(f"Stored photometrically filtered depth map for index {idx}.")
+
+        except Exception as e:
+            logging.error(f"Error in Step 1 for image pair {idx}: {e}", exc_info=True)
+
+    # --- ステップ2: 幾何学的一貫性フィルタリングと点群生成 ---
+    logging.info(
+        "\n--- Step 2: Applying geometric consistency filter and generating point clouds ---"
+    )
+    merged_pts_list, merged_cols_list = [], []
+
+    for idx in target_indices:
+        if idx not in all_optimized_depths:
+            logging.warning(
+                f"No optimized depth map for index {idx}. Skipping point cloud generation."
             )
+            continue
+
+        logging.info(f"Generating point cloud for image pair {idx}...")
+
+        try:
+            _, T_pos, _, _, R_mat = all_pairs_data[idx]
+            li_rgb = loaded_images[idx]
+
+            ref_depth_map = all_optimized_depths[idx]
+
+            # 近傍ビューのデータ準備 (再)
+            neighbor_views_data = []
+            for offset in neighbor_view_offsets:
+                neighbor_idx = idx + offset
+                if (
+                    0 <= neighbor_idx < len(all_pairs_data)
+                    and neighbor_idx in loaded_images
+                ):
+                    _, T_n, _, _, R_n = all_pairs_data[neighbor_idx]
+                    neighbor_views_data.append(
+                        {
+                            "image": loaded_images[neighbor_idx],
+                            "image_idx": neighbor_idx,
+                            "R": R_n,
+                            "T": T_n,
+                            "K": config.K,
+                        }
+                    )
+
+            # 4. 幾何学的一貫性フィルタリング
+            geometrically_filtered_depth = (
+                depth_optimization.filter_depth_map_by_geometric_consistency(
+                    ref_depth_map=ref_depth_map,
+                    ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
+                    neighbor_views_data=neighbor_views_data,
+                    all_optimized_depths=all_optimized_depths,
+                )
+            )
+
+            if config.DEBUG_SAVE_DEPTH_MAPS:
+                save_each_depth_dir = os.path.join(
+                    config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}"
+                )
+                os.makedirs(save_each_depth_dir, exist_ok=True)
+                save_geometric_filtered_depth_path = os.path.join(
+                    save_each_depth_dir, f"geometric_filtered_depth.png"
+                )
+                logging.info(
+                    f"Saving geometrically filtered depth map to {save_geometric_filtered_depth_path}"
+                )
+                save_depth_map_as_image(
+                    geometrically_filtered_depth, save_geometric_filtered_depth_path
+                )
+
+            # 5. 中心投影深度マップを正射投影深度マップに変換
             (
                 ortho_depth_map,
                 ortho_color_map,
             ) = depth_estimator.to_orthographic_projection(
-                optimized_depth, li_rgb, config.camera_height
+                geometrically_filtered_depth, li_rgb, config.camera_height
             )
 
             if config.DEBUG_SAVE_DEPTH_MAPS:
@@ -180,10 +253,7 @@ if __name__ == "__main__":
                 )
                 save_depth_map_as_image(ortho_depth_map, save_ortho_optimized_depth)
 
-            # 4. 正射投影深度マップをワールド座標の点群に変換
-            logging.info(
-                f"Converting orthographic depth map to world coordinates for image {idx}..."
-            )
+            # 6. 正射投影深度マップをワールド座標の点群に変換
             world_points, world_colors = depth_estimator.ortho_depth_to_world(
                 ortho_depth_map,
                 ortho_color_map,
@@ -192,26 +262,27 @@ if __name__ == "__main__":
                 config.pixel_size,
             )
             logging.info(
-                f"Generated {world_points.shape[0]} points for image {idx} from orthographic map."
+                f"Generated {world_points.shape[0]} points for image {idx} after geometric filtering."
             )
 
             merged_pts_list.append(world_points)
             merged_cols_list.append(world_colors)
 
         except Exception as e:
-            logging.error(f"Error processing image pair {idx}: {e}", exc_info=True)
+            logging.error(f"Error in Step 2 for image pair {idx}: {e}", exc_info=True)
 
-    # --- 全点群の統合と保存 ---
+    # --- ステップ3: 全点群の統合と保存 ---
+    logging.info("\n--- Step 3: Integrating and saving the final point cloud ---")
     if merged_pts_list:
         logging.info("Integrating all point clouds...")
         (
-            merged_pts_list,
-            merged_cols_list,
+            merged_pts,
+            merged_cols,
         ) = point_cloud_integrator.integrate_depth_maps_median(
             merged_pts_list, merged_cols_list
         )
         final_pcd = point_cloud_integrator.process_and_save_final_point_cloud(
-            merged_pts_list, merged_cols_list, config.POINT_CLOUD_FILE_PATH
+            merged_pts, merged_cols, config.POINT_CLOUD_FILE_PATH
         )
         if final_pcd and len(final_pcd.points) > 0:
             logging.info(

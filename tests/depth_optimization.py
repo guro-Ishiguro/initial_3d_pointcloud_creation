@@ -446,44 +446,39 @@ def _random_search_jit(
 
 @njit(fastmath=True)
 def _check_geometric_consistency_jit(
-    r_ref, c_ref, d_ref, K_ref, R_ref, T_ref, neighbor_poses, neighbor_depth_maps
+    point_3d_world, neighbor_K_np, neighbor_R_np, neighbor_T_np, neighbor_depth_maps_np
 ):
     """
-    参照ピクセルの深度値が、近傍ビューの深度マップと幾何学的に一貫しているかチェックする
+    単一の3Dポイントが、近傍ビューの深度マップと幾何学的に一貫しているかチェックする
     """
     consistent_views = 0
-    h, w = neighbor_depth_maps[0].shape
-
-    # 参照ビューのカメラ座標系での3D点を計算
-    x_cam_ref = (c_ref - K_ref[0, 2]) * d_ref / K_ref[0, 0]
-    y_cam_ref = (r_ref - K_ref[1, 2]) * d_ref / K_ref[1, 1]
-    point_3d_cam_ref = np.array([x_cam_ref, y_cam_ref, d_ref], dtype=np.float32)
-
-    # ワールド座標に変換
-    point_3d_world = R_ref.T @ (point_3d_cam_ref - T_ref)
+    h, w = neighbor_depth_maps_np[0].shape
 
     # 各近傍ビューでチェック
-    for i in range(len(neighbor_poses)):
-        K_src, R_src, T_src = neighbor_poses[i]
-        depth_map_src = neighbor_depth_maps[i]
+    for i in range(len(neighbor_K_np)):
+        K_src = neighbor_K_np[i]
+        R_src = neighbor_R_np[i]
+        T_src = neighbor_T_np[i]
+        depth_map_src = neighbor_depth_maps_np[i]
 
         # 近傍ビューのカメラ座標に変換
         p_src_cam = R_src @ point_3d_world + T_src
 
-        # カメラの後ろにある点は無視
-        if p_src_cam[2] <= 0:
-            continue
-
         # 近傍ビューの画像座標に投影
         p_src_img_h = K_src @ p_src_cam
-        d_proj_src = p_src_img_h[2]  # 逆投影された深度
+        d_proj_src = p_src_img_h[2]
+
+        # ゼロ除算を防ぎ、カメラの後ろにある点も無視する
+        if d_proj_src < 1e-6:
+            continue
+
         u_src, v_src = p_src_img_h[0] / d_proj_src, p_src_img_h[1] / d_proj_src
 
-        # 画像範囲外かチェック (整数座標に丸める前にチェック)
+        # 画像範囲外かチェック
         if not (0 <= u_src < w and 0 <= v_src < h):
             continue
 
-        # 最も近いピクセルの深度値を取得 (補間は複雑なので最近傍で)
+        # 最も近いピクセルの深度値を取得
         r_src, c_src = int(round(v_src)), int(round(u_src))
 
         if not (0 <= c_src < w and 0 <= r_src < h):
@@ -1222,50 +1217,63 @@ class DepthOptimization:
         h, w = ref_depth_map.shape
         filtered_depth_map = ref_depth_map.copy()
 
-        # JIT用にデータを準備
         K_ref = ref_pose["K"].astype(np.float32)
         R_ref = ref_pose["R"].astype(np.float32)
         T_ref = ref_pose["T"].astype(np.float32)
 
-        neighbor_poses = []
-        neighbor_depth_maps = []
+        # ゼロ除算のチェック
+        if abs(K_ref[0, 0]) < 1e-6 or abs(K_ref[1, 1]) < 1e-6:
+            logging.error("Focal length is zero. Aborting geometric consistency check.")
+            return ref_depth_map
+
+        # Numbaで効率的に扱えるよう、PythonリストではなくNumPy配列にデータをまとめる
+        neighbor_K_list = []
+        neighbor_R_list = []
+        neighbor_T_list = []
+        neighbor_depth_maps_list = []
+
         for view in neighbor_views_data:
             view_idx = view["image_idx"]
             if view_idx in all_optimized_depths:
-                neighbor_poses.append(
-                    (
-                        view["K"].astype(np.float32),
-                        view["R"].astype(np.float32),
-                        view["T"].astype(np.float32),
-                    )
-                )
-                neighbor_depth_maps.append(
+                neighbor_K_list.append(view["K"].astype(np.float32))
+                neighbor_R_list.append(view["R"].astype(np.float32))
+                neighbor_T_list.append(view["T"].astype(np.float32))
+                neighbor_depth_maps_list.append(
                     all_optimized_depths[view_idx].astype(np.float32)
                 )
 
-        if not neighbor_depth_maps:
+        if not neighbor_depth_maps_list:
             logging.warning(
                 "No neighbor depth maps available for geometric consistency check."
             )
             return filtered_depth_map
 
-        neighbor_depth_maps_np = np.stack(neighbor_depth_maps, axis=0)
+        # JIT関数に渡すためにリストをNumPy配列に変換
+        neighbor_K_np = np.stack(neighbor_K_list)
+        neighbor_R_np = np.stack(neighbor_R_list)
+        neighbor_T_np = np.stack(neighbor_T_list)
+        neighbor_depth_maps_np = np.stack(neighbor_depth_maps_list)
 
         failures = 0
-        for r in prange(h):
+        # prangeは共有メモリへの書き込みで競合を起こすため、rangeに変更
+        for r in range(h):
             for c in range(w):
                 d_ref = filtered_depth_map[r, c]
                 if not np.isfinite(d_ref) or d_ref <= 0:
                     continue
 
+                # 3Dポイントへの逆投影をループの外で一度だけ行う
+                x_cam_ref = (c - K_ref[0, 2]) * d_ref / K_ref[0, 0]
+                y_cam_ref = (r - K_ref[1, 2]) * d_ref / K_ref[1, 1]
+                point_3d_cam_ref = np.array([x_cam_ref, y_cam_ref, d_ref], dtype=np.float32)
+                point_3d_world = R_ref.T @ (point_3d_cam_ref - T_ref)
+
+                # NumPy配列をJIT関数に渡す
                 consistent_views = _check_geometric_consistency_jit(
-                    r,
-                    c,
-                    d_ref,
-                    K_ref,
-                    R_ref,
-                    T_ref,
-                    neighbor_poses,
+                    point_3d_world,
+                    neighbor_K_np,
+                    neighbor_R_np,
+                    neighbor_T_np,
                     neighbor_depth_maps_np,
                 )
 
