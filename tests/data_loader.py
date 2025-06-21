@@ -95,13 +95,5 @@ class DataLoader:
                 logging.warning(f"Image files for index {idx} not found. Skipping.")
                 continue
 
-            pairs.append(
-                (
-                    idx,
-                    T_cv,  # 変換後の位置
-                    left_path,
-                    right_path,
-                    R_cv,  # 変換後の回転行列
-                )
-            )
+            pairs.append((idx, T_cv, left_path, right_path, R_cv))  # 変換後の位置  # 変換後の回転行列
         return pairs
