@@ -114,3 +114,18 @@ CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[1]
 # --- 優先度付き伝播のパラメータ ---
 PROPAGATION_GRID_ROWS = 5  # グリッドの行数
 PROPAGATION_GRID_COLS = 5  # グリッドの列数
+
+# 複数視点での光度一貫性チェックにおける色の差のしきい値 (0-255)
+FILTERING_COLOR_DIFFERENCE_THRESHOLD = 20
+# 光度一貫性チェックをパスするために必要な近傍ビューの最小数
+FILTERING_MIN_CONSISTENT_VIEWS = 3
+
+# --- 幾何学的一貫性フィルターの設定 ---
+# 幾何学的一貫性チェックを有効にするか
+GEOMETRIC_FILTER_ENABLED = True
+# 幾何学的なエラー（相対深度差）のしきい値。小さいほど厳しい。
+GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD = 0.05  # 5%の深度差を許容
+# 一貫性があると判断するために必要な近傍ビューの最小数
+GEOMETRIC_MIN_CONSISTENT_VIEWS = 2
+
+TARGET_INDICES = [38]

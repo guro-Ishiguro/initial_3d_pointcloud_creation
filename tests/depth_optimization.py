@@ -164,7 +164,7 @@ def _propagate_spatial_one_color_jit(
     depth_map,
     normal_map,
     cost_map,  # 更新対象のマップ
-    propagation_mask, # ★追加: 処理領域を制限するマスク
+    propagation_mask,  # ★追加: 処理領域を制限するマスク
     neighbors_dr,
     neighbors_dc,  # 伝播方向 (NumPy配列に修正)
     color,  # 対象の色
@@ -197,7 +197,7 @@ def _propagate_spatial_one_color_jit(
             # ★追加: マスク外のピクセルはスキップ
             if not propagation_mask[r, c]:
                 continue
-            
+
             # 対象の色（赤 or 黒）のピクセルのみを処理
             if (r + c) % 2 != color:
                 continue
@@ -210,7 +210,7 @@ def _propagate_spatial_one_color_jit(
                 dr = neighbors_dr[i]
                 dc = neighbors_dc[i]
                 nr, nc = r + dr, c + dc
-                
+
                 # 隣接ピクセルもマスク内である必要がある
                 if not (0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc]):
                     continue
@@ -252,7 +252,7 @@ def _propagate_wavefront_jit(
     normal_map,
     cost_map,
     visited_map,
-    propagation_mask, # ★追加: 処理領域を制限するマスク
+    propagation_mask,  # ★追加: 処理領域を制限するマスク
     initial_wavefront_np,
     patch_size,
     top_k_costs,
@@ -286,17 +286,17 @@ def _propagate_wavefront_jit(
     current_wave = wavefront_A
     next_wave = wavefront_B
     current_count = wave_A_count
-    
+
     neighbors_dr = np.array([-1, -1, -1, 0, 0, 1, 1, 1], dtype=np.int8)
     neighbors_dc = np.array([-1, 0, 1, -1, 1, -1, 0, 1], dtype=np.int8)
 
     loop_count = 0
-    max_loops = h + w 
+    max_loops = h + w
 
     while current_count > 0 and loop_count < max_loops:
         for i in prange(current_count):
             r, c = current_wave[i]
-            
+
             best_new_cost = cost_map[r, c]
             best_depth = depth_map[r, c]
             best_normal = normal_map[r, c]
@@ -308,21 +308,32 @@ def _propagate_wavefront_jit(
                     neighbor_depth = depth_map[nr, nc]
                     if not np.isfinite(neighbor_depth):
                         continue
-                    
+
                     neighbor_normal = normal_map[nr, nc]
-                    
+
                     new_cost = _evaluate_cost_jit(
-                        r, c, neighbor_depth, neighbor_normal,
-                        patch_size, ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
-                        src_images_gray, src_K, src_R, src_T, top_k_costs,
+                        r,
+                        c,
+                        neighbor_depth,
+                        neighbor_normal,
+                        patch_size,
+                        ref_image_gray,
+                        ref_pose_K,
+                        ref_pose_R,
+                        ref_pose_T,
+                        src_images_gray,
+                        src_K,
+                        src_R,
+                        src_T,
+                        top_k_costs,
                         adaptive_weight_sigma_color,
                     )
-                    
+
                     if new_cost < best_new_cost:
                         best_new_cost = new_cost
                         best_depth = neighbor_depth
                         best_normal = neighbor_normal
-            
+
             if best_new_cost < cost_map[r, c]:
                 cost_map[r, c] = best_new_cost
                 depth_map[r, c] = best_depth
@@ -331,12 +342,17 @@ def _propagate_wavefront_jit(
         next_wave_count = 0
         for i in range(current_count):
             r, c = current_wave[i]
-            
+
             for j in range(len(neighbors_dr)):
                 nr, nc = r + neighbors_dr[j], c + neighbors_dc[j]
-                
+
                 # ★修正: マスク内かつ未訪問のピクセルを次の波面に追加
-                if 0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc] and not visited_map[nr, nc]:
+                if (
+                    0 <= nr < h
+                    and 0 <= nc < w
+                    and propagation_mask[nr, nc]
+                    and not visited_map[nr, nc]
+                ):
                     visited_map[nr, nc] = True
                     if next_wave_count < len(next_wave):
                         next_wave[next_wave_count, 0] = nr
@@ -353,7 +369,7 @@ def _random_search_jit(
     depth_map,
     normal_map,
     cost_map,
-    search_mask, # ★追加: 処理領域を制限するマスク
+    search_mask,  # ★追加: 処理領域を制限するマスク
     iteration,
     patch_size,
     top_k_costs,
@@ -426,6 +442,143 @@ def _random_search_jit(
                     n_new,
                     new_cost,
                 )
+
+
+@njit(fastmath=True)
+def _check_geometric_consistency_jit(
+    r_ref, c_ref, d_ref, K_ref, R_ref, T_ref, neighbor_poses, neighbor_depth_maps
+):
+    """
+    参照ピクセルの深度値が、近傍ビューの深度マップと幾何学的に一貫しているかチェックする
+    """
+    consistent_views = 0
+    h, w = neighbor_depth_maps[0].shape
+
+    # 参照ビューのカメラ座標系での3D点を計算
+    x_cam_ref = (c_ref - K_ref[0, 2]) * d_ref / K_ref[0, 0]
+    y_cam_ref = (r_ref - K_ref[1, 2]) * d_ref / K_ref[1, 1]
+    point_3d_cam_ref = np.array([x_cam_ref, y_cam_ref, d_ref], dtype=np.float32)
+
+    # ワールド座標に変換
+    point_3d_world = R_ref.T @ (point_3d_cam_ref - T_ref)
+
+    # 各近傍ビューでチェック
+    for i in range(len(neighbor_poses)):
+        K_src, R_src, T_src = neighbor_poses[i]
+        depth_map_src = neighbor_depth_maps[i]
+
+        # 近傍ビューのカメラ座標に変換
+        p_src_cam = R_src @ point_3d_world + T_src
+
+        # カメラの後ろにある点は無視
+        if p_src_cam[2] <= 0:
+            continue
+
+        # 近傍ビューの画像座標に投影
+        p_src_img_h = K_src @ p_src_cam
+        d_proj_src = p_src_img_h[2]  # 逆投影された深度
+        u_src, v_src = p_src_img_h[0] / d_proj_src, p_src_img_h[1] / d_proj_src
+
+        # 画像範囲外かチェック (整数座標に丸める前にチェック)
+        if not (0 <= u_src < w and 0 <= v_src < h):
+            continue
+
+        # 最も近いピクセルの深度値を取得 (補間は複雑なので最近傍で)
+        r_src, c_src = int(round(v_src)), int(round(u_src))
+
+        if not (0 <= c_src < w and 0 <= r_src < h):
+            continue
+
+        d_actual_src = depth_map_src[r_src, c_src]
+
+        # 近傍ビューの深度が有効かチェック
+        if not np.isfinite(d_actual_src) or d_actual_src <= 0:
+            continue
+
+        # 幾何学的なエラーを計算 (相対深度差)
+        relative_error = np.abs(d_proj_src - d_actual_src) / d_actual_src
+
+        if relative_error < config.GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD:
+            consistent_views += 1
+
+    return consistent_views
+
+
+@njit(fastmath=True)
+def _check_photometric_consistency_jit(
+    r,
+    c,
+    depth,
+    ref_color_pixel,
+    K,
+    R_ref,
+    T_ref,
+    neighbor_images,
+    neighbor_R,
+    neighbor_T,
+):
+    """
+    指定されたピクセルの深度値が、近傍ビューと光度的に一貫しているかチェックする
+    """
+    consistent_views = 0
+    h, w, _ = neighbor_images[0].shape
+
+    # 参照ビューのカメラ座標系での3D点を計算
+    x_cam = (c - K[0, 2]) * depth / K[0, 0]
+    y_cam = (r - K[1, 2]) * depth / K[1, 1]
+    point_3d_cam = np.array([x_cam, y_cam, depth], dtype=np.float32)
+
+    # ワールド座標に変換
+    point_3d_world = R_ref.T @ (point_3d_cam - T_ref)
+
+    # 各近傍ビューでチェック
+    for i in range(len(neighbor_images)):
+        R_src, T_src = neighbor_R[i], neighbor_T[i]
+
+        # 近傍ビューのカメラ座標に変換
+        p_src_cam = R_src @ point_3d_world + T_src
+
+        # カメラの後ろにある点は無視
+        if p_src_cam[2] <= 0:
+            continue
+
+        # 画像座標に投影
+        p_src_img_h = K @ p_src_cam
+        u_src, v_src = p_src_img_h[0] / p_src_img_h[2], p_src_img_h[1] / p_src_img_h[2]
+
+        # 画像範囲内かチェック
+        if not (0 <= u_src < w and 0 <= v_src < h):
+            continue
+
+        # 双線形補間で色を取得
+        y, x = v_src, u_src
+        x1, y1 = int(x), int(y)
+        x2, y2 = x1 + 1, y1 + 1
+        if not (x1 >= 0 and x2 < w and y1 >= 0 and y2 < h):
+            continue
+
+        q11, q12 = neighbor_images[i][y1, x1], neighbor_images[i][y1, x2]
+        q21, q22 = neighbor_images[i][y2, x1], neighbor_images[i][y2, x2]
+        w1, w2, w3, w4 = (
+            (x2 - x) * (y2 - y),
+            (x - x1) * (y2 - y),
+            (x2 - x) * (y - y1),
+            (x - x1) * (y - y1),
+        )
+        neighbor_color = w1 * q11 + w2 * q12 + w3 * q21 + w4 * q22
+
+        # 色の差を計算 (L2ノルム)
+        color_diff = np.sqrt(
+            np.sum(
+                (ref_color_pixel.astype(np.float32) - neighbor_color.astype(np.float32))
+                ** 2
+            )
+        )
+
+        if color_diff < config.FILTERING_COLOR_DIFFERENCE_THRESHOLD:
+            consistent_views += 1
+
+    return consistent_views
 
 
 @njit(parallel=True)
@@ -659,9 +812,10 @@ class DepthOptimization:
         )
 
         valid_initial_mask = np.isfinite(initial_depth)
-        kernel = np.ones((7, 7), np.uint8) # 膨張させるカーネルサイズ
-        propagation_mask = cv2.dilate(valid_initial_mask.astype(np.uint8), kernel, iterations=1).astype(np.bool_)
-
+        kernel = np.ones((7, 7), np.uint8)  # 膨張させるカーネルサイズ
+        propagation_mask = cv2.dilate(
+            valid_initial_mask.astype(np.uint8), kernel, iterations=1
+        ).astype(np.bool_)
 
         ref_image_gray = cv2.cvtColor(ref_image, cv2.COLOR_RGB2GRAY).astype(np.float32)
         ref_pose_K, ref_pose_R, ref_pose_T = (
@@ -708,7 +862,6 @@ class DepthOptimization:
                     if len(valid_costs) > 0:
                         grid_costs[r_idx, c_idx] = np.median(valid_costs)
 
-
         # --- PatchMatch反復ループ ---
         for i in range(self.config.PATCHMATCH_ITERATIONS):
             np.copyto(depth_map_prev, depth_map)
@@ -725,36 +878,77 @@ class DepthOptimization:
                     neighbors_dr = np.array([1, 0], dtype=np.int8)
                     neighbors_dc = np.array([0, 1], dtype=np.int8)
                 _propagate_spatial_one_color_jit(
-                    depth_map, normal_map, cost_map, propagation_mask, 
-                    neighbors_dr, neighbors_dc, 0, 0, h, 0, w,
-                    self.config.PATCHMATCH_PATCH_SIZE, self.config.TOP_K_COSTS,
-                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR, ref_image_gray,
-                    ref_pose_K, ref_pose_R, ref_pose_T, src_images_gray,
-                    src_K, src_R, src_T,
+                    depth_map,
+                    normal_map,
+                    cost_map,
+                    propagation_mask,
+                    neighbors_dr,
+                    neighbors_dc,
+                    0,
+                    0,
+                    h,
+                    0,
+                    w,
+                    self.config.PATCHMATCH_PATCH_SIZE,
+                    self.config.TOP_K_COSTS,
+                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                    ref_image_gray,
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_images_gray,
+                    src_K,
+                    src_R,
+                    src_T,
                 )
                 _propagate_spatial_one_color_jit(
-                    depth_map, normal_map, cost_map, propagation_mask, 
-                    neighbors_dr, neighbors_dc, 1, 0, h, 0, w,
-                    self.config.PATCHMATCH_PATCH_SIZE, self.config.TOP_K_COSTS,
-                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR, ref_image_gray,
-                    ref_pose_K, ref_pose_R, ref_pose_T, src_images_gray,
-                    src_K, src_R, src_T,
+                    depth_map,
+                    normal_map,
+                    cost_map,
+                    propagation_mask,
+                    neighbors_dr,
+                    neighbors_dc,
+                    1,
+                    0,
+                    h,
+                    0,
+                    w,
+                    self.config.PATCHMATCH_PATCH_SIZE,
+                    self.config.TOP_K_COSTS,
+                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                    ref_image_gray,
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_images_gray,
+                    src_K,
+                    src_R,
+                    src_T,
                 )
             elif self.config.CHOICED_PROPAGATION_METHOD == "priority":
                 if i == 0:
-                    logging.info("Starting wavefront propagation from the best seed grid...")
+                    logging.info(
+                        "Starting wavefront propagation from the best seed grid..."
+                    )
                     visited_map = np.zeros_like(initial_depth, dtype=np.bool_)
-                    grid_rows, grid_cols = self.config.PROPAGATION_GRID_ROWS, self.config.PROPAGATION_GRID_COLS
+                    grid_rows, grid_cols = (
+                        self.config.PROPAGATION_GRID_ROWS,
+                        self.config.PROPAGATION_GRID_COLS,
+                    )
                     grid_h, grid_w = h // grid_rows, w // grid_cols
                     valid_grid_indices = np.where(np.isfinite(grid_costs))
                     if len(valid_grid_indices[0]) > 0:
                         min_cost_flat_idx = np.nanargmin(grid_costs)
-                        r_idx, c_idx = np.unravel_index(min_cost_flat_idx, grid_costs.shape)
+                        r_idx, c_idx = np.unravel_index(
+                            min_cost_flat_idx, grid_costs.shape
+                        )
                         min_cost = grid_costs[r_idx, c_idx]
                         r_start, r_end = r_idx * grid_h, (r_idx + 1) * grid_h
                         c_start, c_end = c_idx * grid_w, (c_idx + 1) * grid_w
-                        logging.info(f"Seed grid found at index ({r_idx}, {c_idx}) with cost {min_cost:.4f}.")
-                        
+                        logging.info(
+                            f"Seed grid found at index ({r_idx}, {c_idx}) with cost {min_cost:.4f}."
+                        )
+
                         # シードグリッドはマスク内のみを訪問済みとする
                         seed_mask = np.zeros_like(visited_map)
                         seed_mask[r_start:r_end, c_start:c_end] = True
@@ -763,40 +957,77 @@ class DepthOptimization:
                         initial_wavefront = []
                         for r_ in range(r_start, r_end):
                             for c_ in range(c_start, c_end):
-                                if not visited_map[r_, c_]: continue
+                                if not visited_map[r_, c_]:
+                                    continue
                                 for dr in [-1, 0, 1]:
                                     for dc in [-1, 0, 1]:
-                                        if dr == 0 and dc == 0: continue
+                                        if dr == 0 and dc == 0:
+                                            continue
                                         nr, nc = r_ + dr, c_ + dc
-                                        if 0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc] and not visited_map[nr, nc]:
+                                        if (
+                                            0 <= nr < h
+                                            and 0 <= nc < w
+                                            and propagation_mask[nr, nc]
+                                            and not visited_map[nr, nc]
+                                        ):
                                             initial_wavefront.append((nr, nc))
 
-                        initial_wavefront_np = np.array(list(set(initial_wavefront)), dtype=np.int32)
-                        
+                        initial_wavefront_np = np.array(
+                            list(set(initial_wavefront)), dtype=np.int32
+                        )
+
                         if len(initial_wavefront_np) > 0:
                             _propagate_wavefront_jit(
-                                depth_map, normal_map, cost_map, visited_map, propagation_mask, 
-                                initial_wavefront_np, self.config.PATCHMATCH_PATCH_SIZE,
-                                self.config.TOP_K_COSTS, self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                                ref_image_gray, ref_pose_K, ref_pose_R, ref_pose_T,
-                                src_images_gray, src_K, src_R, src_T
+                                depth_map,
+                                normal_map,
+                                cost_map,
+                                visited_map,
+                                propagation_mask,
+                                initial_wavefront_np,
+                                self.config.PATCHMATCH_PATCH_SIZE,
+                                self.config.TOP_K_COSTS,
+                                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                                ref_image_gray,
+                                ref_pose_K,
+                                ref_pose_R,
+                                ref_pose_T,
+                                src_images_gray,
+                                src_K,
+                                src_R,
+                                src_T,
                             )
                         else:
                             logging.warning("Initial wavefront is empty.")
                     else:
                         logging.warning("No valid grids to start propagation.")
                 else:
-                    logging.info("Skipping spatial propagation for subsequent iterations.")
+                    logging.info(
+                        "Skipping spatial propagation for subsequent iterations."
+                    )
 
             # --- 2. ランダム探索 ---
-            depth_range_map = (initial_depth_error * (self.config.PATCHMATCH_DECAY_RATE**i)).astype(np.float32)
+            depth_range_map = (
+                initial_depth_error * (self.config.PATCHMATCH_DECAY_RATE**i)
+            ).astype(np.float32)
             _random_search_jit(
-                depth_map, normal_map, cost_map, propagation_mask, 
-                i, self.config.PATCHMATCH_PATCH_SIZE,
-                self.config.TOP_K_COSTS, self.config.PATCHMATCH_DECAY_RATE,
-                self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE, ref_image_gray,
-                ref_pose_K, ref_pose_R, ref_pose_T, src_images_gray,
-                src_K, src_R, src_T, self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                depth_map,
+                normal_map,
+                cost_map,
+                propagation_mask,
+                i,
+                self.config.PATCHMATCH_PATCH_SIZE,
+                self.config.TOP_K_COSTS,
+                self.config.PATCHMATCH_DECAY_RATE,
+                self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE,
+                ref_image_gray,
+                ref_pose_K,
+                ref_pose_R,
+                ref_pose_T,
+                src_images_gray,
+                src_K,
+                src_R,
+                src_T,
+                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
                 depth_range_map,
             )
             if self.config.DEBUG_SAVE_DEPTH_MAPS:
@@ -827,12 +1058,10 @@ class DepthOptimization:
             else:
                 logging.warning("No valid pixels for convergence check.")
 
-
         logging.info("PatchMatch MVS refinement finished.")
         final_depth_map = depth_map.copy()
         final_depth_map[~propagation_mask] = np.nan
         return final_depth_map
-
 
     def refine_depth_with_patchmatch_vanilla(
         self, ref_image, ref_pose, neighbor_views_data, ref_idx=0
@@ -945,7 +1174,7 @@ class DepthOptimization:
             depth_range_map = np.full(
                 (h, w),
                 self.config.PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE
-                * (self.config.PATCHMATCH_DECAY_RATE ** i),
+                * (self.config.PATCHMATCH_DECAY_RATE**i),
                 dtype=np.float32,
             )
             _random_search_jit(
@@ -982,3 +1211,129 @@ class DepthOptimization:
 
         logging.info("Vanilla PatchMatch MVS refinement finished.")
         return depth_map
+
+    def filter_depth_map_by_geometric_consistency(
+        self, ref_depth_map, ref_pose, neighbor_views_data, all_optimized_depths
+    ):
+        """
+        複数ビュー間の幾何学的一貫性に基づいて深度マップをフィルタリングする
+        """
+        logging.info("Filtering depth map by geometric consistency...")
+        h, w = ref_depth_map.shape
+        filtered_depth_map = ref_depth_map.copy()
+
+        # JIT用にデータを準備
+        K_ref = ref_pose["K"].astype(np.float32)
+        R_ref = ref_pose["R"].astype(np.float32)
+        T_ref = ref_pose["T"].astype(np.float32)
+
+        neighbor_poses = []
+        neighbor_depth_maps = []
+        for view in neighbor_views_data:
+            view_idx = view["image_idx"]
+            if view_idx in all_optimized_depths:
+                neighbor_poses.append(
+                    (
+                        view["K"].astype(np.float32),
+                        view["R"].astype(np.float32),
+                        view["T"].astype(np.float32),
+                    )
+                )
+                neighbor_depth_maps.append(
+                    all_optimized_depths[view_idx].astype(np.float32)
+                )
+
+        if not neighbor_depth_maps:
+            logging.warning(
+                "No neighbor depth maps available for geometric consistency check."
+            )
+            return filtered_depth_map
+
+        neighbor_depth_maps_np = np.stack(neighbor_depth_maps, axis=0)
+
+        failures = 0
+        for r in prange(h):
+            for c in range(w):
+                d_ref = filtered_depth_map[r, c]
+                if not np.isfinite(d_ref) or d_ref <= 0:
+                    continue
+
+                consistent_views = _check_geometric_consistency_jit(
+                    r,
+                    c,
+                    d_ref,
+                    K_ref,
+                    R_ref,
+                    T_ref,
+                    neighbor_poses,
+                    neighbor_depth_maps_np,
+                )
+
+                if consistent_views < self.config.GEOMETRIC_MIN_CONSISTENT_VIEWS:
+                    filtered_depth_map[r, c] = np.nan
+                    failures += 1
+
+        logging.info(
+            f"{failures} points ({failures/(h*w)*100:.2f}%) invalidated by geometric consistency check."
+        )
+        return filtered_depth_map
+
+    def filter_depth_map(self, depth_map, ref_image, ref_pose, neighbor_views_data):
+        """
+        コストと光度一貫性に基づいて深度マップをフィルタリングする
+        """
+        logging.info(
+            "Filtering optimized depth map based on cost and photometric consistency..."
+        )
+        h, w = depth_map.shape
+        filtered_depth_map = depth_map.copy()
+
+        # データをJIT用に準備
+        K = ref_pose["K"].astype(np.float32)
+        R_ref = ref_pose["R"].astype(np.float32)
+        T_ref = ref_pose["T"].astype(np.float32)
+
+        neighbor_images = np.stack(
+            [view["image"] for view in neighbor_views_data], axis=0
+        )
+        neighbor_R = np.stack(
+            [view["R"].astype(np.float32) for view in neighbor_views_data], axis=0
+        )
+        neighbor_T = np.stack(
+            [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
+        )
+
+        # 1. コストが高いピクセルを無効化
+        # invalid_mask = cost_map > self.config.FILTERING_COST_THRESHOLD
+        # filtered_depth_map[invalid_mask] = np.nan
+        # logging.info(f"{np.sum(invalid_mask)} points invalidated by cost threshold.")
+
+        # 2. 光度一貫性チェック
+        consistency_failures = 0
+        for r in range(h):
+            for c in range(w):
+                if not np.isfinite(filtered_depth_map[r, c]):
+                    continue
+
+                consistent_views = _check_photometric_consistency_jit(
+                    r,
+                    c,
+                    filtered_depth_map[r, c],
+                    ref_image[r, c],
+                    K,
+                    R_ref,
+                    T_ref,
+                    neighbor_images,
+                    neighbor_R,
+                    neighbor_T,
+                )
+
+                if consistent_views < self.config.FILTERING_MIN_CONSISTENT_VIEWS:
+                    filtered_depth_map[r, c] = np.nan
+                    consistency_failures += 1
+
+        logging.info(
+            f"{consistency_failures} points invalidated by photometric consistency check."
+        )
+
+        return filtered_depth_map

@@ -146,6 +146,20 @@ if __name__ == "__main__":
             #     ref_idx=idx,
             # )
 
+            optimized_depth = depth_optimization.filter_depth_map(
+                optimized_depth,
+                li_rgb,
+                {"R": R_mat, "T": T_pos, "K": config.K},
+                neighbor_views_data
+            )
+
+            if config.DEBUG_SAVE_DEPTH_MAPS:
+                save_filtered_depth_path = os.path.join(
+                    save_each_depth_dir, f"filtered_depth.png"
+                )
+                logging.info(f"Saving filtered depth map to {save_filtered_depth_path}")
+                save_depth_map_as_image(optimized_depth, save_filtered_depth_path)
+
             # 3. 中心投影深度マップを正射投影深度マップに変換
             logging.info(
                 f"Converting perspective depth map to orthographic for image {idx}..."
