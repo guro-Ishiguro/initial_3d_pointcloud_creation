@@ -161,8 +161,7 @@ if __name__ == "__main__":
                     f"Saving photometrically filtered depth map to {save_photometric_filtered_depth_path}"
                 )
                 save_depth_map_as_image(
-                    photometrically_filtered_depth,
-                    save_photometric_filtered_depth_path,
+                    photometrically_filtered_depth, save_photometric_filtered_depth_path
                 )
 
             all_optimized_depths[idx] = photometrically_filtered_depth
@@ -212,13 +211,11 @@ if __name__ == "__main__":
                     )
 
             # 4. 幾何学的一貫性フィルタリング
-            geometrically_filtered_depth = (
-                depth_optimization.filter_depth_map_by_geometric_consistency(
-                    ref_depth_map=ref_depth_map,
-                    ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
-                    neighbor_views_data=neighbor_views_data,
-                    all_optimized_depths=all_optimized_depths,
-                )
+            geometrically_filtered_depth = depth_optimization.filter_depth_map_by_geometric_consistency(
+                ref_depth_map=ref_depth_map,
+                ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
+                neighbor_views_data=neighbor_views_data,
+                all_optimized_depths=all_optimized_depths,
             )
 
             if config.DEBUG_SAVE_DEPTH_MAPS:
@@ -255,11 +252,7 @@ if __name__ == "__main__":
 
             # 6. 正射投影深度マップをワールド座標の点群に変換
             world_points, world_colors = depth_estimator.ortho_depth_to_world(
-                ortho_depth_map,
-                ortho_color_map,
-                R_mat,
-                T_pos,
-                config.pixel_size,
+                ortho_depth_map, ortho_color_map, R_mat, T_pos, config.pixel_size
             )
             logging.info(
                 f"Generated {world_points.shape[0]} points for image {idx} after geometric filtering."
@@ -275,10 +268,7 @@ if __name__ == "__main__":
     logging.info("\n--- Step 3: Integrating and saving the final point cloud ---")
     if merged_pts_list:
         logging.info("Integrating all point clouds...")
-        (
-            merged_pts,
-            merged_cols,
-        ) = point_cloud_integrator.integrate_depth_maps_median(
+        (merged_pts, merged_cols) = point_cloud_integrator.integrate_depth_maps_median(
             merged_pts_list, merged_cols_list
         )
         final_pcd = point_cloud_integrator.process_and_save_final_point_cloud(

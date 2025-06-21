@@ -61,7 +61,7 @@ def _compute_weighted_zncc_cost_jit(patch_ref, warped_patch_src, sigma_color):
     for r in range(patch_size):
         for c in range(patch_size):
             color_diff_sq = (patch_ref[r, c] - center_val) ** 2
-            weights[r, c] = np.exp(-color_diff_sq / (2 * sigma_color**2))
+            weights[r, c] = np.exp(-color_diff_sq / (2 * sigma_color ** 2))
 
     # 2. 重み付き統計量を計算
     sum_w = np.sum(weights)
@@ -164,7 +164,7 @@ def _propagate_spatial_one_color_jit(
     depth_map,
     normal_map,
     cost_map,  # 更新対象のマップ
-    propagation_mask,  # ★追加: 処理領域を制限するマスク
+    propagation_mask,
     neighbors_dr,
     neighbors_dc,  # 伝播方向 (NumPy配列に修正)
     color,  # 対象の色
@@ -252,7 +252,7 @@ def _propagate_wavefront_jit(
     normal_map,
     cost_map,
     visited_map,
-    propagation_mask,  # ★追加: 処理領域を制限するマスク
+    propagation_mask,
     initial_wavefront_np,
     patch_size,
     top_k_costs,
@@ -346,7 +346,6 @@ def _propagate_wavefront_jit(
             for j in range(len(neighbors_dr)):
                 nr, nc = r + neighbors_dr[j], c + neighbors_dc[j]
 
-                # ★修正: マスク内かつ未訪問のピクセルを次の波面に追加
                 if (
                     0 <= nr < h
                     and 0 <= nc < w
@@ -369,7 +368,7 @@ def _random_search_jit(
     depth_map,
     normal_map,
     cost_map,
-    search_mask,  # ★追加: 処理領域を制限するマスク
+    search_mask,
     iteration,
     patch_size,
     top_k_costs,
@@ -390,7 +389,6 @@ def _random_search_jit(
     h, w = depth_map.shape
     for r in prange(h):
         for c in range(w):
-            # ★追加: マスク外のピクセルはスキップ
             if not search_mask[r, c]:
                 continue
 
@@ -406,7 +404,7 @@ def _random_search_jit(
             angle_rad = np.radians(
                 (np.random.rand() * 2 - 1)
                 * normal_search_angle
-                * (decay_rate**iteration)
+                * (decay_rate ** iteration)
             )
             rand_axis = np.random.randn(3).astype(np.float32)
             rand_axis /= np.linalg.norm(rand_axis)
@@ -487,7 +485,8 @@ def _check_geometric_consistency_jit(
         d_actual_src = depth_map_src[r_src, c_src]
 
         # 近傍ビューの深度が有効かチェック
-        if not np.isfinite(d_actual_src) or d_actual_src <= 0:
+        # ゼロ除算を避けるために、非常に小さい正の値も除外
+        if not np.isfinite(d_actual_src) or d_actual_src < 1e-6:
             continue
 
         # 幾何学的なエラーを計算 (相対深度差)
@@ -1002,7 +1001,7 @@ class DepthOptimization:
 
             # --- 2. ランダム探索 ---
             depth_range_map = (
-                initial_depth_error * (self.config.PATCHMATCH_DECAY_RATE**i)
+                initial_depth_error * (self.config.PATCHMATCH_DECAY_RATE ** i)
             ).astype(np.float32)
             _random_search_jit(
                 depth_map,
@@ -1030,8 +1029,7 @@ class DepthOptimization:
                     config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}"
                 )
                 save_path = os.path.join(
-                    save_each_depth_dir,
-                    f"depth_iter_{i+1:02d}.png",
+                    save_each_depth_dir, f"depth_iter_{i+1:02d}.png"
                 )
                 logging.info(f"Saving intermediate depth map to {save_path}")
                 save_depth_map_as_image(depth_map.copy(), save_path)
@@ -1169,7 +1167,7 @@ class DepthOptimization:
             depth_range_map = np.full(
                 (h, w),
                 self.config.PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE
-                * (self.config.PATCHMATCH_DECAY_RATE**i),
+                * (self.config.PATCHMATCH_DECAY_RATE ** i),
                 dtype=np.float32,
             )
             _random_search_jit(
@@ -1221,12 +1219,10 @@ class DepthOptimization:
         R_ref = ref_pose["R"].astype(np.float32)
         T_ref = ref_pose["T"].astype(np.float32)
 
-        # ゼロ除算のチェック
         if abs(K_ref[0, 0]) < 1e-6 or abs(K_ref[1, 1]) < 1e-6:
             logging.error("Focal length is zero. Aborting geometric consistency check.")
             return ref_depth_map
 
-        # Numbaで効率的に扱えるよう、PythonリストではなくNumPy配列にデータをまとめる
         neighbor_K_list = []
         neighbor_R_list = []
         neighbor_T_list = []
@@ -1265,7 +1261,9 @@ class DepthOptimization:
                 # 3Dポイントへの逆投影をループの外で一度だけ行う
                 x_cam_ref = (c - K_ref[0, 2]) * d_ref / K_ref[0, 0]
                 y_cam_ref = (r - K_ref[1, 2]) * d_ref / K_ref[1, 1]
-                point_3d_cam_ref = np.array([x_cam_ref, y_cam_ref, d_ref], dtype=np.float32)
+                point_3d_cam_ref = np.array(
+                    [x_cam_ref, y_cam_ref, d_ref], dtype=np.float32
+                )
                 point_3d_world = R_ref.T @ (point_3d_cam_ref - T_ref)
 
                 # NumPy配列をJIT関数に渡す
@@ -1311,12 +1309,7 @@ class DepthOptimization:
             [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
         )
 
-        # 1. コストが高いピクセルを無効化
-        # invalid_mask = cost_map > self.config.FILTERING_COST_THRESHOLD
-        # filtered_depth_map[invalid_mask] = np.nan
-        # logging.info(f"{np.sum(invalid_mask)} points invalidated by cost threshold.")
-
-        # 2. 光度一貫性チェック
+        # 光度一貫性チェック
         consistency_failures = 0
         for r in range(h):
             for c in range(w):

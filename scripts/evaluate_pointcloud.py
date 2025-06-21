@@ -77,7 +77,7 @@ def compute_cloud_to_mesh(pcd, mesh):
     query = o3d.core.Tensor(pts, dtype=o3d.core.Dtype.Float32)
     signed = scene.compute_signed_distance(query).numpy().flatten()
     d = np.abs(signed)
-    return d.mean(), np.sqrt((d**2).mean()), d
+    return d.mean(), np.sqrt((d ** 2).mean()), d
 
 
 def compute_density(pcd, cell_size=0.1):
@@ -180,13 +180,7 @@ def main():
     N = len(errors)
     weights = np.ones_like(errors) / N * 100
     plt.figure(figsize=(8, 4))
-    plt.hist(
-        errors,
-        bins=50,
-        range=(0, 1.0),
-        weights=weights,
-        edgecolor="black",
-    )
+    plt.hist(errors, bins=50, range=(0, 1.0), weights=weights, edgecolor="black")
     plt.title("Cloud-to-Mesh Distance Histogram")
     plt.xlabel("Distance [m]")
     plt.ylabel("Percentage of points (%)")
