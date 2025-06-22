@@ -36,7 +36,6 @@ if __name__ == "__main__":
 
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
 
-    # config.pyでTARGET_INDICESが定義されていればそれを使う
     if hasattr(config, "TARGET_INDICES") and config.TARGET_INDICES:
         target_indices = config.TARGET_INDICES
     else:
@@ -146,7 +145,7 @@ if __name__ == "__main__":
             )
 
             # 3. 光度一貫性フィルタリング
-            photometrically_filtered_depth = depth_optimization.filter_depth_map(
+            photometrically_filtered_depth = depth_optimization.filter_depth_map_by_photometric_consistency(
                 optimized_depth,
                 li_rgb,
                 {"R": R_mat, "T": T_pos, "K": config.K},

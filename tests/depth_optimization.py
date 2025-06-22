@@ -194,7 +194,6 @@ def _propagate_spatial_one_color_jit(
     # 指定された範囲のピクセルを並列で処理
     for r in prange(max(1, r_min), min(h - 1, r_max)):
         for c in range(max(1, c_min), min(w - 1, c_max)):
-            # ★追加: マスク外のピクセルはスキップ
             if not propagation_mask[r, c]:
                 continue
 
@@ -806,7 +805,7 @@ class DepthOptimization:
         )
 
         valid_initial_mask = np.isfinite(initial_depth)
-        kernel = np.ones((7, 7), np.uint8)  # 膨張させるカーネルサイズ
+        kernel = np.ones((7, 7), np.uint8)  
         propagation_mask = cv2.dilate(
             valid_initial_mask.astype(np.uint8), kernel, iterations=1
         ).astype(np.bool_)
@@ -871,54 +870,32 @@ class DepthOptimization:
                 else:
                     neighbors_dr = np.array([1, 0], dtype=np.int8)
                     neighbors_dc = np.array([0, 1], dtype=np.int8)
-                _propagate_spatial_one_color_jit(
-                    depth_map,
-                    normal_map,
-                    cost_map,
-                    propagation_mask,
-                    neighbors_dr,
-                    neighbors_dc,
-                    0,
-                    0,
-                    h,
-                    0,
-                    w,
-                    self.config.PATCHMATCH_PATCH_SIZE,
-                    self.config.TOP_K_COSTS,
-                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                    ref_image_gray,
-                    ref_pose_K,
-                    ref_pose_R,
-                    ref_pose_T,
-                    src_images_gray,
-                    src_K,
-                    src_R,
-                    src_T,
-                )
-                _propagate_spatial_one_color_jit(
-                    depth_map,
-                    normal_map,
-                    cost_map,
-                    propagation_mask,
-                    neighbors_dr,
-                    neighbors_dc,
-                    1,
-                    0,
-                    h,
-                    0,
-                    w,
-                    self.config.PATCHMATCH_PATCH_SIZE,
-                    self.config.TOP_K_COSTS,
-                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                    ref_image_gray,
-                    ref_pose_K,
-                    ref_pose_R,
-                    ref_pose_T,
-                    src_images_gray,
-                    src_K,
-                    src_R,
-                    src_T,
-                )
+                for i in [0, 1]:
+                    _propagate_spatial_one_color_jit(
+                        depth_map,
+                        normal_map,
+                        cost_map,
+                        propagation_mask,
+                        neighbors_dr,
+                        neighbors_dc,
+                        i,
+                        0,
+                        h,
+                        0,
+                        w,
+                        self.config.PATCHMATCH_PATCH_SIZE,
+                        self.config.TOP_K_COSTS,
+                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                        ref_image_gray,
+                        ref_pose_K,
+                        ref_pose_R,
+                        ref_pose_T,
+                        src_images_gray,
+                        src_K,
+                        src_R,
+                        src_T,
+                    )
+
             elif self.config.CHOICED_PROPAGATION_METHOD == "priority":
                 if i == 0:
                     logging.info(
@@ -1116,52 +1093,30 @@ class DepthOptimization:
                 neighbors_dr = np.array([1, 0], dtype=np.int8)
                 neighbors_dc = np.array([0, 1], dtype=np.int8)
 
-            _propagate_spatial_one_color_jit(
-                depth_map,
-                normal_map,
-                cost_map,
-                neighbors_dr,
-                neighbors_dc,
-                0,
-                0,
-                h,
-                0,
-                w,
-                self.config.PATCHMATCH_PATCH_SIZE,
-                self.config.TOP_K_COSTS,
-                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                ref_image_gray,
-                ref_pose_K,
-                ref_pose_R,
-                ref_pose_T,
-                src_images_gray,
-                src_K,
-                src_R,
-                src_T,
-            )
-            _propagate_spatial_one_color_jit(
-                depth_map,
-                normal_map,
-                cost_map,
-                neighbors_dr,
-                neighbors_dc,
-                1,
-                0,
-                h,
-                0,
-                w,
-                self.config.PATCHMATCH_PATCH_SIZE,
-                self.config.TOP_K_COSTS,
-                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                ref_image_gray,
-                ref_pose_K,
-                ref_pose_R,
-                ref_pose_T,
-                src_images_gray,
-                src_K,
-                src_R,
-                src_T,
-            )
+            for i in [0, 1]:
+                _propagate_spatial_one_color_jit(
+                    depth_map,
+                    normal_map,
+                    cost_map,
+                    neighbors_dr,
+                    neighbors_dc,
+                    i,
+                    0,
+                    h,
+                    0,
+                    w,
+                    self.config.PATCHMATCH_PATCH_SIZE,
+                    self.config.TOP_K_COSTS,
+                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                    ref_image_gray,
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_images_gray,
+                    src_K,
+                    src_R,
+                    src_T,
+                )
 
             # --- ランダム探索 ---
             depth_range_map = np.full(
@@ -1251,7 +1206,6 @@ class DepthOptimization:
         neighbor_depth_maps_np = np.stack(neighbor_depth_maps_list)
 
         failures = 0
-        # prangeは共有メモリへの書き込みで競合を起こすため、rangeに変更
         for r in range(h):
             for c in range(w):
                 d_ref = filtered_depth_map[r, c]
@@ -1284,9 +1238,9 @@ class DepthOptimization:
         )
         return filtered_depth_map
 
-    def filter_depth_map(self, depth_map, ref_image, ref_pose, neighbor_views_data):
+    def filter_depth_map_by_photometric_consistency(self, depth_map, ref_image, ref_pose, neighbor_views_data):
         """
-        コストと光度一貫性に基づいて深度マップをフィルタリングする
+        光度一貫性に基づいて深度マップをフィルタリングする
         """
         logging.info(
             "Filtering optimized depth map based on cost and photometric consistency..."
