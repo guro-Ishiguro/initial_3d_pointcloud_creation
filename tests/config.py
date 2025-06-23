@@ -75,59 +75,41 @@ pixel_size = scene_width / width
 
 window_size, min_disp, num_disp = 5, 0, 216
 
-DEBUG_PATCH_MATCH_VISUALIZATION = False
-# rows, colums
-DEBUG_PIXEL_COORDS = (230, 490)
+# --- デバッグ用の設定 ---
+DEBUG_PATCH_MATCH_VISUALIZATION = False # PatchMatch のホモグラフィ行列の移動先デバッグ可視化を行うか
+DEBUG_PIXEL_COORDS = (230, 490) # デバッグ用のピクセル座標 (x, y)
 
-# PatchMatchの反復回数
-PATCHMATCH_ITERATIONS = 5
-# パッチサイズ (奇数)
-PATCHMATCH_PATCH_SIZE = 9
-# 法線推定に使う近傍のサイズ
-NORMAL_ESTIMATION_NEIGHBORHOOD = 7
-# ZNCCコスト計算時の小さな値
-ZNCC_EPSILON = 1e-6
-# 複数視点コストを集計する際の上位何個を考慮するか
-TOP_K_COSTS = 3
-
-# --- 適応的ランダム探索のパラメータ ---
-PATCHMATCH_DECAY_RATE = 0.9
-PATCHMATCH_NORMAL_SEARCH_ANGLE = 20.0
-
-ADAPTIVE_WEIGHT_SIGMA_COLOR = 10
-
-# 処理中の点群などをウィンドウで表示するか
-DEBUG_VISUALIZATION = True
-# 最適化前後のデプスマップを画像として保存するか
-DEBUG_SAVE_DEPTH_MAPS = True
-
-# 深度をランダムに初期化する際の範囲
-PATCHMATCH_VANILLA_MIN_DEPTH = 5.0  # meters
-PATCHMATCH_VANILLA_MAX_DEPTH = 50.0  # meters
-# ランダム探索の初期探索幅
-PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE = 50.0  # meters
+# --- PatchMatch MVS のパラメーター ---
+PATCHMATCH_ITERATIONS = 5 # PatchMatchの反復回数
+PATCHMATCH_PATCH_SIZE = 9 # パッチサイズ (奇数)
+NORMAL_ESTIMATION_NEIGHBORHOOD = 7 # 法線推定に使う近傍のサイズ
+ZNCC_EPSILON = 1e-6 # ZNCCコスト計算時の小さな値
+TOP_K_COSTS = 3 # 複数視点コストを集計する際の上位何個を考慮するか
+PATCHMATCH_VANILLA_MIN_DEPTH = 5.0  
+PATCHMATCH_VANILLA_MAX_DEPTH = 50.0  
+PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE = 50.0  # ランダム探索の初期探索幅
+DEBUG_VISUALIZATION = True # 処理中の点群などをウィンドウで表示するか
+DEBUG_SAVE_DEPTH_MAPS = True # 最適化前後のデプスマップを画像として保存するか
+TARGET_INDICES = [38] # 対象の画像インデックス
 
 # --- 伝播の方法の選択 ---
 PROPAGATION_METHOD = ["checkerboard", "priority"]
 CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[1]
 
+# --- 適応的ランダム探索のパラメータ ---
+PATCHMATCH_DECAY_RATE = 0.9
+PATCHMATCH_NORMAL_SEARCH_ANGLE = 20.0
+ADAPTIVE_WEIGHT_SIGMA_COLOR = 10
+
 # --- 優先度付き伝播のパラメータ ---
 PROPAGATION_GRID_ROWS = 5  # グリッドの行数
 PROPAGATION_GRID_COLS = 5  # グリッドの列数
 
-# 複数視点での光度一貫性チェックにおける色の差のしきい値 (0-255)
-FILTERING_COLOR_DIFFERENCE_THRESHOLD = 20
-# 光度一貫性チェックをパスするために必要な近傍ビューの最小数
-FILTERING_MIN_CONSISTENT_VIEWS = 3
+# --- 光度一貫性チェックの設定 ---
+FILTERING_COLOR_DIFFERENCE_THRESHOLD = 20 # 色の差のしきい値 (0-255)
+FILTERING_MIN_CONSISTENT_VIEWS = 3 # 必要な近傍ビューの最小数
 
 # --- 幾何学的一貫性フィルターの設定 ---
-# 幾何学的一貫性チェックを有効にするか
-GEOMETRIC_FILTER_ENABLED = True
-# 幾何学的なエラー（相対深度差）のしきい値。小さいほど厳しい。
-GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD = 0.05  # 5%の深度差を許容
-# 一貫性があると判断するために必要な近傍ビューの最小数
-GEOMETRIC_MIN_CONSISTENT_VIEWS = 2
-
-TARGET_INDICES = [38]
-
-SAVE_PROPAGATION_ANIMATION = True
+GEOMETRIC_FILTER_ENABLED = True # 幾何学的一貫性チェックを有効にするか
+GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD = 0.05  # 幾何学的なエラー（相対深度差）のしきい値
+GEOMETRIC_MIN_CONSISTENT_VIEWS = 2 # 一貫性があると判断するために必要な近傍ビューの最小数
