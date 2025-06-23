@@ -805,7 +805,7 @@ class DepthOptimization:
         )
 
         valid_initial_mask = np.isfinite(initial_depth)
-        kernel = np.ones((7, 7), np.uint8)  
+        kernel = np.ones((7, 7), np.uint8)
         propagation_mask = cv2.dilate(
             valid_initial_mask.astype(np.uint8), kernel, iterations=1
         ).astype(np.bool_)
@@ -1238,7 +1238,9 @@ class DepthOptimization:
         )
         return filtered_depth_map
 
-    def filter_depth_map_by_photometric_consistency(self, depth_map, ref_image, ref_pose, neighbor_views_data):
+    def filter_depth_map_by_photometric_consistency(
+        self, depth_map, ref_image, ref_pose, neighbor_views_data
+    ):
         """
         光度一貫性に基づいて深度マップをフィルタリングする
         """
