@@ -40,19 +40,19 @@ def quaternion_to_rotation_matrix(qx, qy, qz, qw):
     R = np.array(
         [
             [
-                1 - 2 * (qy**2 + qz**2),
+                1 - 2 * (qy ** 2 + qz ** 2),
                 2 * (qx * qy - qz * qw),
                 2 * (qx * qz + qy * qw),
             ],
             [
                 2 * (qx * qy + qz * qw),
-                1 - 2 * (qx**2 + qz**2),
+                1 - 2 * (qx ** 2 + qz ** 2),
                 2 * (qy * qz - qx * qw),
             ],
             [
                 2 * (qx * qz - qy * qw),
                 2 * (qy * qz + qx * qw),
-                1 - 2 * (qx**2 + qy**2),
+                1 - 2 * (qx ** 2 + qy ** 2),
             ],
         ]
     )
@@ -125,8 +125,8 @@ def create_disparity(image_L, image_R, img_id):
         minDisparity=config.min_disp,
         numDisparities=config.num_disp,
         blockSize=config.window_size,
-        P1=8 * 3 * config.window_size**2,
-        P2=16 * 3 * config.window_size**2,
+        P1=8 * 3 * config.window_size ** 2,
+        P2=16 * 3 * config.window_size ** 2,
         disp12MaxDiff=1,
         uniquenessRatio=10,
         speckleWindowSize=100,
