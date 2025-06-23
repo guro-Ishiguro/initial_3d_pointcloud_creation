@@ -100,6 +100,12 @@ if __name__ == "__main__":
                 h, w, _ = loaded_images[idx].shape
                 if gt_depth.shape != (h, w):
                     gt_depth = cv2.resize(gt_depth, (w, h), interpolation=cv2.INTER_NEAREST)
+                save_each_depth_dir = os.path.join(
+                    config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}"
+                )
+                os.makedirs(save_each_depth_dir, exist_ok=True)
+                clear_folder(save_each_depth_dir)
+                save_depth_map_as_image(gt_depth, os.path.join(config.DEPTH_IMAGE_DIR, f"gt_depth_{idx:04d}.png"))
 
         try:
             li_bgr = cv2.imread(left_path)
@@ -117,11 +123,6 @@ if __name__ == "__main__":
 
             # 初期深度を保存
             if config.DEBUG_SAVE_DEPTH_MAPS:
-                save_each_depth_dir = os.path.join(
-                    config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}"
-                )
-                os.makedirs(save_each_depth_dir, exist_ok=True)
-                clear_folder(save_each_depth_dir)
                 save_initial_depth_path = os.path.join(
                     save_each_depth_dir, f"initial_depth.png"
                 )
