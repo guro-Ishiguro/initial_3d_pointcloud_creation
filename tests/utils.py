@@ -4,6 +4,8 @@ import numpy as np
 import logging
 import argparse
 import cv2
+import OpenEXR
+import Imath
 
 # ログ設定はここで一元的に行う
 logging.basicConfig(
@@ -104,3 +106,79 @@ def save_depth_map_as_image(depth_map, file_path):
         cv2.imwrite(file_path, colored_map)
     except Exception as e:
         logging.error(f"Failed to save depth map to {file_path}: {e}")
+
+
+def read_exr_depth(file_path):
+    """
+    OpenEXRライブラリを使用して、単一チャンネルのEXR深度ファイルを読み込む。
+    """
+    try:
+        exr_file = OpenEXR.InputFile(file_path)
+        header = exr_file.header()
+        
+        available_channels = list(header['channels'].keys())
+        
+        # 'R' または 'Y' チャンネルを深度データとして優先的に使用
+        target_channel = ''
+        if 'R' in available_channels:
+            target_channel = 'R'
+        elif 'Y' in available_channels:
+            target_channel = 'Y'
+        else:
+            logging.error(f"Error: Could not find 'R' or 'Y' channel for depth information.")
+            logging.error(f"Available channels: {available_channels}")
+            return None
+
+        logging.info(f"Info: Detected '{target_channel}' channel in the file. Reading it as depth data.")
+
+        dw = header['dataWindow']
+        size = (dw.max.y - dw.min.y + 1, dw.max.x - dw.min.x + 1)
+
+        pt = Imath.PixelType(Imath.PixelType.FLOAT)
+        channel_bytes = exr_file.channel(target_channel, pt)
+        
+        depth_map = np.frombuffer(channel_bytes, dtype=np.float32)
+        depth_map = depth_map.reshape(size)
+        
+        return depth_map
+    except Exception as e:
+        logging.error(f"An error occurred while reading the EXR file: {e}")
+        return None
+
+def compute_depth_metrics(pred_depth, gt_depth):
+    """
+    予測深度と正解深度を比較し、評価指標を計算する。
+    """
+    valid_mask = np.isfinite(pred_depth) & np.isfinite(gt_depth) & (gt_depth > 0)
+    
+    if np.sum(valid_mask) == 0:
+        return {"rmse": np.nan, "mae": np.nan, "abs_rel": np.nan}
+        
+    pred_valid = pred_depth[valid_mask]
+    gt_valid = gt_depth[valid_mask]
+
+    rmse = np.sqrt(np.mean((pred_valid - gt_valid) ** 2))
+    mae = np.mean(np.abs(pred_valid - gt_valid))
+    abs_rel = np.mean(np.abs(pred_valid - gt_valid) / gt_valid)
+
+    return {"rmse": rmse, "mae": mae, "abs_rel": abs_rel}
+
+
+def save_error_map_as_image(pred_depth, gt_depth, file_path, max_error=1.0):
+    """
+    深度誤差を計算し、カラーマップとして可視化して保存する。
+    """
+    valid_mask = np.isfinite(pred_depth) & np.isfinite(gt_depth) & (gt_depth > 0)
+    error_map = np.full(pred_depth.shape, np.nan, dtype=np.float32)
+    error_map[valid_mask] = np.abs(pred_depth[valid_mask] - gt_depth[valid_mask])
+
+    vis_map = np.nan_to_num(error_map)
+    vis_map[vis_map > max_error] = max_error # エラーの上限を設定
+    vis_map = (vis_map / max_error) * 255.0
+    
+    colored_map = cv2.applyColorMap(vis_map.astype(np.uint8), cv2.COLORMAP_INFERNO)
+    
+    colored_map[~valid_mask] = [0, 0, 0]
+
+    cv2.imwrite(file_path, colored_map)
+    logging.info(f"Saved depth error map to {file_path}")

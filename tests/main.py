@@ -8,12 +8,19 @@ import cv2
 import open3d as o3d
 import numpy as np
 
-from depth_optimization import DepthOptimization
-from utils import parse_arguments, clear_folder, save_depth_map_as_image
+from utils import (
+    parse_arguments,
+    clear_folder,
+    save_depth_map_as_image,
+    read_exr_depth,
+    compute_depth_metrics,
+    save_error_map_as_image
+)
 from data_loader import DataLoader
 from image_processing import ImageProcessor
 from depth_estimation import DepthEstimator
 from point_cloud_integrator import PointCloudIntegrator
+from depth_optimization import DepthOptimization
 
 
 if __name__ == "__main__":
@@ -74,6 +81,18 @@ if __name__ == "__main__":
         _, T_pos, left_path, right_path, R_mat = all_pairs_data[idx]
         logging.info(f"Optimizing depth map for image pair {idx}...")
 
+        # --- Ground Truth Depthの読み込み ---
+        gt_depth_path = os.path.join(config.LABEL_DEPTH_IMAGE_DIR, f"depth_{idx:06d}.exr")
+        if not os.path.exists(gt_depth_path):
+            logging.warning(f"Ground truth depth file not found for index {idx}, skipping evaluation for this view.")
+            gt_depth = None
+        else:
+            gt_depth = read_exr_depth(gt_depth_path)
+            if gt_depth is not None:
+                h, w, _ = loaded_images[idx].shape
+                if gt_depth.shape != (h, w):
+                    gt_depth = cv2.resize(gt_depth, (w, h), interpolation=cv2.INTER_NEAREST)
+
         try:
             li_bgr = cv2.imread(left_path)
             ri_bgr = cv2.imread(right_path)
@@ -84,9 +103,30 @@ if __name__ == "__main__":
             li_gray = cv2.cvtColor(li_bgr, cv2.COLOR_BGR2GRAY)
             ri_gray = cv2.cvtColor(ri_bgr, cv2.COLOR_BGR2GRAY)
 
-            # 1. 初期深度マップと深度誤差コストを計算
+            # 初期深度マップと深度誤差コストを計算
             disp = image_processor.create_disparity(li_gray, ri_gray)
             initial_depth = depth_estimator.disparity_to_depth(disp)
+
+            # 初期深度を保存
+            if config.DEBUG_SAVE_DEPTH_MAPS:
+                save_each_depth_dir = os.path.join(
+                    config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}"
+                )
+                os.makedirs(save_each_depth_dir, exist_ok=True)
+                clear_folder(save_each_depth_dir)
+                save_initial_depth_path = os.path.join(
+                    save_each_depth_dir, f"initial_depth.png"
+                )
+                logging.info(f"Saving initial depth map to {save_initial_depth_path}")
+                save_depth_map_as_image(initial_depth, save_initial_depth_path)
+
+            # 初期深度を評価
+            if gt_depth is not None:
+                metrics = compute_depth_metrics(initial_depth, gt_depth)
+                logging.info(f"[Initial Depth] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}")
+                save_error_map_as_image(initial_depth, gt_depth, os.path.join(save_each_depth_dir, "error_map_initial.png"))
+
+            # 深度誤差コストを計算
             d_cost = depth_estimator.compute_depth_error_cost(
                 disp, initial_depth, config.window_size
             )
@@ -103,7 +143,7 @@ if __name__ == "__main__":
             d_cost[bmask] = np.nan
             d_cost[np.isnan(d_cost)] = 1.0
 
-            # 2. PatchMatchによる深度マップの最適化
+            # PatchMatchによる深度マップの最適化
             neighbor_views_data = []
             for offset in neighbor_view_offsets:
                 neighbor_idx = idx + offset
@@ -115,24 +155,12 @@ if __name__ == "__main__":
                     neighbor_views_data.append(
                         {
                             "image": loaded_images[neighbor_idx],
-                            "image_idx": neighbor_idx,  # 幾何学フィルタで使うためインデックスを追加
+                            "image_idx": neighbor_idx,  
                             "R": R_n,
                             "T": T_n,
                             "K": config.K,
                         }
                     )
-
-            if config.DEBUG_SAVE_DEPTH_MAPS:
-                save_each_depth_dir = os.path.join(
-                    config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}"
-                )
-                os.makedirs(save_each_depth_dir, exist_ok=True)
-                clear_folder(save_each_depth_dir)
-                save_initial_depth_path = os.path.join(
-                    save_each_depth_dir, f"initial_depth.png"
-                )
-                logging.info(f"Saving initial depth map to {save_initial_depth_path}")
-                save_depth_map_as_image(initial_depth, save_initial_depth_path)
 
             # PatchMatchを実行
             optimized_depth = depth_optimization.refine_depth_with_patchmatch(
@@ -144,13 +172,25 @@ if __name__ == "__main__":
                 ref_idx=idx,
             )
 
-            # 3. 光度一貫性フィルタリング
+            # 最適化後の深度を評価
+            if gt_depth is not None:
+                metrics = compute_depth_metrics(optimized_depth, gt_depth)
+                logging.info(f"[Optimized Depth] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}")
+                save_error_map_as_image(optimized_depth, gt_depth, os.path.join(save_each_depth_dir, "error_map_optimized.png"))
+
+            # 光度一貫性フィルタリング
             photometrically_filtered_depth = depth_optimization.filter_depth_map_by_photometric_consistency(
                 optimized_depth,
                 li_rgb,
                 {"R": R_mat, "T": T_pos, "K": config.K},
                 neighbor_views_data,
             )
+
+            # 光度フィルタリング後の深度を評価
+            if gt_depth is not None:
+                metrics = compute_depth_metrics(photometrically_filtered_depth, gt_depth)
+                logging.info(f"  [Photometric Filtered] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}")
+                save_error_map_as_image(photometrically_filtered_depth, gt_depth, os.path.join(save_each_depth_dir, "error_map_photometric.png"))
 
             if config.DEBUG_SAVE_DEPTH_MAPS:
                 save_photometric_filtered_depth_path = os.path.join(
