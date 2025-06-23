@@ -105,7 +105,7 @@ if __name__ == "__main__":
                 )
                 os.makedirs(save_each_depth_dir, exist_ok=True)
                 clear_folder(save_each_depth_dir)
-                save_depth_map_as_image(gt_depth, os.path.join(config.DEPTH_IMAGE_DIR, f"gt_depth_{idx:04d}.png"))
+                save_depth_map_as_image(gt_depth, os.path.join(save_each_depth_dir, f"gt_depth_{idx:04d}.png"))
 
         try:
             li_bgr = cv2.imread(left_path)
