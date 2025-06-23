@@ -8,9 +8,6 @@ import sys
 # scipyをインポートしてクォータニオンから回転行列への変換を確実に行う
 from scipy.spatial.transform import Rotation
 
-# utils.pyのquaternion_to_rotation_matrixは不要になるため、インポートしない
-# from utils import quaternion_to_rotation_matrix
-
 
 class DataLoader:
     def __init__(self, image_dir, drone_image_log):
@@ -41,7 +38,7 @@ class DataLoader:
     def get_image_paths(self, idx):
         """指定されたインデックスの左右画像のパスを返す"""
         if 0 <= idx < len(self.camera_data):
-            base_fn, _, _ = self.camera_data[idx]  # e.g., "left_000000.png"
+            base_fn, _, _ = self.camera_data[idx]  
             right_fn = base_fn.replace("left_", "right_")
             right_path = os.path.join(self.image_dir, right_fn)
             left_path = os.path.join(self.image_dir, base_fn)
@@ -95,5 +92,5 @@ class DataLoader:
                 logging.warning(f"Image files for index {idx} not found. Skipping.")
                 continue
 
-            pairs.append((idx, T_cv, left_path, right_path, R_cv))  # 変換後の位置  # 変換後の回転行列
+            pairs.append((idx, T_cv, left_path, right_path, R_cv)) 
         return pairs

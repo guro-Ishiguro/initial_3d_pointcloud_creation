@@ -21,7 +21,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # --- 初期化 ---
-    data_loader = DataLoader(config.IMAGE_DIR, config.DRONE_IMAGE_LOG)
+    data_loader = DataLoader(config.STEREO_IMAGE_DIR, config.DRONE_IMAGE_LOG)
     image_processor = ImageProcessor(config)
     depth_estimator = DepthEstimator(config)
     depth_optimization = DepthOptimization(config)
