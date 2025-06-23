@@ -855,6 +855,52 @@ class DepthOptimization:
                     if len(valid_costs) > 0:
                         grid_costs[r_idx, c_idx] = np.median(valid_costs)
 
+            # シードグリッドの選定
+            visited_map = np.zeros_like(initial_depth, dtype=np.bool_)
+            grid_rows, grid_cols = (
+                self.config.PROPAGATION_GRID_ROWS,
+                self.config.PROPAGATION_GRID_COLS,
+            )
+            grid_h, grid_w = h // grid_rows, w // grid_cols
+            
+            min_cost_flat_idx = np.nanargmin(grid_costs)
+            r_idx, c_idx = np.unravel_index(
+                min_cost_flat_idx, grid_costs.shape
+            )
+            min_cost = grid_costs[r_idx, c_idx]
+            r_start, r_end = r_idx * grid_h, (r_idx + 1) * grid_h
+            c_start, c_end = c_idx * grid_w, (c_idx + 1) * grid_w
+            logging.info(
+                f"Seed grid found at index ({r_idx}, {c_idx}) with cost {min_cost:.4f}."
+            )
+
+            # 初期波面の設定
+            seed_mask = np.zeros_like(visited_map)
+            seed_mask[r_start:r_end, c_start:c_end] = True
+            visited_map[seed_mask & propagation_mask] = True
+
+            initial_wavefront = []
+            for r_ in range(r_start, r_end):
+                for c_ in range(c_start, c_end):
+                    if not visited_map[r_, c_]:
+                        continue
+                    for dr in [-1, 0, 1]:
+                        for dc in [-1, 0, 1]:
+                            if dr == 0 and dc == 0:
+                                continue
+                            nr, nc = r_ + dr, c_ + dc
+                            if (
+                                0 <= nr < h
+                                and 0 <= nc < w
+                                and propagation_mask[nr, nc]
+                                and not visited_map[nr, nc]
+                            ):
+                                initial_wavefront.append((nr, nc))
+
+            initial_wavefront_np = np.array(
+                list(set(initial_wavefront)), dtype=np.int32
+            )
+
         # --- PatchMatch反復ループ ---
         for i in range(self.config.PATCHMATCH_ITERATIONS):
             np.copyto(depth_map_prev, depth_map)
@@ -897,84 +943,32 @@ class DepthOptimization:
                     )
 
             elif self.config.CHOICED_PROPAGATION_METHOD == "priority":
-                if i == 0:
-                    logging.info(
-                        "Starting wavefront propagation from the best seed grid..."
+                logging.info(
+                    "Starting wavefront propagation from the best seed grid..."
+                )
+
+                if len(initial_wavefront_np) > 0:
+                    _propagate_wavefront_jit(
+                        depth_map,
+                        normal_map,
+                        cost_map,
+                        visited_map,
+                        propagation_mask,
+                        initial_wavefront_np,
+                        self.config.PATCHMATCH_PATCH_SIZE,
+                        self.config.TOP_K_COSTS,
+                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                        ref_image_gray,
+                        ref_pose_K,
+                        ref_pose_R,
+                        ref_pose_T,
+                        src_images_gray,
+                        src_K,
+                        src_R,
+                        src_T,
                     )
-                    visited_map = np.zeros_like(initial_depth, dtype=np.bool_)
-                    grid_rows, grid_cols = (
-                        self.config.PROPAGATION_GRID_ROWS,
-                        self.config.PROPAGATION_GRID_COLS,
-                    )
-                    grid_h, grid_w = h // grid_rows, w // grid_cols
-                    valid_grid_indices = np.where(np.isfinite(grid_costs))
-                    if len(valid_grid_indices[0]) > 0:
-                        min_cost_flat_idx = np.nanargmin(grid_costs)
-                        r_idx, c_idx = np.unravel_index(
-                            min_cost_flat_idx, grid_costs.shape
-                        )
-                        min_cost = grid_costs[r_idx, c_idx]
-                        r_start, r_end = r_idx * grid_h, (r_idx + 1) * grid_h
-                        c_start, c_end = c_idx * grid_w, (c_idx + 1) * grid_w
-                        logging.info(
-                            f"Seed grid found at index ({r_idx}, {c_idx}) with cost {min_cost:.4f}."
-                        )
-
-                        # シードグリッドはマスク内のみを訪問済みとする
-                        seed_mask = np.zeros_like(visited_map)
-                        seed_mask[r_start:r_end, c_start:c_end] = True
-                        visited_map[seed_mask & propagation_mask] = True
-
-                        initial_wavefront = []
-                        for r_ in range(r_start, r_end):
-                            for c_ in range(c_start, c_end):
-                                if not visited_map[r_, c_]:
-                                    continue
-                                for dr in [-1, 0, 1]:
-                                    for dc in [-1, 0, 1]:
-                                        if dr == 0 and dc == 0:
-                                            continue
-                                        nr, nc = r_ + dr, c_ + dc
-                                        if (
-                                            0 <= nr < h
-                                            and 0 <= nc < w
-                                            and propagation_mask[nr, nc]
-                                            and not visited_map[nr, nc]
-                                        ):
-                                            initial_wavefront.append((nr, nc))
-
-                        initial_wavefront_np = np.array(
-                            list(set(initial_wavefront)), dtype=np.int32
-                        )
-
-                        if len(initial_wavefront_np) > 0:
-                            _propagate_wavefront_jit(
-                                depth_map,
-                                normal_map,
-                                cost_map,
-                                visited_map,
-                                propagation_mask,
-                                initial_wavefront_np,
-                                self.config.PATCHMATCH_PATCH_SIZE,
-                                self.config.TOP_K_COSTS,
-                                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                                ref_image_gray,
-                                ref_pose_K,
-                                ref_pose_R,
-                                ref_pose_T,
-                                src_images_gray,
-                                src_K,
-                                src_R,
-                                src_T,
-                            )
-                        else:
-                            logging.warning("Initial wavefront is empty.")
-                    else:
-                        logging.warning("No valid grids to start propagation.")
                 else:
-                    logging.info(
-                        "Skipping spatial propagation for subsequent iterations."
-                    )
+                    logging.warning("Initial wavefront is empty.")                   
 
             # --- 2. ランダム探索 ---
             depth_range_map = (
