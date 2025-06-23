@@ -38,6 +38,9 @@ if __name__ == "__main__":
     os.makedirs(config.POINT_CLOUD_DIR, exist_ok=True)
     clear_folder(config.POINT_CLOUD_DIR)
 
+    os.makedirs(config.CSV_DIR, exist_ok=True)
+    clear_folder(config.CSV_DIR)
+
     if config.DEBUG_SAVE_DEPTH_MAPS:
         os.makedirs(config.DEPTH_IMAGE_DIR, exist_ok=True)
         clear_folder(config.DEPTH_IMAGE_DIR)
@@ -340,7 +343,7 @@ if __name__ == "__main__":
     # --- 評価サマリの出力 ---
     if evaluation_results:
         # CSVファイルへの書き出し
-        output_csv_path = os.path.join(config.HISTGRAM_DIR, "evaluation_summary.csv")
+        output_csv_path = os.path.join(config.CSV_DIR, "evaluation_summary.csv")
         logging.info(f"\n--- Evaluation Summary ---")
         logging.info(f"Writing evaluation summary to {output_csv_path}")
 

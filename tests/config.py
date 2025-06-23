@@ -55,6 +55,7 @@ VIDEO_DIR = os.path.join(OUTPUT_TYPE_DIR, "video")
 DISPARITY_IMAGE_DIR = os.path.join(OUTPUT_TYPE_DIR, "disparity")
 DEPTH_IMAGE_DIR = os.path.join(OUTPUT_TYPE_DIR, "depth")
 HISTGRAM_DIR = os.path.join(OUTPUT_TYPE_DIR, "histgram")
+CSV_DIR = os.path.join(OUTPUT_TYPE_DIR, "csv")
 
 # スケールの設定
 B, fov_h, fov_v, width, height = (
