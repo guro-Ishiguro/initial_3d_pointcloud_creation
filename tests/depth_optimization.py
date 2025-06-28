@@ -916,7 +916,7 @@ class DepthOptimization:
                 else:
                     neighbors_dr = np.array([1, 0], dtype=np.int8)
                     neighbors_dc = np.array([0, 1], dtype=np.int8)
-                for i in [0, 1]:
+                for j in [0, 1]:
                     _propagate_spatial_one_color_jit(
                         depth_map,
                         normal_map,
@@ -924,7 +924,7 @@ class DepthOptimization:
                         propagation_mask,
                         neighbors_dr,
                         neighbors_dc,
-                        i,
+                        j,
                         0,
                         h,
                         0,
