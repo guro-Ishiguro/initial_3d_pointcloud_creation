@@ -123,23 +123,6 @@ if __name__ == "__main__":
             image_processor.save_disparity_image(disp, os.path.join(config.DISPARITY_IMAGE_DIR, f"disp_{idx:04d}.png"))
             initial_depth = depth_estimator.disparity_to_depth(disp)
 
-            # 初期深度を保存
-            if config.DEBUG_SAVE_DEPTH_MAPS:
-                save_initial_depth_path = os.path.join(
-                    save_each_depth_dir, f"initial_depth.png"
-                )
-                logging.info(f"Saving initial depth map to {save_initial_depth_path}")
-                save_depth_map_as_image(initial_depth, save_initial_depth_path)
-
-            # 初期深度を評価
-            if gt_depth is not None:
-                metrics = compute_depth_metrics(initial_depth, gt_depth)
-                logging.info(f"[Initial Depth] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}")
-                view_metrics["rmse_initial"] = metrics["rmse"]
-                view_metrics["mae_initial"] = metrics["mae"]
-                view_metrics["abs_rel_initial"] = metrics["abs_rel"]
-                save_error_map_as_image(initial_depth, gt_depth, os.path.join(save_each_depth_dir, "error_map_initial.png"))
-
             # 深度誤差コストを計算
             d_cost = depth_estimator.compute_depth_error_cost(
                 disp, initial_depth, config.window_size
@@ -156,6 +139,23 @@ if __name__ == "__main__":
             initial_depth[bmask] = np.nan
             d_cost[bmask] = np.nan
             d_cost[np.isnan(d_cost)] = 1.0
+
+            # 初期深度を保存
+            if config.DEBUG_SAVE_DEPTH_MAPS:
+                save_initial_depth_path = os.path.join(
+                    save_each_depth_dir, f"initial_depth.png"
+                )
+                logging.info(f"Saving initial depth map to {save_initial_depth_path}")
+                save_depth_map_as_image(initial_depth, save_initial_depth_path)
+
+            # 初期深度を評価
+            if gt_depth is not None:
+                metrics = compute_depth_metrics(initial_depth, gt_depth)
+                logging.info(f"[Initial Depth] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}")
+                view_metrics["rmse_initial"] = metrics["rmse"]
+                view_metrics["mae_initial"] = metrics["mae"]
+                view_metrics["abs_rel_initial"] = metrics["abs_rel"]
+                save_error_map_as_image(initial_depth, gt_depth, os.path.join(save_each_depth_dir, "error_map_initial.png"))
 
             # PatchMatchによる深度マップの最適化
             neighbor_views_data = []
