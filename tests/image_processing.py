@@ -64,3 +64,23 @@ class ImageProcessor:
                             xorv >>= 1
                         cost[y, x] = c
         return cost
+    
+
+    def save_disparity_image(self, disparity_map, filename, normalize=True, colormap=cv2.COLORMAP_JET):
+        """
+        視差マップを画像ファイルとして保存する
+        """
+        if normalize:
+            min_disp = disparity_map.min()
+            max_disp = disparity_map.max()
+            if max_disp - min_disp > 0:
+                normalized_disp = (disparity_map - min_disp) / (max_disp - min_disp)
+            else:
+                normalized_disp = np.zeros_like(disparity_map)
+            normalized_disp_uint8 = np.uint8(normalized_disp * 255)
+            color_disp = cv2.applyColorMap(normalized_disp_uint8, colormap)
+            cv2.imwrite(filename, color_disp)
+            print(f"Colorized disparity image saved to {filename}")
+        else:
+            np.save(filename, disparity_map)
+            print(f"Raw disparity map saved to {filename}")

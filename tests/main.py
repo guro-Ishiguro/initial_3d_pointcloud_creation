@@ -89,6 +89,11 @@ if __name__ == "__main__":
 
         view_metrics = {"image_index": idx}
 
+        save_each_depth_dir = os.path.join(
+            config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}"
+        )
+        os.makedirs(save_each_depth_dir, exist_ok=True)
+
         # --- Ground Truth Depthの読み込み ---
         gt_depth_path = os.path.join(config.LABEL_DEPTH_IMAGE_DIR, f"depth_{idx:06d}.exr")
         if not os.path.exists(gt_depth_path):
@@ -100,10 +105,6 @@ if __name__ == "__main__":
                 h, w, _ = loaded_images[idx].shape
                 if gt_depth.shape != (h, w):
                     gt_depth = cv2.resize(gt_depth, (w, h), interpolation=cv2.INTER_NEAREST)
-                save_each_depth_dir = os.path.join(
-                    config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}"
-                )
-                os.makedirs(save_each_depth_dir, exist_ok=True)
                 clear_folder(save_each_depth_dir)
                 save_depth_map_as_image(gt_depth, os.path.join(save_each_depth_dir, f"gt_depth_{idx:04d}.png"))
 
@@ -119,6 +120,7 @@ if __name__ == "__main__":
 
             # 初期深度マップと深度誤差コストを計算
             disp = image_processor.create_disparity(li_gray, ri_gray)
+            image_processor.save_disparity_image(disp, os.path.join(config.DISPARITY_IMAGE_DIR, f"disp_{idx:04d}.png"))
             initial_depth = depth_estimator.disparity_to_depth(disp)
 
             # 初期深度を保存
