@@ -995,6 +995,21 @@ class DepthOptimization:
                 self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
                 depth_range_map,
             )
+
+            if self.config.DEBUG_PATCH_MATCH_VISUALIZATION:
+                y_debug, x_debug = self.config.DEBUG_PIXEL_COORDS
+                self._debug_patch_visualization(
+                    y_debug,
+                    x_debug,
+                    depth_map[y_debug, x_debug],
+                    normal_map[y_debug, x_debug],
+                    ref_image,
+                    ref_pose,
+                    neighbor_views_data,
+                    title_prefix=f"Iteration {i+1}",
+                )
+                cv2.waitKey(0)
+
             if self.config.DEBUG_SAVE_DEPTH_MAPS:
                 save_each_depth_dir = os.path.join(
                     config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}"
