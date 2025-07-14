@@ -119,9 +119,14 @@ if __name__ == "__main__":
             ri_gray = cv2.cvtColor(ri_bgr, cv2.COLOR_BGR2GRAY)
 
             # 初期深度マップと深度誤差コストを計算
+            start_time_initial_depth = time.time()
             disp = image_processor.create_disparity(li_gray, ri_gray)
-            image_processor.save_disparity_image(disp, os.path.join(config.DISPARITY_IMAGE_DIR, f"disp_{idx:04d}.png"))
             initial_depth = depth_estimator.disparity_to_depth(disp)
+            end_time_initial_depth = time.time()
+            logging.info(f"Initial depth calculation time for image {idx}: {end_time_initial_depth - start_time_initial_depth:.4f} seconds")
+            
+            image_processor.save_disparity_image(disp, os.path.join(config.DISPARITY_IMAGE_DIR, f"disp_{idx:04d}.png"))
+            
 
             # 深度誤差コストを計算
             d_cost = depth_estimator.compute_depth_error_cost(

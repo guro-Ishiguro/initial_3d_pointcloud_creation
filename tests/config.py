@@ -75,7 +75,7 @@ scene_width = 2 * camera_height * np.tan(np.radians(fov_h) / 2)
 scene_height = 2 * camera_height * np.tan(np.radians(fov_v) / 2)
 pixel_size = scene_width / width
 
-window_size, min_disp, num_disp = 5, 0, 192
+window_size, min_disp, num_disp = 5, 0, 216
 
 # --- デバッグ用の設定 ---
 DEBUG_PATCH_MATCH_VISUALIZATION = False  # PatchMatch のホモグラフィ行列の移動先デバッグ可視化を行うか
