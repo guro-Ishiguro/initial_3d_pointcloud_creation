@@ -7,6 +7,7 @@ import logging
 import config
 import os
 from utils import save_depth_map_as_image
+import time  # timeモジュールをインポート
 
 
 @njit(fastmath=True)
@@ -903,6 +904,7 @@ class DepthOptimization:
 
         # --- PatchMatch反復ループ ---
         for i in range(self.config.PATCHMATCH_ITERATIONS):
+            iteration_start_time = time.time()  
             np.copyto(depth_map_prev, depth_map)
             logging.info(
                 f"PatchMatch Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
@@ -1036,6 +1038,11 @@ class DepthOptimization:
                     break
             else:
                 logging.warning("No valid pixels for convergence check.")
+            
+            iteration_end_time = time.time()  
+            elapsed_time = iteration_end_time - iteration_start_time
+            logging.info(f"Iteration {i+1} took {elapsed_time:.2f} seconds.")
+
 
         logging.info("PatchMatch MVS refinement finished.")
         final_depth_map = depth_map.copy()
