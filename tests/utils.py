@@ -1,4 +1,5 @@
 import os
+import config
 import shutil
 import numpy as np
 import logging
@@ -83,8 +84,8 @@ def save_depth_map_as_image(depth_map, file_path):
             cv2.imwrite(file_path, black_image)
             return
 
-        min_val = np.min(depth_map[valid_mask])
-        max_val = np.max(depth_map[valid_mask])
+        min_val = 0
+        max_val = config.camera_height
 
         # 0-255の範囲に正規化
         if max_val - min_val > 1e-6:
