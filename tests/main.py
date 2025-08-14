@@ -16,6 +16,7 @@ from utils import (
     read_exr_depth,
     compute_depth_metrics,
     save_error_map_as_image,
+    save_disparity_map_with_colorbar,
 )
 from data_loader import DataLoader
 from image_processing import ImageProcessor
@@ -40,6 +41,9 @@ if __name__ == "__main__":
 
     os.makedirs(config.CSV_DIR, exist_ok=True)
     clear_folder(config.CSV_DIR)
+
+    os.makedirs(config.DISPARITY_IMAGE_DIR, exist_ok=True)
+    clear_folder(config.DISPARITY_IMAGE_DIR)
 
     if config.DEBUG_SAVE_DEPTH_MAPS:
         os.makedirs(config.DEPTH_IMAGE_DIR, exist_ok=True)
@@ -134,7 +138,7 @@ if __name__ == "__main__":
                 f"Initial depth calculation time for image {idx}: {end_time_initial_depth - start_time_initial_depth:.4f} seconds"
             )
 
-            image_processor.save_disparity_image(
+            save_disparity_map_with_colorbar(
                 disp, os.path.join(config.DISPARITY_IMAGE_DIR, f"disp_{idx:04d}.png")
             )
 

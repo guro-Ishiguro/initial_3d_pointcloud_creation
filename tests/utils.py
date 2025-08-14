@@ -226,3 +226,88 @@ def save_error_map_as_image(pred_depth, gt_depth, file_path, max_error=1.0):
 
     cv2.imwrite(file_path, colored_map)
     logging.info(f"Saved depth error map to {file_path}")
+
+
+def save_disparity_map_with_colorbar(disparity_map, file_path):
+    """
+    視差マップをカラーバー付きの画像として保存する。
+    """
+    try:
+        h, w = disparity_map.shape
+        valid_mask = np.isfinite(disparity_map)
+
+        if not valid_mask.any():
+            black_image = np.zeros((h, w, 3), dtype=np.uint8)
+            cv2.putText(
+                black_image,
+                "No valid disparity",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (255, 255, 255),
+                2,
+            )
+            cv2.imwrite(file_path, black_image)
+            return
+
+        # 有効な視差値から最小値と最大値を取得
+        min_val = disparity_map[valid_mask].min()
+        max_val = disparity_map[valid_mask].max()
+
+        if max_val - min_val > 1e-6:
+            # 0-255の範囲に正規化
+            normalized_map = 255.0 * (disparity_map - min_val) / (max_val - min_val)
+        else:
+            normalized_map = np.full(disparity_map.shape, 128, dtype=np.float32)
+
+        # NaNの値を0に変換し、uint8にキャスト
+        vis_map = np.nan_to_num(normalized_map).astype(np.uint8)
+        # カラーマップを適用
+        colored_map = cv2.applyColorMap(vis_map, cv2.COLORMAP_JET)
+        # 無効な領域を黒で塗りつぶす
+        colored_map[~valid_mask] = [0, 0, 0]
+
+        # カラーバー用の設定
+        colorbar_width = 80
+        total_width = w + colorbar_width
+        output_image = np.zeros((h, total_width, 3), dtype=np.uint8)
+        output_image[:, :w] = colored_map
+
+        # カラーバーの生成
+        colorbar = np.linspace(0, 255, h).reshape(h, 1)
+        colorbar_img = cv2.applyColorMap(np.uint8(colorbar), cv2.COLORMAP_JET)
+        # カラーバーを上下反転させる（値が小さい方が下になるように）
+        colorbar_img = cv2.flip(colorbar_img, 0)
+
+        # 出力画像にカラーバーを配置
+        output_image[:, w : w + 20] = cv2.resize(
+            colorbar_img, (20, h), interpolation=cv2.INTER_LINEAR
+        )
+
+        # カラーバーにテキストを追加
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(
+            output_image,
+            f"{max_val:.2f}", # 最大値を表示
+            (w + 25, 30),
+            font,
+            0.8,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            output_image,
+            f"{min_val:.2f}", # 最小値を表示
+            (w + 25, h - 10),
+            font,
+            0.8,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+        cv2.imwrite(file_path, output_image)
+        logging.info(f"Saved disparity map to {file_path}")
+    except Exception as e:
+        logging.error(f"Failed to save disparity map to {file_path}: {e}")
