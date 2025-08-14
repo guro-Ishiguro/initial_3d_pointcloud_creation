@@ -11,7 +11,11 @@ class DepthEstimator:
     def disparity_to_depth(self, disparity):
         """視差マップを深度マップに変換する"""
         depth = self.config.B * self.config.focal_length / (disparity + 1e-6)
-        depth[(depth < 0) | (depth > self.config.camera_height) | ((depth > 8.5) & (depth < 9.5))] = np.nan
+        depth[
+            (depth < 0)
+            | (depth > self.config.camera_height)
+            | ((depth > 8.5) & (depth < 9.5))
+        ] = np.nan
         return depth
 
     @staticmethod

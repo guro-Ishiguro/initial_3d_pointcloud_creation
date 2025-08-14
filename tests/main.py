@@ -15,7 +15,7 @@ from utils import (
     save_depth_map_as_image,
     read_exr_depth,
     compute_depth_metrics,
-    save_error_map_as_image
+    save_error_map_as_image,
 )
 from data_loader import DataLoader
 from image_processing import ImageProcessor
@@ -89,24 +89,31 @@ if __name__ == "__main__":
 
         view_metrics = {"image_index": idx}
 
-        save_each_depth_dir = os.path.join(
-            config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}"
-        )
+        save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}")
         os.makedirs(save_each_depth_dir, exist_ok=True)
 
         # --- Ground Truth Depthの読み込み ---
-        gt_depth_path = os.path.join(config.LABEL_DEPTH_IMAGE_DIR, f"depth_{idx:06d}.exr")
+        gt_depth_path = os.path.join(
+            config.LABEL_DEPTH_IMAGE_DIR, f"depth_{idx:06d}.exr"
+        )
         if not os.path.exists(gt_depth_path):
-            logging.warning(f"Ground truth depth file not found for index {idx}, skipping evaluation for this view.")
+            logging.warning(
+                f"Ground truth depth file not found for index {idx}, skipping evaluation for this view."
+            )
             gt_depth = None
         else:
             gt_depth = read_exr_depth(gt_depth_path)
             if gt_depth is not None:
                 h, w, _ = loaded_images[idx].shape
                 if gt_depth.shape != (h, w):
-                    gt_depth = cv2.resize(gt_depth, (w, h), interpolation=cv2.INTER_NEAREST)
+                    gt_depth = cv2.resize(
+                        gt_depth, (w, h), interpolation=cv2.INTER_NEAREST
+                    )
                 clear_folder(save_each_depth_dir)
-                save_depth_map_as_image(gt_depth, os.path.join(save_each_depth_dir, f"gt_depth_{idx:04d}.png"))
+                save_depth_map_as_image(
+                    gt_depth,
+                    os.path.join(save_each_depth_dir, f"gt_depth_{idx:04d}.png"),
+                )
 
         try:
             li_bgr = cv2.imread(left_path)
@@ -123,10 +130,13 @@ if __name__ == "__main__":
             disp = image_processor.create_disparity(li_gray, ri_gray)
             initial_depth = depth_estimator.disparity_to_depth(disp)
             end_time_initial_depth = time.time()
-            logging.info(f"Initial depth calculation time for image {idx}: {end_time_initial_depth - start_time_initial_depth:.4f} seconds")
-            
-            image_processor.save_disparity_image(disp, os.path.join(config.DISPARITY_IMAGE_DIR, f"disp_{idx:04d}.png"))
-            
+            logging.info(
+                f"Initial depth calculation time for image {idx}: {end_time_initial_depth - start_time_initial_depth:.4f} seconds"
+            )
+
+            image_processor.save_disparity_image(
+                disp, os.path.join(config.DISPARITY_IMAGE_DIR, f"disp_{idx:04d}.png")
+            )
 
             # 深度誤差コストを計算
             d_cost = depth_estimator.compute_depth_error_cost(
@@ -156,11 +166,17 @@ if __name__ == "__main__":
             # 初期深度を評価
             if gt_depth is not None:
                 metrics = compute_depth_metrics(initial_depth, gt_depth)
-                logging.info(f"[Initial Depth] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}")
+                logging.info(
+                    f"[Initial Depth] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}"
+                )
                 view_metrics["rmse_initial"] = metrics["rmse"]
                 view_metrics["mae_initial"] = metrics["mae"]
                 view_metrics["abs_rel_initial"] = metrics["abs_rel"]
-                save_error_map_as_image(initial_depth, gt_depth, os.path.join(save_each_depth_dir, "error_map_initial.png"))
+                save_error_map_as_image(
+                    initial_depth,
+                    gt_depth,
+                    os.path.join(save_each_depth_dir, "error_map_initial.png"),
+                )
 
             # PatchMatchによる深度マップの最適化
             neighbor_views_data = []
@@ -174,7 +190,7 @@ if __name__ == "__main__":
                     neighbor_views_data.append(
                         {
                             "image": loaded_images[neighbor_idx],
-                            "image_idx": neighbor_idx,  
+                            "image_idx": neighbor_idx,
                             "R": R_n,
                             "T": T_n,
                             "K": config.K,
@@ -194,28 +210,44 @@ if __name__ == "__main__":
             # 最適化後の深度を評価
             if gt_depth is not None:
                 metrics = compute_depth_metrics(optimized_depth, gt_depth)
-                logging.info(f"[Optimized Depth] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}")
+                logging.info(
+                    f"[Optimized Depth] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}"
+                )
                 view_metrics["rmse_optimized"] = metrics["rmse"]
                 view_metrics["mae_optimized"] = metrics["mae"]
                 view_metrics["abs_rel_optimized"] = metrics["abs_rel"]
-                save_error_map_as_image(optimized_depth, gt_depth, os.path.join(save_each_depth_dir, "error_map_optimized.png"))
+                save_error_map_as_image(
+                    optimized_depth,
+                    gt_depth,
+                    os.path.join(save_each_depth_dir, "error_map_optimized.png"),
+                )
 
             # 光度一貫性フィルタリング
-            photometrically_filtered_depth = depth_optimization.filter_depth_map_by_photometric_consistency(
-                optimized_depth,
-                li_rgb,
-                {"R": R_mat, "T": T_pos, "K": config.K},
-                neighbor_views_data,
+            photometrically_filtered_depth = (
+                depth_optimization.filter_depth_map_by_photometric_consistency(
+                    optimized_depth,
+                    li_rgb,
+                    {"R": R_mat, "T": T_pos, "K": config.K},
+                    neighbor_views_data,
+                )
             )
 
             # 光度フィルタリング後の深度を評価
             if gt_depth is not None:
-                metrics = compute_depth_metrics(photometrically_filtered_depth, gt_depth)
-                logging.info(f"  [Photometric Filtered] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}")
+                metrics = compute_depth_metrics(
+                    photometrically_filtered_depth, gt_depth
+                )
+                logging.info(
+                    f"  [Photometric Filtered] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}"
+                )
                 view_metrics["rmse_photometric"] = metrics["rmse"]
                 view_metrics["mae_photometric"] = metrics["mae"]
                 view_metrics["abs_rel_photometric"] = metrics["abs_rel"]
-                save_error_map_as_image(photometrically_filtered_depth, gt_depth, os.path.join(save_each_depth_dir, "error_map_photometric.png"))
+                save_error_map_as_image(
+                    photometrically_filtered_depth,
+                    gt_depth,
+                    os.path.join(save_each_depth_dir, "error_map_photometric.png"),
+                )
 
             if config.DEBUG_SAVE_DEPTH_MAPS:
                 save_photometric_filtered_depth_path = os.path.join(
@@ -233,7 +265,7 @@ if __name__ == "__main__":
 
         except Exception as e:
             logging.error(f"Error in Step 1 for image pair {idx}: {e}", exc_info=True)
-        
+
         evaluation_results.append(view_metrics)
 
     # --- ステップ2: 幾何学的一貫性フィルタリングと点群生成 ---
@@ -277,11 +309,13 @@ if __name__ == "__main__":
                     )
 
             # 幾何学的一貫性フィルタリング
-            geometrically_filtered_depth = depth_optimization.filter_depth_map_by_geometric_consistency(
-                ref_depth_map=ref_depth_map,
-                ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
-                neighbor_views_data=neighbor_views_data,
-                all_optimized_depths=all_optimized_depths,
+            geometrically_filtered_depth = (
+                depth_optimization.filter_depth_map_by_geometric_consistency(
+                    ref_depth_map=ref_depth_map,
+                    ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
+                    neighbor_views_data=neighbor_views_data,
+                    all_optimized_depths=all_optimized_depths,
+                )
             )
 
             if config.DEBUG_SAVE_DEPTH_MAPS:
@@ -357,14 +391,22 @@ if __name__ == "__main__":
 
         headers = [
             "image_index",
-            "rmse_initial", "mae_initial", "abs_rel_initial",
-            "rmse_optimized", "mae_optimized", "abs_rel_optimized",
-            "rmse_photometric", "mae_photometric", "abs_rel_photometric",
-            "rmse_geometric", "mae_geometric", "abs_rel_geometric"
+            "rmse_initial",
+            "mae_initial",
+            "abs_rel_initial",
+            "rmse_optimized",
+            "mae_optimized",
+            "abs_rel_optimized",
+            "rmse_photometric",
+            "mae_photometric",
+            "abs_rel_photometric",
+            "rmse_geometric",
+            "mae_geometric",
+            "abs_rel_geometric",
         ]
-        
+
         try:
-            with open(output_csv_path, 'w', newline='') as csvfile:
+            with open(output_csv_path, "w", newline="") as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=headers)
                 writer.writeheader()
                 for row in evaluation_results:
@@ -380,7 +422,9 @@ if __name__ == "__main__":
             if key == "image_index":
                 continue
             # NaNを無視して平均を計算
-            valid_values = [d[key] for d in evaluation_results if key in d and np.isfinite(d[key])]
+            valid_values = [
+                d[key] for d in evaluation_results if key in d and np.isfinite(d[key])
+            ]
             if valid_values:
                 avg_metrics[key] = np.mean(valid_values)
             else:

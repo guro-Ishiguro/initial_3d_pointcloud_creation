@@ -33,19 +33,19 @@ def quaternion_to_rotation_matrix(qx, qy, qz, qw):
     R = np.array(
         [
             [
-                1 - 2 * (qy ** 2 + qz ** 2),
+                1 - 2 * (qy**2 + qz**2),
                 2 * (qx * qy - qz * qw),
                 2 * (qx * qz + qy * qw),
             ],
             [
                 2 * (qx * qy + qz * qw),
-                1 - 2 * (qx ** 2 + qz ** 2),
+                1 - 2 * (qx**2 + qz**2),
                 2 * (qy * qz - qx * qw),
             ],
             [
                 2 * (qx * qz - qy * qw),
                 2 * (qy * qz + qx * qw),
-                1 - 2 * (qx ** 2 + qy ** 2),
+                1 - 2 * (qx**2 + qy**2),
             ],
         ]
     )
@@ -116,45 +116,50 @@ def read_exr_depth(file_path):
     try:
         exr_file = OpenEXR.InputFile(file_path)
         header = exr_file.header()
-        
-        available_channels = list(header['channels'].keys())
-        
+
+        available_channels = list(header["channels"].keys())
+
         # 'R' または 'Y' チャンネルを深度データとして優先的に使用
-        target_channel = ''
-        if 'R' in available_channels:
-            target_channel = 'R'
-        elif 'Y' in available_channels:
-            target_channel = 'Y'
+        target_channel = ""
+        if "R" in available_channels:
+            target_channel = "R"
+        elif "Y" in available_channels:
+            target_channel = "Y"
         else:
-            logging.error(f"Error: Could not find 'R' or 'Y' channel for depth information.")
+            logging.error(
+                f"Error: Could not find 'R' or 'Y' channel for depth information."
+            )
             logging.error(f"Available channels: {available_channels}")
             return None
 
-        logging.info(f"Info: Detected '{target_channel}' channel in the file. Reading it as depth data.")
+        logging.info(
+            f"Info: Detected '{target_channel}' channel in the file. Reading it as depth data."
+        )
 
-        dw = header['dataWindow']
+        dw = header["dataWindow"]
         size = (dw.max.y - dw.min.y + 1, dw.max.x - dw.min.x + 1)
 
         pt = Imath.PixelType(Imath.PixelType.FLOAT)
         channel_bytes = exr_file.channel(target_channel, pt)
-        
+
         depth_map = np.frombuffer(channel_bytes, dtype=np.float32)
         depth_map = depth_map.reshape(size)
-        
+
         return depth_map
     except Exception as e:
         logging.error(f"An error occurred while reading the EXR file: {e}")
         return None
+
 
 def compute_depth_metrics(pred_depth, gt_depth):
     """
     予測深度と正解深度を比較し、評価指標を計算する。
     """
     valid_mask = np.isfinite(pred_depth) & np.isfinite(gt_depth) & (gt_depth > 0)
-    
+
     if np.sum(valid_mask) == 0:
         return {"rmse": np.nan, "mae": np.nan, "abs_rel": np.nan}
-        
+
     pred_valid = pred_depth[valid_mask]
     gt_valid = gt_depth[valid_mask]
 
@@ -174,11 +179,11 @@ def save_error_map_as_image(pred_depth, gt_depth, file_path, max_error=1.0):
     error_map[valid_mask] = np.abs(pred_depth[valid_mask] - gt_depth[valid_mask])
 
     vis_map = np.nan_to_num(error_map)
-    vis_map[vis_map > max_error] = max_error # エラーの上限を設定
+    vis_map[vis_map > max_error] = max_error  # エラーの上限を設定
     vis_map = (vis_map / max_error) * 255.0
-    
+
     colored_map = cv2.applyColorMap(vis_map.astype(np.uint8), cv2.COLORMAP_INFERNO)
-    
+
     colored_map[~valid_mask] = [0, 0, 0]
 
     cv2.imwrite(file_path, colored_map)

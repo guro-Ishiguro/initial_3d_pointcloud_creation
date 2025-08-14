@@ -77,7 +77,7 @@ def compute_cloud_to_mesh(pcd, mesh):
     query = o3d.core.Tensor(pts, dtype=o3d.core.Dtype.Float32)
     signed = scene.compute_signed_distance(query).numpy().flatten()
     d = np.abs(signed)
-    return d.mean(), np.sqrt((d ** 2).mean()), d
+    return d.mean(), np.sqrt((d**2).mean()), d
 
 
 def compute_density(pcd, cell_size=0.1):

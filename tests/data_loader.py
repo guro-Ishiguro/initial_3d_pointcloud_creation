@@ -38,7 +38,7 @@ class DataLoader:
     def get_image_paths(self, idx):
         """指定されたインデックスの左右画像のパスを返す"""
         if 0 <= idx < len(self.camera_data):
-            base_fn, _, _ = self.camera_data[idx]  
+            base_fn, _, _ = self.camera_data[idx]
             right_fn = base_fn.replace("left_", "right_")
             right_path = os.path.join(self.image_dir, right_fn)
             left_path = os.path.join(self.image_dir, base_fn)
@@ -92,5 +92,5 @@ class DataLoader:
                 logging.warning(f"Image files for index {idx} not found. Skipping.")
                 continue
 
-            pairs.append((idx, T_cv, left_path, right_path, R_cv)) 
+            pairs.append((idx, T_cv, left_path, right_path, R_cv))
         return pairs

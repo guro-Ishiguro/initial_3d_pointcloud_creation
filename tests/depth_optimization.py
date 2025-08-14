@@ -62,7 +62,7 @@ def _compute_weighted_zncc_cost_jit(patch_ref, warped_patch_src, sigma_color):
     for r in range(patch_size):
         for c in range(patch_size):
             color_diff_sq = (patch_ref[r, c] - center_val) ** 2
-            weights[r, c] = np.exp(-color_diff_sq / (2 * sigma_color ** 2))
+            weights[r, c] = np.exp(-color_diff_sq / (2 * sigma_color**2))
 
     # 2. 重み付き統計量を計算
     sum_w = np.sum(weights)
@@ -404,7 +404,7 @@ def _random_search_jit(
             angle_rad = np.radians(
                 (np.random.rand() * 2 - 1)
                 * normal_search_angle
-                * (decay_rate ** iteration)
+                * (decay_rate**iteration)
             )
             rand_axis = np.random.randn(3).astype(np.float32)
             rand_axis /= np.linalg.norm(rand_axis)
@@ -863,11 +863,9 @@ class DepthOptimization:
                 self.config.PROPAGATION_GRID_COLS,
             )
             grid_h, grid_w = h // grid_rows, w // grid_cols
-            
+
             min_cost_flat_idx = np.nanargmin(grid_costs)
-            r_idx, c_idx = np.unravel_index(
-                min_cost_flat_idx, grid_costs.shape
-            )
+            r_idx, c_idx = np.unravel_index(min_cost_flat_idx, grid_costs.shape)
             min_cost = grid_costs[r_idx, c_idx]
             r_start, r_end = r_idx * grid_h, (r_idx + 1) * grid_h
             c_start, c_end = c_idx * grid_w, (c_idx + 1) * grid_w
@@ -904,7 +902,7 @@ class DepthOptimization:
 
         # --- PatchMatch反復ループ ---
         for i in range(self.config.PATCHMATCH_ITERATIONS):
-            iteration_start_time = time.time()  
+            iteration_start_time = time.time()
             np.copyto(depth_map_prev, depth_map)
             logging.info(
                 f"PatchMatch Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
@@ -970,11 +968,11 @@ class DepthOptimization:
                         src_T,
                     )
                 else:
-                    logging.warning("Initial wavefront is empty.")                   
+                    logging.warning("Initial wavefront is empty.")
 
             # --- 2. ランダム探索 ---
             depth_range_map = (
-                initial_depth_error * (self.config.PATCHMATCH_DECAY_RATE ** i)
+                initial_depth_error * (self.config.PATCHMATCH_DECAY_RATE**i)
             ).astype(np.float32)
             _random_search_jit(
                 depth_map,
@@ -1038,11 +1036,10 @@ class DepthOptimization:
                     break
             else:
                 logging.warning("No valid pixels for convergence check.")
-            
-            iteration_end_time = time.time()  
+
+            iteration_end_time = time.time()
             elapsed_time = iteration_end_time - iteration_start_time
             logging.info(f"Iteration {i+1} took {elapsed_time:.2f} seconds.")
-
 
         logging.info("PatchMatch MVS refinement finished.")
         final_depth_map = depth_map.copy()
@@ -1138,7 +1135,7 @@ class DepthOptimization:
             depth_range_map = np.full(
                 (h, w),
                 self.config.PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE
-                * (self.config.PATCHMATCH_DECAY_RATE ** i),
+                * (self.config.PATCHMATCH_DECAY_RATE**i),
                 dtype=np.float32,
             )
             _random_search_jit(

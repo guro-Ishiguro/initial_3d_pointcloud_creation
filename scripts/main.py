@@ -40,19 +40,19 @@ def quaternion_to_rotation_matrix(qx, qy, qz, qw):
     R = np.array(
         [
             [
-                1 - 2 * (qy ** 2 + qz ** 2),
+                1 - 2 * (qy**2 + qz**2),
                 2 * (qx * qy - qz * qw),
                 2 * (qx * qz + qy * qw),
             ],
             [
                 2 * (qx * qy + qz * qw),
-                1 - 2 * (qx ** 2 + qz ** 2),
+                1 - 2 * (qx**2 + qz**2),
                 2 * (qy * qz - qx * qw),
             ],
             [
                 2 * (qx * qz - qy * qw),
                 2 * (qy * qz + qx * qw),
-                1 - 2 * (qx ** 2 + qy ** 2),
+                1 - 2 * (qx**2 + qy**2),
             ],
         ]
     )
@@ -125,8 +125,8 @@ def create_disparity(image_L, image_R, img_id):
         minDisparity=config.min_disp,
         numDisparities=config.num_disp,
         blockSize=config.window_size,
-        P1=8 * 3 * config.window_size ** 2,
-        P2=16 * 3 * config.window_size ** 2,
+        P1=8 * 3 * config.window_size**2,
+        P2=16 * 3 * config.window_size**2,
         disp12MaxDiff=1,
         uniquenessRatio=10,
         speckleWindowSize=100,
@@ -486,7 +486,9 @@ def refine_points_with_multiview_cost(
             )
             neighbors_info.append((idx, fname, pos, quat))
 
-    logging.info(f"{num_points}点ある{cur_idx}番目から生成される点群を複数視点コストに基づいて深度を最適化中...")
+    logging.info(
+        f"{num_points}点ある{cur_idx}番目から生成される点群を複数視点コストに基づいて深度を最適化中..."
+    )
 
     # 複数視点最適化のコアロジック
     for p_idx in range(num_points):
@@ -558,7 +560,9 @@ def refine_points_with_multiview_cost(
         optimized_points[p_idx] = best_point
         optimized_colors[p_idx] = current_color
     num_points = optimized_points.shape[0]
-    logging.info(f"{num_points}点ある{cur_idx}番目の画像から生成される点群の複数視点最適化が終了")
+    logging.info(
+        f"{num_points}点ある{cur_idx}番目の画像から生成される点群の複数視点最適化が終了"
+    )
     return optimized_points, optimized_colors
 
 
