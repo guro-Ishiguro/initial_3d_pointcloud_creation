@@ -92,7 +92,7 @@ PATCHMATCH_VANILLA_MAX_DEPTH = 50.0
 PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE = 50.0  # ランダム探索の初期探索幅
 DEBUG_VISUALIZATION = True  # 処理中の点群などをウィンドウで表示するか
 DEBUG_SAVE_DEPTH_MAPS = True  # 最適化前後のデプスマップを画像として保存するか
-TARGET_INDICES = [38]  # 対象の画像インデックス
+TARGET_INDICES = [2]  # 対象の画像インデックス
 
 # --- 伝播の方法の選択 ---
 PROPAGATION_METHOD = ["checkerboard", "priority"]
