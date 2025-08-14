@@ -70,41 +70,79 @@ def clear_folder(dir_path):
 
 def save_depth_map_as_image(depth_map, file_path):
     """
-    デプスマップ（float配列）を視覚的に確認可能なカラー画像として保存する。
-    NaN（無効な深度）のピクセルは黒色で表示される。
+    デプスマップを保存する。
     """
     try:
-        # 有効な深度値のマスクを作成
+        h, w = depth_map.shape
         valid_mask = np.isfinite(depth_map)
 
-        # 有効な深度値が存在しない場合は、黒い画像を保存
         if not valid_mask.any():
-            h, w = depth_map.shape
             black_image = np.zeros((h, w, 3), dtype=np.uint8)
+            cv2.putText(
+                black_image,
+                "No valid depth",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (255, 255, 255),
+                2,
+            )
             cv2.imwrite(file_path, black_image)
             return
 
         min_val = 0
         max_val = config.camera_height
 
-        # 0-255の範囲に正規化
         if max_val - min_val > 1e-6:
-            # 深度が遠いほど値が大きくなるように正規化 (near=255, far=1)
-            normalized_map = 255.0 * (1.0 - (depth_map - min_val) / (max_val - min_val))
+            normalized_map = 255.0 * (depth_map - min_val) / (max_val - min_val)
         else:
-            # 全ての深度が同じ値の場合
             normalized_map = np.full(depth_map.shape, 128, dtype=np.float32)
 
-        # uint8に変換
         vis_map = np.nan_to_num(normalized_map).astype(np.uint8)
-
-        # カラーマップを適用
         colored_map = cv2.applyColorMap(vis_map, cv2.COLORMAP_JET)
-
-        # 無効な深度（NaN）を持つピクセルを黒にする
         colored_map[~valid_mask] = [0, 0, 0]
 
-        cv2.imwrite(file_path, colored_map)
+        # カラーバー用の設定
+        colorbar_width = 80
+        total_width = w + colorbar_width
+        output_image = np.zeros((h, total_width, 3), dtype=np.uint8)
+        output_image[:, :w] = colored_map
+
+        # カラーバーの生成
+        colorbar = np.linspace(0, 255, h).reshape(h, 1)
+        colorbar_img = cv2.applyColorMap(
+            np.uint8(colorbar), cv2.COLORMAP_JET
+        )
+        colorbar_img = cv2.flip(colorbar_img, 0)
+
+        output_image[:, w : w + 20] = cv2.resize(
+            colorbar_img, (20, h), interpolation=cv2.INTER_LINEAR
+        )
+
+        # カラーバーにテキストを追加
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(
+            output_image,
+            f"{max_val:.2f}",
+            (w + 25, 30),
+            font,
+            0.8,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            output_image,
+            f"{min_val:.2f}",
+            (w + 25, h - 10),
+            font,
+            0.8,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+        cv2.imwrite(file_path, output_image)
     except Exception as e:
         logging.error(f"Failed to save depth map to {file_path}: {e}")
 
@@ -119,7 +157,6 @@ def read_exr_depth(file_path):
 
         available_channels = list(header["channels"].keys())
 
-        # 'R' または 'Y' チャンネルを深度データとして優先的に使用
         target_channel = ""
         if "R" in available_channels:
             target_channel = "R"
@@ -142,8 +179,9 @@ def read_exr_depth(file_path):
         pt = Imath.PixelType(Imath.PixelType.FLOAT)
         channel_bytes = exr_file.channel(target_channel, pt)
 
-        depth_map = np.frombuffer(channel_bytes, dtype=np.float32)
+        depth_map = np.frombuffer(channel_bytes, dtype=np.float32).copy()
         depth_map = depth_map.reshape(size)
+        depth_map[depth_map <= 0] = np.nan
 
         return depth_map
     except Exception as e:
