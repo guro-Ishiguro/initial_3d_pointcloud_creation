@@ -208,6 +208,7 @@ if __name__ == "__main__":
                 ref_image=li_rgb,
                 ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
                 neighbor_views_data=neighbor_views_data,
+                gt_depth=gt_depth,
                 ref_idx=idx,
             )
 

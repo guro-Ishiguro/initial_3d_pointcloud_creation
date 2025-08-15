@@ -84,7 +84,7 @@ DEBUG_PATCH_MATCH_VISUALIZATION = (
 DEBUG_PIXEL_COORDS = (230, 1000)  # デバッグ用のピクセル座標 (x, y)
 
 # --- PatchMatch MVS のパラメーター ---
-PATCHMATCH_ITERATIONS = 5  # PatchMatchの反復回数
+PATCHMATCH_ITERATIONS = 3  # PatchMatchの反復回数
 PATCHMATCH_PATCH_SIZE = 7  # パッチサイズ (奇数)
 NORMAL_ESTIMATION_NEIGHBORHOOD = 7  # 法線推定に使う近傍のサイズ
 ZNCC_EPSILON = 1e-6  # ZNCCコスト計算時の小さな値
@@ -98,7 +98,7 @@ TARGET_INDICES = [38]  # 対象の画像インデックス
 
 # --- 伝播の方法の選択 ---
 PROPAGATION_METHOD = ["checkerboard", "priority"]
-CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[1]
+CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[0]
 
 
 # --- 適応的ランダム探索のパラメータ ---
@@ -109,6 +109,7 @@ ADAPTIVE_WEIGHT_SIGMA_COLOR = 10
 # --- 優先度付き伝播のパラメータ ---
 PROPAGATION_GRID_ROWS = 10  # グリッドの行数
 PROPAGATION_GRID_COLS = 10  # グリッドの列数
+BUCKET_PROPAGATION_BINS = 8
 
 # --- 光度一貫性チェックの設定 ---
 FILTERING_COLOR_DIFFERENCE_THRESHOLD = 20  # 色の差のしきい値 (0-255)

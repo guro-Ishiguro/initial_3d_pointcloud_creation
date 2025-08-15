@@ -6,7 +6,7 @@ from numba import njit, prange
 import logging
 import config
 import os
-from utils import save_depth_map_as_image
+from utils import save_depth_map_as_image, compute_depth_metrics
 import time  # timeモジュールをインポート
 
 
@@ -273,7 +273,7 @@ def _propagate_priority_wavefront_jit(
     neighbors_dr = np.array([-1, -1, -1, 0, 0, 1, 1, 1], dtype=np.int8)
     neighbors_dc = np.array([-1, 0, 1, -1, 1, -1, 0, 1], dtype=np.int8)
 
-    # --- コスト範囲の計算 (Numba互換) ---
+    # --- コスト範囲の計算 ---
     finite_costs_count = 0
     for i in range(h):
         for j in range(w):
@@ -317,7 +317,6 @@ def _propagate_priority_wavefront_jit(
                         continue
 
                     # --- 隣接ピクセル(nr, nc)の平面を現在のピクセル(r, c)で評価 ---
-                    # 伝播元(neighbor)のコストが現在のビンに含まれているかチェック
                     neighbor_error = initial_depth_error[nr, nc]
                     if not (lower_bound <= neighbor_error < upper_bound):
                         continue
@@ -622,7 +621,6 @@ class DepthOptimization:
             logging.warning(
                 "BUCKET_PROPAGATION_BINS not found in config. Using default value 16."
             )
-            self.config.BUCKET_PROPAGATION_BINS = 16
 
     def _debug_patch_visualization(
         self,
@@ -787,6 +785,7 @@ class DepthOptimization:
         ref_image,
         ref_pose,
         neighbor_views_data,
+        gt_depth,
         ref_idx=0,
     ):
         logging.info(
@@ -974,6 +973,12 @@ class DepthOptimization:
                     break
             else:
                 logging.warning("No valid pixels for convergence check.")
+
+            if gt_depth is not None:
+                metrics = compute_depth_metrics(depth_map, gt_depth)
+                logging.info(
+                    f"[Initial Depth] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}"
+                )
 
             iteration_end_time = time.time()
             elapsed_time = iteration_end_time - iteration_start_time
