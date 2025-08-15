@@ -97,7 +97,7 @@ DEBUG_SAVE_DEPTH_MAPS = True  # 最適化前後のデプスマップを画像と
 TARGET_INDICES = [2]  # 対象の画像インデックス
 
 # --- 伝播の方法の選択 ---
-PROPAGATION_METHOD = ["checkerboard", "priority"]
+PROPAGATION_METHOD = ["checkerboard", "bucket"]
 CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[1]
 
 # --- 適応的ランダム探索のパラメータ ---
@@ -105,9 +105,8 @@ PATCHMATCH_DECAY_RATE = 0.9
 PATCHMATCH_NORMAL_SEARCH_ANGLE = 20.0
 ADAPTIVE_WEIGHT_SIGMA_COLOR = 10
 
-# --- 優先度付き伝播のパラメータ ---
-PROPAGATION_GRID_ROWS = 10  # グリッドの行数
-PROPAGATION_GRID_COLS = 10  # グリッドの列数
+# --- バケット伝播のパラメータ ---
+BUCKET_PROPAGATION_BINS = 16 # バケットの数
 
 # --- 光度一貫性チェックの設定 ---
 FILTERING_COLOR_DIFFERENCE_THRESHOLD = 20  # 色の差のしきい値 (0-255)

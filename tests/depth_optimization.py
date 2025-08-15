@@ -247,13 +247,13 @@ def _propagate_spatial_one_color_jit(
 
 
 @njit(parallel=True, fastmath=True)
-def _propagate_wavefront_jit(
+def _propagate_priority_wavefront_jit(
     depth_map,
     normal_map,
     cost_map,
-    visited_map,
+    initial_depth_error,
     propagation_mask,
-    initial_wavefront_np,
+    num_bins,
     patch_size,
     top_k_costs,
     adaptive_weight_sigma_color,
@@ -267,48 +267,64 @@ def _propagate_wavefront_jit(
     src_T,
 ):
     """
-    シードグリッドから波面を広げるように空間伝播を実行する。
+    コストをビンに分割し、低コストのビンから優先的に並列伝播を実行する。
     """
     h, w = depth_map.shape
-
-    wavefront_A = np.zeros((h * w, 2), dtype=np.int32)
-    wavefront_B = np.zeros((h * w, 2), dtype=np.int32)
-
-    wave_A_count = len(initial_wavefront_np)
-    if wave_A_count == 0:
-        return
-    wavefront_A[:wave_A_count] = initial_wavefront_np
-
-    for i in range(wave_A_count):
-        r, c = initial_wavefront_np[i]
-        visited_map[r, c] = True
-
-    current_wave = wavefront_A
-    next_wave = wavefront_B
-    current_count = wave_A_count
-
     neighbors_dr = np.array([-1, -1, -1, 0, 0, 1, 1, 1], dtype=np.int8)
     neighbors_dc = np.array([-1, 0, 1, -1, 1, -1, 0, 1], dtype=np.int8)
 
-    loop_count = 0
-    max_loops = h + w
+    # --- コスト範囲の計算 (Numba互換) ---
+    finite_costs_count = 0
+    for i in range(h):
+        for j in range(w):
+            if np.isfinite(initial_depth_error[i, j]):
+                finite_costs_count += 1
+    
+    if finite_costs_count == 0:
+        return
 
-    while current_count > 0 and loop_count < max_loops:
-        for i in prange(current_count):
-            r, c = current_wave[i]
+    finite_costs = np.empty(finite_costs_count, dtype=np.float32)
+    k = 0
+    for i in range(h):
+        for j in range(w):
+            val = initial_depth_error[i,j]
+            if np.isfinite(val):
+                finite_costs[k] = val
+                k += 1
 
-            best_new_cost = cost_map[r, c]
-            best_depth = depth_map[r, c]
-            best_normal = normal_map[r, c]
+    min_cost = np.min(finite_costs)
+    max_cost = np.max(finite_costs)
+    if max_cost - min_cost < 1e-6:
+        return
+    bin_width = (max_cost - min_cost) / num_bins
 
-            for j in range(len(neighbors_dr)):
-                nr, nc = r + neighbors_dr[j], c + neighbors_dc[j]
+    # --- バケット伝播ループ ---
+    for bin_idx in range(num_bins):
+        lower_bound = min_cost + bin_idx * bin_width
+        upper_bound = min_cost + (bin_idx + 1) * bin_width
 
-                if 0 <= nr < h and 0 <= nc < w and visited_map[nr, nc]:
+        # 各ピクセルを並列で処理
+        for r in prange(h):
+            for c in range(w):
+                if not propagation_mask[r, c]:
+                    continue
+
+                # 8近傍をチェックし、より良い平面を伝播させる
+                for i in range(len(neighbors_dr)):
+                    nr, nc = r + neighbors_dr[i], c + neighbors_dc[i]
+
+                    if not (0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc]):
+                        continue
+
+                    # --- 隣接ピクセル(nr, nc)の平面を現在のピクセル(r, c)で評価 ---
+                    # 伝播元(neighbor)のコストが現在のビンに含まれているかチェック
+                    neighbor_error = initial_depth_error[nr, nc]
+                    if not (lower_bound <= neighbor_error < upper_bound):
+                        continue
+                        
                     neighbor_depth = depth_map[nr, nc]
                     if not np.isfinite(neighbor_depth):
                         continue
-
                     neighbor_normal = normal_map[nr, nc]
 
                     new_cost = _evaluate_cost_jit(
@@ -329,38 +345,11 @@ def _propagate_wavefront_jit(
                         adaptive_weight_sigma_color,
                     )
 
-                    if new_cost < best_new_cost:
-                        best_new_cost = new_cost
-                        best_depth = neighbor_depth
-                        best_normal = neighbor_normal
-
-            if best_new_cost < cost_map[r, c]:
-                cost_map[r, c] = best_new_cost
-                depth_map[r, c] = best_depth
-                normal_map[r, c] = best_normal
-
-        next_wave_count = 0
-        for i in range(current_count):
-            r, c = current_wave[i]
-
-            for j in range(len(neighbors_dr)):
-                nr, nc = r + neighbors_dr[j], c + neighbors_dc[j]
-
-                if (
-                    0 <= nr < h
-                    and 0 <= nc < w
-                    and propagation_mask[nr, nc]
-                    and not visited_map[nr, nc]
-                ):
-                    visited_map[nr, nc] = True
-                    if next_wave_count < len(next_wave):
-                        next_wave[next_wave_count, 0] = nr
-                        next_wave[next_wave_count, 1] = nc
-                        next_wave_count += 1
-
-        current_wave, next_wave = next_wave, current_wave
-        current_count = next_wave_count
-        loop_count += 1
+                    # コストが改善されれば更新
+                    if new_cost < cost_map[r, c]:
+                        depth_map[r, c] = neighbor_depth
+                        normal_map[r, c] = neighbor_normal
+                        cost_map[r, c] = new_cost
 
 
 @njit(parallel=True, fastmath=True)
@@ -629,6 +618,11 @@ class DepthOptimization:
                 "ADAPTIVE_WEIGHT_SIGMA_COLOR not found in config. Using default value 10.0."
             )
             self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR = 10.0
+        if not hasattr(self.config, "BUCKET_PROPAGATION_BINS"):
+            logging.warning(
+                "BUCKET_PROPAGATION_BINS not found in config. Using default value 16."
+            )
+            self.config.BUCKET_PROPAGATION_BINS = 16
 
     def _debug_patch_visualization(
         self,
@@ -834,71 +828,20 @@ class DepthOptimization:
             [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
         )
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
+        # 初期コストを計算
+        for r in range(h):
+            for c in range(w):
+                if propagation_mask[r,c] and np.isfinite(depth_map[r,c]):
+                    cost_map[r,c] = _evaluate_cost_jit(
+                         r, c, depth_map[r,c], normal_map[r,c],
+                         self.config.PATCHMATCH_PATCH_SIZE, ref_image_gray,
+                         ref_pose_K, ref_pose_R, ref_pose_T,
+                         src_images_gray, src_K, src_R, src_T,
+                         self.config.TOP_K_COSTS, self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR
+                    )
+
         depth_map_prev = np.zeros_like(depth_map)
         convergence_threshold = 0.001
-
-        if self.config.CHOICED_PROPAGATION_METHOD == "priority":
-            logging.info("Calculating grid costs for priority propagation...")
-            grid_rows = self.config.PROPAGATION_GRID_ROWS
-            grid_cols = self.config.PROPAGATION_GRID_COLS
-            grid_h = h // grid_rows
-            grid_w = w // grid_cols
-            grid_costs = np.full((grid_rows, grid_cols), np.inf, dtype=np.float32)
-
-            for r_idx in range(grid_rows):
-                for c_idx in range(grid_cols):
-                    r_start = r_idx * grid_h
-                    r_end = (r_idx + 1) * grid_h
-                    c_start = c_idx * grid_w
-                    c_end = (c_idx + 1) * grid_w
-                    grid_patch = initial_depth_error[r_start:r_end, c_start:c_end]
-                    valid_costs = grid_patch[np.isfinite(grid_patch)]
-                    if len(valid_costs) > 0:
-                        grid_costs[r_idx, c_idx] = np.median(valid_costs)
-
-            # シードグリッドの選定
-            visited_map = np.zeros_like(initial_depth, dtype=np.bool_)
-            grid_rows, grid_cols = (
-                self.config.PROPAGATION_GRID_ROWS,
-                self.config.PROPAGATION_GRID_COLS,
-            )
-            grid_h, grid_w = h // grid_rows, w // grid_cols
-
-            min_cost_flat_idx = np.nanargmin(grid_costs)
-            r_idx, c_idx = np.unravel_index(min_cost_flat_idx, grid_costs.shape)
-            min_cost = grid_costs[r_idx, c_idx]
-            r_start, r_end = r_idx * grid_h, (r_idx + 1) * grid_h
-            c_start, c_end = c_idx * grid_w, (c_idx + 1) * grid_w
-            logging.info(
-                f"Seed grid found at index ({r_idx}, {c_idx}) with cost {min_cost:.4f}."
-            )
-
-            # 初期波面の設定
-            seed_mask = np.zeros_like(visited_map)
-            seed_mask[r_start:r_end, c_start:c_end] = True
-            visited_map[seed_mask & propagation_mask] = True
-
-            initial_wavefront = []
-            for r_ in range(r_start, r_end):
-                for c_ in range(c_start, c_end):
-                    if not visited_map[r_, c_]:
-                        continue
-                    for dr in [-1, 0, 1]:
-                        for dc in [-1, 0, 1]:
-                            if dr == 0 and dc == 0:
-                                continue
-                            nr, nc = r_ + dr, c_ + dc
-                            if (
-                                0 <= nr < h
-                                and 0 <= nc < w
-                                and propagation_mask[nr, nc]
-                                and not visited_map[nr, nc]
-                            ):
-                                initial_wavefront.append((nr, nc))
-
-            initial_wavefront_np = np.array(
-                list(set(initial_wavefront)), dtype=np.int32
-            )
 
         # --- PatchMatch反復ループ ---
         for i in range(self.config.PATCHMATCH_ITERATIONS):
@@ -910,6 +853,7 @@ class DepthOptimization:
 
             # --- 1. 空間伝播 ---
             if self.config.CHOICED_PROPAGATION_METHOD == "checkerboard":
+                logging.info("Starting checkerboard propagation ...")
                 if i % 2 == 0:
                     neighbors_dr = np.array([-1, 0], dtype=np.int8)
                     neighbors_dc = np.array([0, -1], dtype=np.int8)
@@ -943,32 +887,26 @@ class DepthOptimization:
                     )
 
             elif self.config.CHOICED_PROPAGATION_METHOD == "priority":
-                logging.info(
-                    "Starting wavefront propagation from the best seed grid..."
+                logging.info("Starting priority propagation ...")
+                _propagate_priority_wavefront_jit(
+                    depth_map,
+                    normal_map,
+                    cost_map,
+                    initial_depth_error,
+                    propagation_mask,
+                    self.config.BUCKET_PROPAGATION_BINS,
+                    self.config.PATCHMATCH_PATCH_SIZE,
+                    self.config.TOP_K_COSTS,
+                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                    ref_image_gray,
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_images_gray,
+                    src_K,
+                    src_R,
+                    src_T,
                 )
-
-                if len(initial_wavefront_np) > 0:
-                    _propagate_wavefront_jit(
-                        depth_map,
-                        normal_map,
-                        cost_map,
-                        visited_map,
-                        propagation_mask,
-                        initial_wavefront_np,
-                        self.config.PATCHMATCH_PATCH_SIZE,
-                        self.config.TOP_K_COSTS,
-                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                        ref_image_gray,
-                        ref_pose_K,
-                        ref_pose_R,
-                        ref_pose_T,
-                        src_images_gray,
-                        src_K,
-                        src_R,
-                        src_T,
-                    )
-                else:
-                    logging.warning("Initial wavefront is empty.")
 
             # --- 2. ランダム探索 ---
             depth_range_map = (
@@ -1091,6 +1029,8 @@ class DepthOptimization:
             [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
         )
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
+        propagation_mask = np.full((h, w), True, dtype=np.bool_)
+
 
         # 4. PatchMatch反復ループ
         for i in range(self.config.PATCHMATCH_ITERATIONS):
@@ -1106,14 +1046,15 @@ class DepthOptimization:
                 neighbors_dr = np.array([1, 0], dtype=np.int8)
                 neighbors_dc = np.array([0, 1], dtype=np.int8)
 
-            for i in [0, 1]:
+            for color_idx in [0, 1]:
                 _propagate_spatial_one_color_jit(
                     depth_map,
                     normal_map,
                     cost_map,
+                    propagation_mask,
                     neighbors_dr,
                     neighbors_dc,
-                    i,
+                    color_idx,
                     0,
                     h,
                     0,
@@ -1138,10 +1079,12 @@ class DepthOptimization:
                 * (self.config.PATCHMATCH_DECAY_RATE**i),
                 dtype=np.float32,
             )
+            search_mask = np.full((h,w), True, dtype=np.bool_)
             _random_search_jit(
                 depth_map,
                 normal_map,
                 cost_map,
+                search_mask,
                 i,
                 self.config.PATCHMATCH_PATCH_SIZE,
                 self.config.TOP_K_COSTS,
