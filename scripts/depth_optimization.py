@@ -6,7 +6,7 @@ from numba import njit, prange
 import logging
 import config
 import os
-from utils import save_depth_map_as_image
+from utils import save_depth_map_as_image, compute_depth_metrics
 import time  # timeモジュールをインポート
 
 
@@ -247,7 +247,7 @@ def _propagate_spatial_one_color_jit(
 
 
 @njit(parallel=True, fastmath=True)
-def _propagate_wavefront_jit(
+def _propagate_priority_wavefront_jit(
     depth_map,
     normal_map,
     cost_map,
@@ -527,7 +527,7 @@ def _check_photometric_consistency_jit(
 
     # 各近傍ビューでチェック
     for i in range(len(neighbor_images)):
-        R_src, T_src = neighbor_R[i], neighbor_T[i]
+        R_src, T_src = np.ascontiguousarray(neighbor_R[i]), neighbor_T[i]
 
         # 近傍ビューのカメラ座標に変換
         p_src_cam = R_src @ point_3d_world + T_src
@@ -629,6 +629,10 @@ class DepthOptimization:
                 "ADAPTIVE_WEIGHT_SIGMA_COLOR not found in config. Using default value 10.0."
             )
             self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR = 10.0
+        if not hasattr(self.config, "BUCKET_PROPAGATION_BINS"):
+            logging.warning(
+                "BUCKET_PROPAGATION_BINS not found in config. Using default value 16."
+            )
 
     def _debug_patch_visualization(
         self,
@@ -793,6 +797,7 @@ class DepthOptimization:
         ref_image,
         ref_pose,
         neighbor_views_data,
+        gt_depth,
         ref_idx=0,
     ):
         logging.info(
@@ -834,6 +839,18 @@ class DepthOptimization:
             [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
         )
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
+        # 初期コストを計算
+        for r in range(h):
+            for c in range(w):
+                if propagation_mask[r,c] and np.isfinite(depth_map[r,c]):
+                    cost_map[r,c] = _evaluate_cost_jit(
+                         r, c, depth_map[r,c], normal_map[r,c],
+                         self.config.PATCHMATCH_PATCH_SIZE, ref_image_gray,
+                         ref_pose_K, ref_pose_R, ref_pose_T,
+                         src_images_gray, src_K, src_R, src_T,
+                         self.config.TOP_K_COSTS, self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR
+                    )
+
         depth_map_prev = np.zeros_like(depth_map)
         convergence_threshold = 0.001
 
@@ -847,10 +864,8 @@ class DepthOptimization:
 
             for r_idx in range(grid_rows):
                 for c_idx in range(grid_cols):
-                    r_start = r_idx * grid_h
-                    r_end = (r_idx + 1) * grid_h
-                    c_start = c_idx * grid_w
-                    c_end = (c_idx + 1) * grid_w
+                    r_start, r_end = r_idx * grid_h, (r_idx + 1) * grid_h
+                    c_start, c_end = c_idx * grid_w, (c_idx + 1) * grid_w
                     grid_patch = initial_depth_error[r_start:r_end, c_start:c_end]
                     valid_costs = grid_patch[np.isfinite(grid_patch)]
                     if len(valid_costs) > 0:
@@ -910,6 +925,7 @@ class DepthOptimization:
 
             # --- 1. 空間伝播 ---
             if self.config.CHOICED_PROPAGATION_METHOD == "checkerboard":
+                logging.info("Starting checkerboard propagation ...")
                 if i % 2 == 0:
                     neighbors_dr = np.array([-1, 0], dtype=np.int8)
                     neighbors_dc = np.array([0, -1], dtype=np.int8)
@@ -948,7 +964,7 @@ class DepthOptimization:
                 )
 
                 if len(initial_wavefront_np) > 0:
-                    _propagate_wavefront_jit(
+                    _propagate_priority_wavefront_jit(
                         depth_map,
                         normal_map,
                         cost_map,
@@ -1037,6 +1053,12 @@ class DepthOptimization:
             else:
                 logging.warning("No valid pixels for convergence check.")
 
+            if gt_depth is not None:
+                metrics = compute_depth_metrics(depth_map, gt_depth)
+                logging.info(
+                    f"[Initial Depth] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}"
+                )
+
             iteration_end_time = time.time()
             elapsed_time = iteration_end_time - iteration_start_time
             logging.info(f"Iteration {i+1} took {elapsed_time:.2f} seconds.")
@@ -1091,6 +1113,8 @@ class DepthOptimization:
             [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
         )
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
+        propagation_mask = np.full((h, w), True, dtype=np.bool_)
+
 
         # 4. PatchMatch反復ループ
         for i in range(self.config.PATCHMATCH_ITERATIONS):
@@ -1106,14 +1130,15 @@ class DepthOptimization:
                 neighbors_dr = np.array([1, 0], dtype=np.int8)
                 neighbors_dc = np.array([0, 1], dtype=np.int8)
 
-            for i in [0, 1]:
+            for color_idx in [0, 1]:
                 _propagate_spatial_one_color_jit(
                     depth_map,
                     normal_map,
                     cost_map,
+                    propagation_mask,
                     neighbors_dr,
                     neighbors_dc,
-                    i,
+                    color_idx,
                     0,
                     h,
                     0,
@@ -1138,10 +1163,12 @@ class DepthOptimization:
                 * (self.config.PATCHMATCH_DECAY_RATE**i),
                 dtype=np.float32,
             )
+            search_mask = np.full((h,w), True, dtype=np.bool_)
             _random_search_jit(
                 depth_map,
                 normal_map,
                 cost_map,
+                search_mask,
                 i,
                 self.config.PATCHMATCH_PATCH_SIZE,
                 self.config.TOP_K_COSTS,
