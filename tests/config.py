@@ -98,7 +98,7 @@ TARGET_INDICES = [38]  # 対象の画像インデックス
 
 # --- 伝播の方法の選択 ---
 PROPAGATION_METHOD = ["checkerboard", "priority"]
-CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[0]
+CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[1]
 
 
 # --- 適応的ランダム探索のパラメータ ---
