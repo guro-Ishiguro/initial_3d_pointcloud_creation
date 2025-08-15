@@ -38,11 +38,9 @@ print(f"Selected data type: {DATA_TYPE}")
 
 # パスの設定
 DATA_TYPE_DIR = os.path.join(DATA_DIR, DATA_TYPE)
-IMAGE_DIR = os.path.join(DATA_TYPE_DIR, "images")
+STEREO_IMAGE_DIR = os.path.join(DATA_TYPE_DIR, "images/stereo")
+LABEL_DEPTH_IMAGE_DIR = os.path.join(DATA_TYPE_DIR, "images/depth")
 TXT_DIR = os.path.join(DATA_TYPE_DIR, "txt")
-DRONE_IMAGE_DIR = os.path.join(IMAGE_DIR, "drone")
-DISPARITY_IMAGE_DIR = os.path.join(IMAGE_DIR, "disparity")
-DEPTH_IMAGE_DIR = os.path.join(IMAGE_DIR, "depth")
 DRONE_IMAGE_LOG = os.path.join(TXT_DIR, "drone_image_log.txt")
 ORB_SLAM_LOG = os.path.join(TXT_DIR, "KeyFrameTrajectory.txt")
 
@@ -52,8 +50,12 @@ POINT_CLOUD_DIR = os.path.join(OUTPUT_TYPE_DIR, "point_cloud")
 POINT_CLOUD_FILE_PATH = os.path.join(POINT_CLOUD_DIR, "output.ply")
 OLD_POINT_CLOUD_FILE_PATH = os.path.join(POINT_CLOUD_DIR, "old_output.ply")
 MESH_DIR = os.path.join(OUTPUT_TYPE_DIR, "mesh")
-MESH_FILE_PATH = os.path.join(MESH_DIR, "output.ply")
+MESH_FILE_PATH = os.path.join(MESH_DIR, "mesh.ply")
 VIDEO_DIR = os.path.join(OUTPUT_TYPE_DIR, "video")
+DISPARITY_IMAGE_DIR = os.path.join(OUTPUT_TYPE_DIR, "disparity")
+DEPTH_IMAGE_DIR = os.path.join(OUTPUT_TYPE_DIR, "depth")
+HISTGRAM_DIR = os.path.join(OUTPUT_TYPE_DIR, "histgram")
+CSV_DIR = os.path.join(OUTPUT_TYPE_DIR, "csv")
 
 # スケールの設定
 B, fov_h, fov_v, width, height = (
@@ -66,7 +68,6 @@ B, fov_h, fov_v, width, height = (
 focal_length = width / (2 * np.tan(fov_h * np.pi / 180 / 2))
 camera_height = int(DATA_TYPE.split("_")[2])
 cx, cy = int(DATA_TYPE.split("_")[0]) / 2, int(DATA_TYPE.split("_")[1]) / 2
-
 K = np.array(
     [[focal_length, 0, cx], [0, focal_length, cy], [0, 0, 1]], dtype=np.float32
 )
@@ -74,13 +75,47 @@ scene_width = 2 * camera_height * np.tan(np.radians(fov_h) / 2)
 scene_height = 2 * camera_height * np.tan(np.radians(fov_v) / 2)
 pixel_size = scene_width / width
 
-
 window_size, min_disp, num_disp = 5, 0, 216
 
-DEPTH_ERROR_THRESHOLD = 0.1
-DISP_COST_THRESHOLD = 4
+# --- デバッグ用の設定 ---
+DEBUG_PATCH_MATCH_VISUALIZATION = (
+    False  # PatchMatch のホモグラフィ行列の移動先デバッグ可視化を行うか
+)
+DEBUG_PIXEL_COORDS = (230, 1000)  # デバッグ用のピクセル座標 (x, y)
 
-# 複数視点最適化の際のパラメータ
-DEPTH_SEARCH_RANGE = 0.1
-DEPTH_SEARCH_STEPS = 5
-COLOR_THRESHOLD = 30
+# --- PatchMatch MVS のパラメーター ---
+PATCHMATCH_ITERATIONS = 5  # PatchMatchの反復回数
+PATCHMATCH_PATCH_SIZE = 7  # パッチサイズ (奇数)
+NORMAL_ESTIMATION_NEIGHBORHOOD = 7  # 法線推定に使う近傍のサイズ
+ZNCC_EPSILON = 1e-6  # ZNCCコスト計算時の小さな値
+TOP_K_COSTS = 3  # 複数視点コストを集計する際の上位何個を考慮するか
+PATCHMATCH_VANILLA_MIN_DEPTH = 5.0
+PATCHMATCH_VANILLA_MAX_DEPTH = 50.0
+PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE = 50.0  # ランダム探索の初期探索幅
+DEBUG_VISUALIZATION = True  # 処理中の点群などをウィンドウで表示するか
+DEBUG_SAVE_DEPTH_MAPS = True  # 最適化前後のデプスマップを画像として保存するか
+TARGET_INDICES = [2]  # 対象の画像インデックス
+
+# --- 伝播の方法の選択 ---
+PROPAGATION_METHOD = ["checkerboard", "priority"]
+CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[1]
+
+# --- 適応的ランダム探索のパラメータ ---
+PATCHMATCH_DECAY_RATE = 0.9
+PATCHMATCH_NORMAL_SEARCH_ANGLE = 20.0
+ADAPTIVE_WEIGHT_SIGMA_COLOR = 10
+
+# --- 優先度付き伝播のパラメータ ---
+PROPAGATION_GRID_ROWS = 10  # グリッドの行数
+PROPAGATION_GRID_COLS = 10  # グリッドの列数
+
+# --- 光度一貫性チェックの設定 ---
+FILTERING_COLOR_DIFFERENCE_THRESHOLD = 20  # 色の差のしきい値 (0-255)
+FILTERING_MIN_CONSISTENT_VIEWS = 3  # 必要な近傍ビューの最小数
+
+# --- 幾何学的一貫性フィルターの設定 ---
+GEOMETRIC_FILTER_ENABLED = True  # 幾何学的一貫性チェックを有効にするか
+GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD = 0.05  # 幾何学的なエラー（相対深度差）のしきい値
+GEOMETRIC_MIN_CONSISTENT_VIEWS = (
+    2  # 一貫性があると判断するために必要な近傍ビューの最小数
+)
