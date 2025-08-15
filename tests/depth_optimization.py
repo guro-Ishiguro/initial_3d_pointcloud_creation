@@ -273,82 +273,86 @@ def _propagate_priority_wavefront_jit(
     neighbors_dr = np.array([-1, -1, -1, 0, 0, 1, 1, 1], dtype=np.int8)
     neighbors_dc = np.array([-1, 0, 1, -1, 1, -1, 0, 1], dtype=np.int8)
 
-    # --- コスト範囲の計算 ---
-    finite_costs_count = 0
-    for i in range(h):
-        for j in range(w):
-            if np.isfinite(initial_depth_error[i, j]):
-                finite_costs_count += 1
+    # --- 1. 有効なピクセルを抽出し、コストに基づいてビンに分類 ---
     
-    if finite_costs_count == 0:
+    # Numbaの制約上、動的リストが使えないため、一度全有効ピクセルを配列に格納
+    valid_pixels_coords = np.empty((h * w, 2), dtype=np.int32)
+    valid_pixels_costs = np.empty(h * w, dtype=np.float32)
+    valid_pixel_count = 0
+    for r in range(h):
+        for c in range(w):
+            cost = initial_depth_error[r, c]
+            if propagation_mask[r, c] and np.isfinite(cost):
+                valid_pixels_coords[valid_pixel_count, 0] = r
+                valid_pixels_coords[valid_pixel_count, 1] = c
+                valid_pixels_costs[valid_pixel_count] = cost
+                valid_pixel_count += 1
+    
+    if valid_pixel_count == 0:
         return
 
-    finite_costs = np.empty(finite_costs_count, dtype=np.float32)
-    k = 0
-    for i in range(h):
-        for j in range(w):
-            val = initial_depth_error[i,j]
-            if np.isfinite(val):
-                finite_costs[k] = val
-                k += 1
+    # コストの最小値と最大値からビンの幅を計算
+    min_cost = np.inf
+    max_cost = -np.inf
+    for i in range(valid_pixel_count):
+        cost = valid_pixels_costs[i]
+        if cost < min_cost:
+            min_cost = cost
+        if cost > max_cost:
+            max_cost = cost
 
-    min_cost = np.min(finite_costs)
-    max_cost = np.max(finite_costs)
     if max_cost - min_cost < 1e-6:
-        return
-    bin_width = (max_cost - min_cost) / num_bins
+        bin_width = 1.0
+        num_bins = 1
+    else:
+        bin_width = (max_cost - min_cost) / num_bins
 
-    # --- バケット伝播ループ ---
+    # 各有効ピクセルがどのビンに属するかを計算
+    pixel_bin_indices = np.floor((valid_pixels_costs[:valid_pixel_count] - min_cost) / bin_width).astype(np.int32)
+    pixel_bin_indices[pixel_bin_indices >= num_bins] = num_bins - 1
+
+
+    # --- 2. バケット伝播ループ ---
+    # 優先度の高い（コストの低い）ビンから順番に処理
     for bin_idx in range(num_bins):
-        lower_bound = min_cost + bin_idx * bin_width
-        upper_bound = min_cost + (bin_idx + 1) * bin_width
+        # 現在のビンに属するピクセルを並列で処理
+        for i in prange(valid_pixel_count):
+            # このピクセルが現在の処理対象ビンに属しているかチェック
+            if pixel_bin_indices[i] != bin_idx:
+                continue
 
-        # 各ピクセルを並列で処理
-        for r in prange(h):
-            for c in range(w):
-                if not propagation_mask[r, c]:
+            # 伝播元となるピクセル（source）の情報を取得
+            r_source, c_source = valid_pixels_coords[i]
+            source_depth = depth_map[r_source, c_source]
+            if not np.isfinite(source_depth):
+                continue
+            source_normal = normal_map[r_source, c_source]
+
+            # 8方向の近傍ピクセル（target）へ伝播
+            for j in range(len(neighbors_dr)):
+                r_target, c_target = r_source + neighbors_dr[j], c_source + neighbors_dc[j]
+
+                # 伝播先が画像範囲内で、かつマスク内かチェック
+                if not (0 <= r_target < h and 0 <= c_target < w and propagation_mask[r_target, c_target]):
                     continue
+                
+                # 伝播元の平面を、伝播先の位置で評価し、新しいコストを計算
+                new_cost = _evaluate_cost_jit(
+                    r_target, c_target,
+                    source_depth, source_normal,
+                    patch_size,
+                    ref_image_gray,
+                    ref_pose_K, ref_pose_R, ref_pose_T,
+                    src_images_gray, src_K, src_R, src_T,
+                    top_k_costs,
+                    adaptive_weight_sigma_color,
+                )
 
-                # 8近傍をチェックし、より良い平面を伝播させる
-                for i in range(len(neighbors_dr)):
-                    nr, nc = r + neighbors_dr[i], c + neighbors_dc[i]
-
-                    if not (0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc]):
-                        continue
-
-                    # --- 隣接ピクセル(nr, nc)の平面を現在のピクセル(r, c)で評価 ---
-                    neighbor_error = initial_depth_error[nr, nc]
-                    if not (lower_bound <= neighbor_error < upper_bound):
-                        continue
-                        
-                    neighbor_depth = depth_map[nr, nc]
-                    if not np.isfinite(neighbor_depth):
-                        continue
-                    neighbor_normal = normal_map[nr, nc]
-
-                    new_cost = _evaluate_cost_jit(
-                        r,
-                        c,
-                        neighbor_depth,
-                        neighbor_normal,
-                        patch_size,
-                        ref_image_gray,
-                        ref_pose_K,
-                        ref_pose_R,
-                        ref_pose_T,
-                        src_images_gray,
-                        src_K,
-                        src_R,
-                        src_T,
-                        top_k_costs,
-                        adaptive_weight_sigma_color,
-                    )
-
-                    # コストが改善されれば更新
-                    if new_cost < cost_map[r, c]:
-                        depth_map[r, c] = neighbor_depth
-                        normal_map[r, c] = neighbor_normal
-                        cost_map[r, c] = new_cost
+                # コストが改善される場合、伝播先の平面情報を更新
+                if new_cost < cost_map[r_target, c_target]:
+                    depth_map[r_target, c_target] = source_depth
+                    normal_map[r_target, c_target] = source_normal
+                    cost_map[r_target, c_target] = new_cost
 
 
 @njit(parallel=True, fastmath=True)
