@@ -43,12 +43,15 @@ class DepthEstimator:
         mid_x, mid_y = cols // 2, rows // 2
         ri, ci = np.indices((rows, cols))
         valid = np.isfinite(depth)
-        shift_x = (
-            (camera_height - depth[valid]) * (mid_x - ci[valid]) / camera_height
-        ).astype(int)
-        shift_y = (
-            (camera_height - depth[valid]) * (mid_y - ri[valid]) / camera_height
-        ).astype(int)
+        depth_valid = depth[valid]
+        ci_valid = ci[valid]
+        ri_valid = ri[valid]
+        shift_x_float = (camera_height - depth_valid) * (mid_x - ci_valid) / camera_height
+        shift_y_float = (camera_height - depth_valid) * (mid_y - ri_valid) / camera_height
+        shift_x_float[~np.isfinite(shift_x_float)] = 0
+        shift_y_float[~np.isfinite(shift_y_float)] = 0
+        shift_x = shift_x_float.astype(int)
+        shift_y = shift_y_float.astype(int)
         nx, ny = ci.copy(), ri.copy()
         nx[valid] += shift_x
         ny[valid] += shift_y

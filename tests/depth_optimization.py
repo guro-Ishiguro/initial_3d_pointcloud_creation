@@ -516,7 +516,7 @@ def _check_photometric_consistency_jit(
 
     # 各近傍ビューでチェック
     for i in range(len(neighbor_images)):
-        R_src, T_src = neighbor_R[i], neighbor_T[i]
+        R_src, T_src = np.ascontiguousarray(neighbor_R[i]), neighbor_T[i]
 
         # 近傍ビューのカメラ座標に変換
         p_src_cam = R_src @ point_3d_world + T_src
