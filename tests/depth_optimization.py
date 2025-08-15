@@ -270,11 +270,10 @@ def _propagate_priority_wavefront_jit(
     コストをビンに分割し、低コストのビンから優先的に並列伝播を実行する。
     """
     h, w = depth_map.shape
-    neighbors_dr = np.array([-1, -1, -1, 0, 0, 1, 1, 1], dtype=np.int8)
-    neighbors_dc = np.array([-1, 0, 1, -1, 1, -1, 0, 1], dtype=np.int8)
+    neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+    neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
 
     # --- 1. 有効なピクセルを抽出し、コストに基づいてビンに分類 ---
-    
     # Numbaの制約上、動的リストが使えないため、一度全有効ピクセルを配列に格納
     valid_pixels_coords = np.empty((h * w, 2), dtype=np.int32)
     valid_pixels_costs = np.empty(h * w, dtype=np.float32)
