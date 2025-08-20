@@ -247,7 +247,7 @@ def _propagate_spatial_one_color_jit(
 
 
 @njit(parallel=True, fastmath=True)
-def _propagate_priority_wavefront_jit(
+def _propagate_bucket_jit(
     depth_map,
     normal_map,
     cost_map,
@@ -889,7 +889,7 @@ class DepthOptimization:
 
             elif self.config.CHOICED_PROPAGATION_METHOD == "priority":
                 logging.info("Starting priority propagation ...")
-                _propagate_priority_wavefront_jit(
+                _propagate_bucket_jit(
                     depth_map,
                     normal_map,
                     cost_map,
