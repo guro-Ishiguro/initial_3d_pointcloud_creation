@@ -171,11 +171,15 @@ if __name__ == "__main__":
             if gt_depth is not None:
                 metrics = compute_depth_metrics(initial_depth, gt_depth)
                 logging.info(
-                    f"[Initial Depth] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}"
+                    f"[Initial Depth] AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                    f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
-                view_metrics["rmse_initial"] = metrics["rmse"]
-                view_metrics["mae_initial"] = metrics["mae"]
                 view_metrics["abs_rel_initial"] = metrics["abs_rel"]
+                view_metrics["rmse_initial"] = metrics["rmse"]
+                view_metrics["rmse_log_initial"] = metrics["rmse_log"]
+                view_metrics["delta1_initial"] = metrics["delta1"]
+                view_metrics["delta2_initial"] = metrics["delta2"]
+                view_metrics["delta3_initial"] = metrics["delta3"]
                 save_error_map_as_image(
                     initial_depth,
                     gt_depth,
@@ -216,11 +220,15 @@ if __name__ == "__main__":
             if gt_depth is not None:
                 metrics = compute_depth_metrics(optimized_depth, gt_depth)
                 logging.info(
-                    f"[Optimized Depth] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}"
+                    f"[Optimized Depth] AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                    f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
-                view_metrics["rmse_optimized"] = metrics["rmse"]
-                view_metrics["mae_optimized"] = metrics["mae"]
                 view_metrics["abs_rel_optimized"] = metrics["abs_rel"]
+                view_metrics["rmse_optimized"] = metrics["rmse"]
+                view_metrics["rmse_log_optimized"] = metrics["rmse_log"]
+                view_metrics["delta1_optimized"] = metrics["delta1"]
+                view_metrics["delta2_optimized"] = metrics["delta2"]
+                view_metrics["delta3_optimized"] = metrics["delta3"]
                 save_error_map_as_image(
                     optimized_depth,
                     gt_depth,
@@ -243,11 +251,15 @@ if __name__ == "__main__":
                     photometrically_filtered_depth, gt_depth
                 )
                 logging.info(
-                    f"  [Photometric Filtered] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}"
+                    f"  [Photometric Filtered] AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                    f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
-                view_metrics["rmse_photometric"] = metrics["rmse"]
-                view_metrics["mae_photometric"] = metrics["mae"]
                 view_metrics["abs_rel_photometric"] = metrics["abs_rel"]
+                view_metrics["rmse_photometric"] = metrics["rmse"]
+                view_metrics["rmse_log_photometric"] = metrics["rmse_log"]
+                view_metrics["delta1_photometric"] = metrics["delta1"]
+                view_metrics["delta2_photometric"] = metrics["delta2"]
+                view_metrics["delta3_photometric"] = metrics["delta3"]
                 save_error_map_as_image(
                     photometrically_filtered_depth,
                     gt_depth,
@@ -396,18 +408,12 @@ if __name__ == "__main__":
 
         headers = [
             "image_index",
-            "rmse_initial",
-            "mae_initial",
-            "abs_rel_initial",
-            "rmse_optimized",
-            "mae_optimized",
-            "abs_rel_optimized",
-            "rmse_photometric",
-            "mae_photometric",
-            "abs_rel_photometric",
-            "rmse_geometric",
-            "mae_geometric",
-            "abs_rel_geometric",
+            "abs_rel_initial", "rmse_initial", "rmse_log_initial",
+            "delta1_initial", "delta2_initial", "delta3_initial",
+            "abs_rel_optimized", "rmse_optimized", "rmse_log_optimized",
+            "delta1_optimized", "delta2_optimized", "delta3_optimized",
+            "abs_rel_photometric", "rmse_photometric", "rmse_log_photometric",
+            "delta1_photometric", "delta2_photometric", "delta3_photometric",
         ]
 
         try:

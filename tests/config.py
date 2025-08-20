@@ -84,7 +84,7 @@ DEBUG_PATCH_MATCH_VISUALIZATION = (
 DEBUG_PIXEL_COORDS = (230, 1000)  # デバッグ用のピクセル座標 (x, y)
 
 # --- PatchMatch MVS のパラメーター ---
-PATCHMATCH_ITERATIONS = 3  # PatchMatchの反復回数
+PATCHMATCH_ITERATIONS = 10  # PatchMatchの反復回数
 PATCHMATCH_PATCH_SIZE = 7  # パッチサイズ (奇数)
 NORMAL_ESTIMATION_NEIGHBORHOOD = 7  # 法線推定に使う近傍のサイズ
 ZNCC_EPSILON = 1e-6  # ZNCCコスト計算時の小さな値
@@ -94,11 +94,11 @@ PATCHMATCH_VANILLA_MAX_DEPTH = 50.0
 PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE = 50.0  # ランダム探索の初期探索幅
 DEBUG_VISUALIZATION = True  # 処理中の点群などをウィンドウで表示するか
 DEBUG_SAVE_DEPTH_MAPS = True  # 最適化前後のデプスマップを画像として保存するか
-TARGET_INDICES = [38]  # 対象の画像インデックス
+TARGET_INDICES = [6]  # 対象の画像インデックス
 
 # --- 伝播の方法の選択 ---
 PROPAGATION_METHOD = ["checkerboard", "priority"]
-CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[1]
+CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[0]
 
 
 # --- 適応的ランダム探索のパラメータ ---

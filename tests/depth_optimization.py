@@ -274,7 +274,6 @@ def _propagate_priority_wavefront_jit(
     neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
 
     # --- 1. 有効なピクセルを抽出し、コストに基づいてビンに分類 ---
-    # Numbaの制約上、動的リストが使えないため、一度全有効ピクセルを配列に格納
     valid_pixels_coords = np.empty((h * w, 2), dtype=np.int32)
     valid_pixels_costs = np.empty(h * w, dtype=np.float32)
     valid_pixel_count = 0
@@ -980,7 +979,8 @@ class DepthOptimization:
             if gt_depth is not None:
                 metrics = compute_depth_metrics(depth_map, gt_depth)
                 logging.info(
-                    f"[Initial Depth] RMSE: {metrics['rmse']:.4f}, MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}"
+                    f"AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                    f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
 
             iteration_end_time = time.time()

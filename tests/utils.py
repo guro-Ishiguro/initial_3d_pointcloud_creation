@@ -193,19 +193,57 @@ def compute_depth_metrics(pred_depth, gt_depth):
     """
     予測深度と正解深度を比較し、評価指標を計算する。
     """
+    # 有効なピクセルのマスクを生成 (予測・真値ともに有限値で、かつ真値が0より大きい)
     valid_mask = np.isfinite(pred_depth) & np.isfinite(gt_depth) & (gt_depth > 0)
 
+    # 有効なピクセルが存在しない場合はNaNを返す
     if np.sum(valid_mask) == 0:
-        return {"rmse": np.nan, "mae": np.nan, "abs_rel": np.nan}
+        return {
+            "rmse": np.nan,
+            "mae": np.nan,
+            "abs_rel": np.nan,
+            "rmse_log": np.nan,
+            "delta1": np.nan,
+            "delta2": np.nan,
+            "delta3": np.nan,
+        }
 
+    # マスクを適用して有効な深度値のみを抽出
     pred_valid = pred_depth[valid_mask]
     gt_valid = gt_depth[valid_mask]
 
+    # 基本的な誤差指標を計算
     rmse = np.sqrt(np.mean((pred_valid - gt_valid) ** 2))
     mae = np.mean(np.abs(pred_valid - gt_valid))
     abs_rel = np.mean(np.abs(pred_valid - gt_valid) / gt_valid)
 
-    return {"rmse": rmse, "mae": mae, "abs_rel": abs_rel}
+    # RMSE log の計算
+    # 予測値にも0以下の値がないことを確認
+    pred_valid_log = pred_valid[pred_valid > 0]
+    gt_valid_log = gt_valid[pred_valid > 0]
+    if len(pred_valid_log) > 0:
+        rmse_log = np.sqrt(
+            np.mean((np.log(pred_valid_log) - np.log(gt_valid_log)) ** 2)
+        )
+    else:
+        rmse_log = np.nan
+
+    # Threshold Accuracy (δ) の計算
+    thresh = np.maximum((gt_valid / pred_valid), (pred_valid / gt_valid))
+    delta1 = (thresh < 1.25).mean()
+    delta2 = (thresh < 1.25**2).mean()
+    delta3 = (thresh < 1.25**3).mean()
+
+    # 計算した全ての指標を辞書として返す
+    return {
+        "rmse": rmse,
+        "mae": mae,
+        "abs_rel": abs_rel,
+        "rmse_log": rmse_log,
+        "delta1": delta1,
+        "delta2": delta2,
+        "delta3": delta3,
+    }
 
 
 def save_error_map_as_image(pred_depth, gt_depth, file_path, max_error=1.0):
