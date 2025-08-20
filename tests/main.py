@@ -19,7 +19,7 @@ from utils import (
     save_disparity_map_with_colorbar,
 )
 from data_loader import DataLoader
-from image_processing import ImageProcessor
+from disparity_estimation import ImageProcessor
 from depth_estimation import DepthEstimator
 from point_cloud_integrator import PointCloudIntegrator
 from depth_optimization import DepthOptimization
