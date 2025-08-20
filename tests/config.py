@@ -94,11 +94,11 @@ PATCHMATCH_VANILLA_MAX_DEPTH = 50.0
 PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE = 50.0  # ランダム探索の初期探索幅
 DEBUG_VISUALIZATION = True  # 処理中の点群などをウィンドウで表示するか
 DEBUG_SAVE_DEPTH_MAPS = True  # 最適化前後のデプスマップを画像として保存するか
-TARGET_INDICES = [6]  # 対象の画像インデックス
+TARGET_INDICES = [10]  # 対象の画像インデックス
 
 # --- 伝播の方法の選択 ---
 PROPAGATION_METHOD = ["checkerboard", "priority"]
-CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[0]
+CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[1]
 
 
 # --- 適応的ランダム探索のパラメータ ---
@@ -107,8 +107,6 @@ PATCHMATCH_NORMAL_SEARCH_ANGLE = 20.0
 ADAPTIVE_WEIGHT_SIGMA_COLOR = 10
 
 # --- 優先度付き伝播のパラメータ ---
-PROPAGATION_GRID_ROWS = 10  # グリッドの行数
-PROPAGATION_GRID_COLS = 10  # グリッドの列数
 BUCKET_PROPAGATION_BINS = 4
 
 # --- 光度一貫性チェックの設定 ---
