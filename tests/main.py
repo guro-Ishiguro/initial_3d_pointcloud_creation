@@ -213,21 +213,21 @@ if __name__ == "__main__":
                     )
 
             # PatchMatchを実行
-            # optimized_depth = depth_optimization.refine_depth_with_patchmatch(
-            #     initial_depth=initial_depth,
-            #     initial_depth_error=d_cost,
-            #     ref_image=li_rgb,
-            #     ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
-            #     neighbor_views_data=neighbor_views_data,
-            #     gt_depth=gt_depth,
-            #     ref_idx=idx,
-            # )
-            optimized_depth = depth_optimization.refine_depth_with_patchmatch_vanilla(
+            optimized_depth = depth_optimization.refine_depth_with_patchmatch(
+                initial_depth=initial_depth,
+                initial_depth_error=d_cost,
                 ref_image=li_rgb,
                 ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
                 neighbor_views_data=neighbor_views_data,
+                gt_depth=gt_depth,
                 ref_idx=idx,
             )
+            # optimized_depth = depth_optimization.refine_depth_with_patchmatch_vanilla(
+            #     ref_image=li_rgb,
+            #     ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
+            #     neighbor_views_data=neighbor_views_data,
+            #     ref_idx=idx,
+            # )
 
             # 最適化後の深度を評価
             if gt_depth is not None:

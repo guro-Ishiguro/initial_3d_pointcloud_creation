@@ -917,31 +917,33 @@ class DepthOptimization:
                     )
 
             elif self.config.CHOICED_PROPAGATION_METHOD == "priority":
-                logging.info("Starting priority propagation ...")
-                _propagate_bucket_jit(
-                    depth_map,
-                    normal_map,
-                    cost_map,
-                    initial_depth_error,
-                    propagation_mask,
-                    self.config.BUCKET_PROPAGATION_BINS,
-                    self.config.PATCHMATCH_PATCH_SIZE,
-                    self.config.TOP_K_COSTS,
-                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                    ref_image_gray,
-                    ref_pose_K,
-                    ref_pose_R,
-                    ref_pose_T,
-                    src_images_gray,
-                    src_K,
-                    src_R,
-                    src_T,
-                )
+                if i > 0:
+                    logging.info("Starting priority propagation ...")
+                    _propagate_bucket_jit(
+                        depth_map,
+                        normal_map,
+                        cost_map,
+                        initial_depth_error,
+                        propagation_mask,
+                        self.config.BUCKET_PROPAGATION_BINS,
+                        self.config.PATCHMATCH_PATCH_SIZE,
+                        self.config.TOP_K_COSTS,
+                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                        ref_image_gray,
+                        ref_pose_K,
+                        ref_pose_R,
+                        ref_pose_T,
+                        src_images_gray,
+                        src_K,
+                        src_R,
+                        src_T,
+                    )
 
             # --- 2. ランダム探索 ---
             depth_range_map = (
                 initial_depth_error * (self.config.PATCHMATCH_DECAY_RATE**i)
             ).astype(np.float32)
+            logging.info("Starting random search ...")
             _random_search_jit(
                 depth_map,
                 normal_map,
