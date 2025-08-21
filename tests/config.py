@@ -54,6 +54,7 @@ MESH_FILE_PATH = os.path.join(MESH_DIR, "mesh.ply")
 VIDEO_DIR = os.path.join(OUTPUT_TYPE_DIR, "video")
 DISPARITY_IMAGE_DIR = os.path.join(OUTPUT_TYPE_DIR, "disparity")
 DEPTH_IMAGE_DIR = os.path.join(OUTPUT_TYPE_DIR, "depth")
+NORMAL_IMAGE_DIR = os.path.join(OUTPUT_TYPE_DIR, "normal")
 HISTGRAM_DIR = os.path.join(OUTPUT_TYPE_DIR, "histgram")
 CSV_DIR = os.path.join(OUTPUT_TYPE_DIR, "csv")
 
@@ -75,12 +76,10 @@ scene_width = 2 * camera_height * np.tan(np.radians(fov_h) / 2)
 scene_height = 2 * camera_height * np.tan(np.radians(fov_v) / 2)
 pixel_size = scene_width / width
 
-window_size, min_disp, num_disp = 5, 0, 216
+window_size, min_disp, num_disp = 7, 0, 216
 
 # --- デバッグ用の設定 ---
-DEBUG_PATCH_MATCH_VISUALIZATION = (
-    False  # PatchMatch のホモグラフィ行列の移動先デバッグ可視化を行うか
-)
+DEBUG_PATCH_MATCH_VISUALIZATION = False  # PatchMatch のホモグラフィ行列の移動先デバッグ可視化を行うか
 DEBUG_PIXEL_COORDS = (230, 1000)  # デバッグ用のピクセル座標 (x, y)
 
 # --- PatchMatch MVS のパラメーター ---
@@ -94,7 +93,8 @@ PATCHMATCH_VANILLA_MAX_DEPTH = 50.0
 PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE = 50.0  # ランダム探索の初期探索幅
 DEBUG_VISUALIZATION = True  # 処理中の点群などをウィンドウで表示するか
 DEBUG_SAVE_DEPTH_MAPS = True  # 最適化前後のデプスマップを画像として保存するか
-TARGET_INDICES = [10]  # 対象の画像インデックス
+DEBUG_SAVE_NORMAL_MAPS = True  # 法線マップを画像として保存するか
+TARGET_INDICES = [3]  # 対象の画像インデックス
 
 # --- 伝播の方法の選択 ---
 PROPAGATION_METHOD = ["checkerboard", "priority"]
@@ -116,6 +116,4 @@ FILTERING_MIN_CONSISTENT_VIEWS = 3  # 必要な近傍ビューの最小数
 # --- 幾何学的一貫性フィルターの設定 ---
 GEOMETRIC_FILTER_ENABLED = True  # 幾何学的一貫性チェックを有効にするか
 GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD = 0.05  # 幾何学的なエラー（相対深度差）のしきい値
-GEOMETRIC_MIN_CONSISTENT_VIEWS = (
-    2  # 一貫性があると判断するために必要な近傍ビューの最小数
-)
+GEOMETRIC_MIN_CONSISTENT_VIEWS = 2  # 一貫性があると判断するために必要な近傍ビューの最小数

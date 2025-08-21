@@ -46,8 +46,12 @@ class DepthEstimator:
         depth_valid = depth[valid]
         ci_valid = ci[valid]
         ri_valid = ri[valid]
-        shift_x_float = (camera_height - depth_valid) * (mid_x - ci_valid) / camera_height
-        shift_y_float = (camera_height - depth_valid) * (mid_y - ri_valid) / camera_height
+        shift_x_float = (
+            (camera_height - depth_valid) * (mid_x - ci_valid) / camera_height
+        )
+        shift_y_float = (
+            (camera_height - depth_valid) * (mid_y - ri_valid) / camera_height
+        )
         shift_x_float[~np.isfinite(shift_x_float)] = 0
         shift_y_float[~np.isfinite(shift_y_float)] = 0
         shift_x = shift_x_float.astype(int)

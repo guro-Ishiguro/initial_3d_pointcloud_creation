@@ -110,9 +110,7 @@ def save_depth_map_as_image(depth_map, file_path):
 
         # カラーバーの生成
         colorbar = np.linspace(0, 255, h).reshape(h, 1)
-        colorbar_img = cv2.applyColorMap(
-            np.uint8(colorbar), cv2.COLORMAP_JET
-        )
+        colorbar_img = cv2.applyColorMap(np.uint8(colorbar), cv2.COLORMAP_JET)
         colorbar_img = cv2.flip(colorbar_img, 0)
 
         output_image[:, w : w + 20] = cv2.resize(
@@ -288,7 +286,7 @@ def save_disparity_map_with_colorbar(disparity_map, file_path):
         font = cv2.FONT_HERSHEY_SIMPLEX
         cv2.putText(
             output_image,
-            f"{max_val:.2f}", # 最大値を表示
+            f"{max_val:.2f}",  # 最大値を表示
             (w + 25, 30),
             font,
             0.8,
@@ -298,7 +296,7 @@ def save_disparity_map_with_colorbar(disparity_map, file_path):
         )
         cv2.putText(
             output_image,
-            f"{min_val:.2f}", # 最小値を表示
+            f"{min_val:.2f}",  # 最小値を表示
             (w + 25, h - 10),
             font,
             0.8,

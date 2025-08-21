@@ -842,13 +842,23 @@ class DepthOptimization:
         # 初期コストを計算
         for r in range(h):
             for c in range(w):
-                if propagation_mask[r,c] and np.isfinite(depth_map[r,c]):
-                    cost_map[r,c] = _evaluate_cost_jit(
-                         r, c, depth_map[r,c], normal_map[r,c],
-                         self.config.PATCHMATCH_PATCH_SIZE, ref_image_gray,
-                         ref_pose_K, ref_pose_R, ref_pose_T,
-                         src_images_gray, src_K, src_R, src_T,
-                         self.config.TOP_K_COSTS, self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR
+                if propagation_mask[r, c] and np.isfinite(depth_map[r, c]):
+                    cost_map[r, c] = _evaluate_cost_jit(
+                        r,
+                        c,
+                        depth_map[r, c],
+                        normal_map[r, c],
+                        self.config.PATCHMATCH_PATCH_SIZE,
+                        ref_image_gray,
+                        ref_pose_K,
+                        ref_pose_R,
+                        ref_pose_T,
+                        src_images_gray,
+                        src_K,
+                        src_R,
+                        src_T,
+                        self.config.TOP_K_COSTS,
+                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
                     )
 
         depth_map_prev = np.zeros_like(depth_map)
@@ -1115,7 +1125,6 @@ class DepthOptimization:
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
         propagation_mask = np.full((h, w), True, dtype=np.bool_)
 
-
         # 4. PatchMatch反復ループ
         for i in range(self.config.PATCHMATCH_ITERATIONS):
             logging.info(
@@ -1163,7 +1172,7 @@ class DepthOptimization:
                 * (self.config.PATCHMATCH_DECAY_RATE**i),
                 dtype=np.float32,
             )
-            search_mask = np.full((h,w), True, dtype=np.bool_)
+            search_mask = np.full((h, w), True, dtype=np.bool_)
             _random_search_jit(
                 depth_map,
                 normal_map,

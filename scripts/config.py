@@ -78,9 +78,7 @@ pixel_size = scene_width / width
 window_size, min_disp, num_disp = 5, 0, 216
 
 # --- デバッグ用の設定 ---
-DEBUG_PATCH_MATCH_VISUALIZATION = (
-    False  # PatchMatch のホモグラフィ行列の移動先デバッグ可視化を行うか
-)
+DEBUG_PATCH_MATCH_VISUALIZATION = False  # PatchMatch のホモグラフィ行列の移動先デバッグ可視化を行うか
 DEBUG_PIXEL_COORDS = (230, 1000)  # デバッグ用のピクセル座標 (x, y)
 
 # --- PatchMatch MVS のパラメーター ---
@@ -106,7 +104,7 @@ PATCHMATCH_NORMAL_SEARCH_ANGLE = 20.0
 ADAPTIVE_WEIGHT_SIGMA_COLOR = 10
 
 # --- バケット伝播のパラメータ ---
-BUCKET_PROPAGATION_BINS = 4 # バケットの数
+BUCKET_PROPAGATION_BINS = 4  # バケットの数
 
 # --- 光度一貫性チェックの設定 ---
 FILTERING_COLOR_DIFFERENCE_THRESHOLD = 20  # 色の差のしきい値 (0-255)
@@ -115,6 +113,4 @@ FILTERING_MIN_CONSISTENT_VIEWS = 3  # 必要な近傍ビューの最小数
 # --- 幾何学的一貫性フィルターの設定 ---
 GEOMETRIC_FILTER_ENABLED = True  # 幾何学的一貫性チェックを有効にするか
 GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD = 0.05  # 幾何学的なエラー（相対深度差）のしきい値
-GEOMETRIC_MIN_CONSISTENT_VIEWS = (
-    2  # 一貫性があると判断するために必要な近傍ビューの最小数
-)
+GEOMETRIC_MIN_CONSISTENT_VIEWS = 2  # 一貫性があると判断するために必要な近傍ビューの最小数

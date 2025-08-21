@@ -49,6 +49,10 @@ if __name__ == "__main__":
         os.makedirs(config.DEPTH_IMAGE_DIR, exist_ok=True)
         clear_folder(config.DEPTH_IMAGE_DIR)
 
+    if config.DEBUG_SAVE_NORMAL_MAPS:
+        os.makedirs(config.NORMAL_IMAGE_DIR, exist_ok=True)
+        clear_folder(config.NORMAL_IMAGE_DIR)
+
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
 
     if hasattr(config, "TARGET_INDICES") and config.TARGET_INDICES:
@@ -95,6 +99,9 @@ if __name__ == "__main__":
 
         save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}")
         os.makedirs(save_each_depth_dir, exist_ok=True)
+
+        save_each_normal_dir = os.path.join(config.NORMAL_IMAGE_DIR, f"normal_{idx:04d}")
+        os.makedirs(save_each_normal_dir, exist_ok=True)
 
         # --- Ground Truth Depthの読み込み ---
         gt_depth_path = os.path.join(
@@ -162,7 +169,7 @@ if __name__ == "__main__":
             # 初期深度を保存
             if config.DEBUG_SAVE_DEPTH_MAPS:
                 save_initial_depth_path = os.path.join(
-                    save_each_depth_dir, f"initial_depth.png"
+                    save_each_depth_dir, f"depth_iter_00.png"
                 )
                 logging.info(f"Saving initial depth map to {save_initial_depth_path}")
                 save_depth_map_as_image(initial_depth, save_initial_depth_path)
@@ -206,13 +213,19 @@ if __name__ == "__main__":
                     )
 
             # PatchMatchを実行
-            optimized_depth = depth_optimization.refine_depth_with_patchmatch(
-                initial_depth=initial_depth,
-                initial_depth_error=d_cost,
+            # optimized_depth = depth_optimization.refine_depth_with_patchmatch(
+            #     initial_depth=initial_depth,
+            #     initial_depth_error=d_cost,
+            #     ref_image=li_rgb,
+            #     ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
+            #     neighbor_views_data=neighbor_views_data,
+            #     gt_depth=gt_depth,
+            #     ref_idx=idx,
+            # )
+            optimized_depth = depth_optimization.refine_depth_with_patchmatch_vanilla(
                 ref_image=li_rgb,
                 ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
                 neighbor_views_data=neighbor_views_data,
-                gt_depth=gt_depth,
                 ref_idx=idx,
             )
 
@@ -408,12 +421,24 @@ if __name__ == "__main__":
 
         headers = [
             "image_index",
-            "abs_rel_initial", "rmse_initial", "rmse_log_initial",
-            "delta1_initial", "delta2_initial", "delta3_initial",
-            "abs_rel_optimized", "rmse_optimized", "rmse_log_optimized",
-            "delta1_optimized", "delta2_optimized", "delta3_optimized",
-            "abs_rel_photometric", "rmse_photometric", "rmse_log_photometric",
-            "delta1_photometric", "delta2_photometric", "delta3_photometric",
+            "abs_rel_initial",
+            "rmse_initial",
+            "rmse_log_initial",
+            "delta1_initial",
+            "delta2_initial",
+            "delta3_initial",
+            "abs_rel_optimized",
+            "rmse_optimized",
+            "rmse_log_optimized",
+            "delta1_optimized",
+            "delta2_optimized",
+            "delta3_optimized",
+            "abs_rel_photometric",
+            "rmse_photometric",
+            "rmse_log_photometric",
+            "delta1_photometric",
+            "delta2_photometric",
+            "delta3_photometric",
         ]
 
         try:

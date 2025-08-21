@@ -110,9 +110,7 @@ def save_depth_map_as_image(depth_map, file_path):
 
         # カラーバーの生成
         colorbar = np.linspace(0, 255, h).reshape(h, 1)
-        colorbar_img = cv2.applyColorMap(
-            np.uint8(colorbar), cv2.COLORMAP_JET
-        )
+        colorbar_img = cv2.applyColorMap(np.uint8(colorbar), cv2.COLORMAP_JET)
         colorbar_img = cv2.flip(colorbar_img, 0)
 
         output_image[:, w : w + 20] = cv2.resize(
@@ -266,6 +264,22 @@ def save_error_map_as_image(pred_depth, gt_depth, file_path, max_error=1.0):
     logging.info(f"Saved depth error map to {file_path}")
 
 
+def save_normal_map_as_image(normal_map, file_path):
+    """
+    法線マップを画像ファイルとして保存する。
+    法線ベクトル(x, y, z)をRGBカラー(R, G, B)にマッピングする。
+    """
+    try:
+        normalized_normals = normal_map * 0.5 + 0.5
+        valid_normals = np.nan_to_num(normalized_normals, nan=0.0)
+        normal_image_rgb = (valid_normals * 255).astype(np.uint8)
+        normal_image_bgr = cv2.cvtColor(normal_image_rgb, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(file_path, normal_image_bgr)
+        logging.info(f"Saved normal map to {file_path}")
+    except Exception as e:
+        logging.error(f"Failed to save normal map to {file_path}: {e}")
+
+
 def save_disparity_map_with_colorbar(disparity_map, file_path):
     """
     視差マップをカラーバー付きの画像として保存する。
@@ -326,7 +340,7 @@ def save_disparity_map_with_colorbar(disparity_map, file_path):
         font = cv2.FONT_HERSHEY_SIMPLEX
         cv2.putText(
             output_image,
-            f"{max_val:.2f}", # 最大値を表示
+            f"{max_val:.2f}",  # 最大値を表示
             (w + 25, 30),
             font,
             0.8,
@@ -336,7 +350,7 @@ def save_disparity_map_with_colorbar(disparity_map, file_path):
         )
         cv2.putText(
             output_image,
-            f"{min_val:.2f}", # 最小値を表示
+            f"{min_val:.2f}",  # 最小値を表示
             (w + 25, h - 10),
             font,
             0.8,

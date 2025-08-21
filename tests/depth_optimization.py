@@ -6,7 +6,11 @@ from numba import njit, prange
 import logging
 import config
 import os
-from utils import save_depth_map_as_image, compute_depth_metrics
+from utils import (
+    save_depth_map_as_image,
+    compute_depth_metrics,
+    save_normal_map_as_image,
+)
 import time  # timeモジュールをインポート
 
 
@@ -285,7 +289,7 @@ def _propagate_bucket_jit(
                 valid_pixels_coords[valid_pixel_count, 1] = c
                 valid_pixels_costs[valid_pixel_count] = cost
                 valid_pixel_count += 1
-    
+
     if valid_pixel_count == 0:
         return
 
@@ -306,9 +310,10 @@ def _propagate_bucket_jit(
         bin_width = (max_cost - min_cost) / num_bins
 
     # 各有効ピクセルがどのビンに属するかを計算
-    pixel_bin_indices = np.floor((valid_pixels_costs[:valid_pixel_count] - min_cost) / bin_width).astype(np.int32)
+    pixel_bin_indices = np.floor(
+        (valid_pixels_costs[:valid_pixel_count] - min_cost) / bin_width
+    ).astype(np.int32)
     pixel_bin_indices[pixel_bin_indices >= num_bins] = num_bins - 1
-
 
     # --- 2. バケット伝播ループ ---
     # 優先度の高い（コストの低い）ビンから順番に処理
@@ -326,22 +331,36 @@ def _propagate_bucket_jit(
                 continue
             source_normal = normal_map[r_source, c_source]
 
-            # 8方向の近傍ピクセル（target）へ伝播
+            # 4方向の近傍ピクセル（target）へ伝播
             for j in range(len(neighbors_dr)):
-                r_target, c_target = r_source + neighbors_dr[j], c_source + neighbors_dc[j]
+                r_target, c_target = (
+                    r_source + neighbors_dr[j],
+                    c_source + neighbors_dc[j],
+                )
 
                 # 伝播先が画像範囲内で、かつマスク内かチェック
-                if not (0 <= r_target < h and 0 <= c_target < w and propagation_mask[r_target, c_target]):
+                if not (
+                    0 <= r_target < h
+                    and 0 <= c_target < w
+                    and propagation_mask[r_target, c_target]
+                ):
                     continue
-                
+
                 # 伝播元の平面を、伝播先の位置で評価し、新しいコストを計算
                 new_cost = _evaluate_cost_jit(
-                    r_target, c_target,
-                    source_depth, source_normal,
+                    r_target,
+                    c_target,
+                    source_depth,
+                    source_normal,
                     patch_size,
                     ref_image_gray,
-                    ref_pose_K, ref_pose_R, ref_pose_T,
-                    src_images_gray, src_K, src_R, src_T,
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_images_gray,
+                    src_K,
+                    src_R,
+                    src_T,
                     top_k_costs,
                     adaptive_weight_sigma_color,
                 )
@@ -832,13 +851,23 @@ class DepthOptimization:
         # 初期コストを計算
         for r in range(h):
             for c in range(w):
-                if propagation_mask[r,c] and np.isfinite(depth_map[r,c]):
-                    cost_map[r,c] = _evaluate_cost_jit(
-                         r, c, depth_map[r,c], normal_map[r,c],
-                         self.config.PATCHMATCH_PATCH_SIZE, ref_image_gray,
-                         ref_pose_K, ref_pose_R, ref_pose_T,
-                         src_images_gray, src_K, src_R, src_T,
-                         self.config.TOP_K_COSTS, self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR
+                if propagation_mask[r, c] and np.isfinite(depth_map[r, c]):
+                    cost_map[r, c] = _evaluate_cost_jit(
+                        r,
+                        c,
+                        depth_map[r, c],
+                        normal_map[r, c],
+                        self.config.PATCHMATCH_PATCH_SIZE,
+                        ref_image_gray,
+                        ref_pose_K,
+                        ref_pose_R,
+                        ref_pose_T,
+                        src_images_gray,
+                        src_K,
+                        src_R,
+                        src_T,
+                        self.config.TOP_K_COSTS,
+                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
                     )
 
         depth_map_prev = np.zeros_like(depth_map)
@@ -958,6 +987,15 @@ class DepthOptimization:
                 )
                 logging.info(f"Saving intermediate depth map to {save_path}")
                 save_depth_map_as_image(depth_map.copy(), save_path)
+            if self.config.DEBUG_SAVE_NORMAL_MAPS:
+                save_each_normal_dir = os.path.join(
+                    config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}"
+                )
+                save_path_normal = os.path.join(
+                    save_each_normal_dir, f"normal_iter_{i+1:02d}.png"
+                )
+                logging.info(f"Saving intermediate normal map to {save_path_normal}")
+                save_normal_map_as_image(normal_map.copy(), save_path_normal)
 
             diff = np.abs(depth_map_prev - depth_map)
             valid_mask = (
@@ -1008,10 +1046,28 @@ class DepthOptimization:
         max_depth = self.config.PATCHMATCH_VANILLA_MAX_DEPTH
         depth_map = np.random.uniform(min_depth, max_depth, (h, w)).astype(np.float32)
 
+        if config.DEBUG_SAVE_DEPTH_MAPS:
+            save_each_depth_dir = os.path.join(
+                config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}"
+            )
+            save_depth_path = os.path.join(save_each_depth_dir, f"depth_iter_00.png")
+            logging.info(f"Saving initial depth map to {save_depth_path}")
+            save_depth_map_as_image(depth_map, save_depth_path)
+
         # 2. 法線マップを初期化
         normal_map = _initialize_normals_from_depth_jit(
             depth_map, ref_pose["K"].astype(np.float32)
         )
+
+        if self.config.DEBUG_SAVE_NORMAL_MAPS:
+            save_each_normal_dir = os.path.join(
+                config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}"
+            )
+            save_path_normal = os.path.join(
+                save_each_normal_dir, f"normal_iter_00.png"
+            )
+            logging.info(f"Saving initial normal map to {save_path_normal}")
+            save_normal_map_as_image(normal_map.copy(), save_path_normal)
 
         # 3. JITコンパイル用にデータを準備
         ref_image_gray = cv2.cvtColor(ref_image, cv2.COLOR_RGB2GRAY).astype(np.float32)
@@ -1038,7 +1094,6 @@ class DepthOptimization:
         )
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
         propagation_mask = np.full((h, w), True, dtype=np.bool_)
-
 
         # 4. PatchMatch反復ループ
         for i in range(self.config.PATCHMATCH_ITERATIONS):
@@ -1087,7 +1142,7 @@ class DepthOptimization:
                 * (self.config.PATCHMATCH_DECAY_RATE**i),
                 dtype=np.float32,
             )
-            search_mask = np.full((h,w), True, dtype=np.bool_)
+            search_mask = np.full((h, w), True, dtype=np.bool_)
             _random_search_jit(
                 depth_map,
                 normal_map,
@@ -1120,6 +1175,16 @@ class DepthOptimization:
                 )
                 logging.info(f"Saving intermediate depth map to {save_path}")
                 save_depth_map_as_image(depth_map.copy(), save_path)
+
+            if self.config.DEBUG_SAVE_NORMAL_MAPS:
+                save_each_normal_dir = os.path.join(
+                    config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}"
+                )
+                save_path_normal = os.path.join(
+                    save_each_normal_dir, f"normal_iter_{i+1:02d}.png"
+                )
+                logging.info(f"Saving intermediate normal map to {save_path_normal}")
+                save_normal_map_as_image(normal_map.copy(), save_path_normal)
 
         logging.info("Vanilla PatchMatch MVS refinement finished.")
         return depth_map
