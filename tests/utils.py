@@ -7,6 +7,7 @@ import argparse
 import cv2
 import OpenEXR
 import Imath
+import csv
 
 # ログ設定はここで一元的に行う
 logging.basicConfig(
@@ -362,3 +363,27 @@ def save_disparity_map_with_colorbar(disparity_map, file_path):
         logging.info(f"Saved disparity map to {file_path}")
     except Exception as e:
         logging.error(f"Failed to save disparity map to {file_path}: {e}")
+
+
+def initialize_csv(file_path, header):
+    """
+    CSVファイルを初期化し、ヘッダーを書き込む。
+    """
+    try:
+        with open(file_path, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(header)
+    except IOError as e:
+        logging.error(f"Could not initialize CSV file {file_path}: {e}")
+
+
+def append_to_csv(file_path, data_row):
+    """
+    CSVファイルに新しい行を追記する。
+    """
+    try:
+        with open(file_path, "a", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(data_row)
+    except IOError as e:
+        logging.error(f"Could not write to CSV file {file_path}: {e}")
