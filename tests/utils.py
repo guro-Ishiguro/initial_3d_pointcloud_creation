@@ -267,7 +267,6 @@ def save_error_map_as_image(pred_depth, gt_depth, file_path, max_error=1.0):
 def save_normal_map_as_image(normal_map, file_path):
     """
     法線マップを画像ファイルとして保存する。
-    法線ベクトル(x, y, z)をRGBカラー(R, G, B)にマッピングする。
     """
     try:
         normalized_normals = normal_map * 0.5 + 0.5

@@ -94,7 +94,7 @@ PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE = 50.0  # ランダム探索の初期探
 DEBUG_VISUALIZATION = True  # 処理中の点群などをウィンドウで表示するか
 DEBUG_SAVE_DEPTH_MAPS = True  # 最適化前後のデプスマップを画像として保存するか
 DEBUG_SAVE_NORMAL_MAPS = True  # 法線マップを画像として保存するか
-TARGET_INDICES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]  # 対象の画像インデックス
+TARGET_INDICES = [10]  # 対象の画像インデックス
 
 # --- 伝播の方法の選択 ---
 PROPAGATION_METHOD = ["checkerboard", "priority"]

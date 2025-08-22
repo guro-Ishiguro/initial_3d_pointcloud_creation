@@ -7,7 +7,6 @@ import time
 import cv2
 import open3d as o3d
 import numpy as np
-import csv
 
 from utils import (
     parse_arguments,
@@ -66,7 +65,7 @@ if __name__ == "__main__":
 
     # --- パフォーマンス向上のため、必要な画像を事前に一括ロード ---
     image_indices_to_load = set()
-    neighbor_view_offsets = (-2, -1, 1, 2)  # 近傍ビューのオフセット
+    neighbor_view_offsets = (-2, -1, 1, 2) 
     for idx in target_indices:
         image_indices_to_load.add(idx)
         for offset in neighbor_view_offsets:
@@ -181,12 +180,6 @@ if __name__ == "__main__":
                     f"[Initial Depth] AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
-                view_metrics["abs_rel_initial"] = metrics["abs_rel"]
-                view_metrics["rmse_initial"] = metrics["rmse"]
-                view_metrics["rmse_log_initial"] = metrics["rmse_log"]
-                view_metrics["delta1_initial"] = metrics["delta1"]
-                view_metrics["delta2_initial"] = metrics["delta2"]
-                view_metrics["delta3_initial"] = metrics["delta3"]
                 save_error_map_as_image(
                     initial_depth,
                     gt_depth,
@@ -236,12 +229,6 @@ if __name__ == "__main__":
                     f"[Optimized Depth] AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
-                view_metrics["abs_rel_optimized"] = metrics["abs_rel"]
-                view_metrics["rmse_optimized"] = metrics["rmse"]
-                view_metrics["rmse_log_optimized"] = metrics["rmse_log"]
-                view_metrics["delta1_optimized"] = metrics["delta1"]
-                view_metrics["delta2_optimized"] = metrics["delta2"]
-                view_metrics["delta3_optimized"] = metrics["delta3"]
                 save_error_map_as_image(
                     optimized_depth,
                     gt_depth,
@@ -267,12 +254,6 @@ if __name__ == "__main__":
                     f"  [Photometric Filtered] AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
-                view_metrics["abs_rel_photometric"] = metrics["abs_rel"]
-                view_metrics["rmse_photometric"] = metrics["rmse"]
-                view_metrics["rmse_log_photometric"] = metrics["rmse_log"]
-                view_metrics["delta1_photometric"] = metrics["delta1"]
-                view_metrics["delta2_photometric"] = metrics["delta2"]
-                view_metrics["delta3_photometric"] = metrics["delta3"]
                 save_error_map_as_image(
                     photometrically_filtered_depth,
                     gt_depth,
@@ -319,7 +300,7 @@ if __name__ == "__main__":
 
             ref_depth_map = all_optimized_depths[idx]
 
-            # 近傍ビューのデータ準備 (再)
+            # 近傍ビューのデータ準備
             neighbor_views_data = []
             for offset in neighbor_view_offsets:
                 neighbor_idx = idx + offset
@@ -411,66 +392,6 @@ if __name__ == "__main__":
             o3d.visualization.draw_geometries([final_pcd])
     else:
         logging.warning("No point clouds were generated.")
-
-    # --- 評価サマリの出力 ---
-    if evaluation_results:
-        # CSVファイルへの書き出し
-        output_csv_path = os.path.join(config.CSV_DIR, "evaluation_summary.csv")
-        logging.info(f"\n--- Evaluation Summary ---")
-        logging.info(f"Writing evaluation summary to {output_csv_path}")
-
-        headers = [
-            "image_index",
-            "abs_rel_initial",
-            "rmse_initial",
-            "rmse_log_initial",
-            "delta1_initial",
-            "delta2_initial",
-            "delta3_initial",
-            "abs_rel_optimized",
-            "rmse_optimized",
-            "rmse_log_optimized",
-            "delta1_optimized",
-            "delta2_optimized",
-            "delta3_optimized",
-            "abs_rel_photometric",
-            "rmse_photometric",
-            "rmse_log_photometric",
-            "delta1_photometric",
-            "delta2_photometric",
-            "delta3_photometric",
-        ]
-
-        try:
-            with open(output_csv_path, "w", newline="") as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=headers)
-                writer.writeheader()
-                for row in evaluation_results:
-                    # 各行のデータが存在しないキーをNoneで埋める
-                    safe_row = {header: row.get(header) for header in headers}
-                    writer.writerow(safe_row)
-        except IOError as e:
-            logging.error(f"Could not write to CSV file {output_csv_path}: {e}")
-
-        # 平均値の計算とコンソールへの表示
-        avg_metrics = {}
-        for key in headers:
-            if key == "image_index":
-                continue
-            # NaNを無視して平均を計算
-            valid_values = [
-                d[key] for d in evaluation_results if key in d and np.isfinite(d[key])
-            ]
-            if valid_values:
-                avg_metrics[key] = np.mean(valid_values)
-            else:
-                avg_metrics[key] = np.nan
-
-        logging.info("Average metrics across all views:")
-        log_msg = ""
-        for key, value in avg_metrics.items():
-            log_msg += f"{key}: {value:.4f} | "
-        logging.info(log_msg)
 
     end_time = time.time()
     logging.info(f"Total point cloud generation time: {end_time - start_time:.2f}s")
