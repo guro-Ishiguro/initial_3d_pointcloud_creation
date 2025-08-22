@@ -10,12 +10,12 @@ import numpy as np
 
 from utils import (
     parse_arguments,
-    clear_folder,
     save_depth_map_as_image,
     read_exr_depth,
     compute_depth_metrics,
     save_error_map_as_image,
     save_disparity_map_with_colorbar,
+    clear_folder,
 )
 from data_loader import DataLoader
 from disparity_estimation import ImageProcessor
@@ -36,21 +36,16 @@ if __name__ == "__main__":
     point_cloud_integrator = PointCloudIntegrator(config)
 
     os.makedirs(config.POINT_CLOUD_DIR, exist_ok=True)
-    clear_folder(config.POINT_CLOUD_DIR)
 
     os.makedirs(config.CSV_DIR, exist_ok=True)
-    clear_folder(config.CSV_DIR)
 
     os.makedirs(config.DISPARITY_IMAGE_DIR, exist_ok=True)
-    clear_folder(config.DISPARITY_IMAGE_DIR)
 
     if config.DEBUG_SAVE_DEPTH_MAPS:
         os.makedirs(config.DEPTH_IMAGE_DIR, exist_ok=True)
-        clear_folder(config.DEPTH_IMAGE_DIR)
 
     if config.DEBUG_SAVE_NORMAL_MAPS:
         os.makedirs(config.NORMAL_IMAGE_DIR, exist_ok=True)
-        clear_folder(config.NORMAL_IMAGE_DIR)
 
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
 
@@ -98,11 +93,13 @@ if __name__ == "__main__":
 
         save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}")
         os.makedirs(save_each_depth_dir, exist_ok=True)
+        clear_folder(save_each_depth_dir)
 
         save_each_normal_dir = os.path.join(
             config.NORMAL_IMAGE_DIR, f"normal_{idx:04d}"
         )
         os.makedirs(save_each_normal_dir, exist_ok=True)
+        clear_folder(save_each_normal_dir)
 
         # --- Ground Truth Depthの読み込み ---
         gt_depth_path = os.path.join(
@@ -121,7 +118,6 @@ if __name__ == "__main__":
                     gt_depth = cv2.resize(
                         gt_depth, (w, h), interpolation=cv2.INTER_NEAREST
                     )
-                clear_folder(save_each_depth_dir)
                 save_depth_map_as_image(
                     gt_depth,
                     os.path.join(save_each_depth_dir, f"gt_depth_{idx:04d}.png"),

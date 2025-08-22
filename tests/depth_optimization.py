@@ -12,6 +12,7 @@ from utils import (
     save_normal_map_as_image,
     initialize_csv,
     append_to_csv,
+    clear_folder,
 )
 import time  # timeモジュールをインポート
 
@@ -878,14 +879,15 @@ class DepthOptimization:
         if gt_depth is not None:
             save_each_csv_dir = os.path.join(config.CSV_DIR, f"csv_{ref_idx:04d}")
             os.makedirs(save_each_csv_dir, exist_ok=True)
+            clear_folder(save_each_csv_dir)
             csv_files = {
-                "rmse": os.path.join(save_each_csv_dir, f"rmse_{ref_idx:04d}.csv"),
-                "mae": os.path.join(save_each_csv_dir, f"mae_{ref_idx:04d}.csv"),
-                "abs_rel": os.path.join(save_each_csv_dir, f"abs_rel_{ref_idx:04d}.csv"),
-                "rmse_log": os.path.join(save_each_csv_dir, f"rmse_log_{ref_idx:04d}.csv"),
-                "delta1": os.path.join(save_each_csv_dir, f"delta1_{ref_idx:04d}.csv"),
-                "delta2": os.path.join(save_each_csv_dir, f"delta2_{ref_idx:04d}.csv"),
-                "delta3": os.path.join(save_each_csv_dir, f"delta3_{ref_idx:04d}.csv"),
+                "rmse": os.path.join(save_each_csv_dir, f"rmse_{self.config.CHOICED_PROPAGATION_METHOD}.csv"),
+                "mae": os.path.join(save_each_csv_dir, f"mae_{self.config.CHOICED_PROPAGATION_METHOD}.csv"),
+                "abs_rel": os.path.join(save_each_csv_dir, f"abs_rel_{self.config.CHOICED_PROPAGATION_METHOD}.csv"),
+                "rmse_log": os.path.join(save_each_csv_dir, f"rmse_log_{self.config.CHOICED_PROPAGATION_METHOD}.csv"),
+                "delta1": os.path.join(save_each_csv_dir, f"delta1_{self.config.CHOICED_PROPAGATION_METHOD}.csv"),
+                "delta2": os.path.join(save_each_csv_dir, f"delta2_{self.config.CHOICED_PROPAGATION_METHOD}.csv"),
+                "delta3": os.path.join(save_each_csv_dir, f"delta3_{self.config.CHOICED_PROPAGATION_METHOD}.csv"),
             }
             for metric, path in csv_files.items():
                 initialize_csv(path, ["time", metric])
