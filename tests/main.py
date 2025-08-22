@@ -65,7 +65,7 @@ if __name__ == "__main__":
 
     # --- パフォーマンス向上のため、必要な画像を事前に一括ロード ---
     image_indices_to_load = set()
-    neighbor_view_offsets = (-2, -1, 1, 2) 
+    neighbor_view_offsets = (-2, -1, 1, 2)
     for idx in target_indices:
         image_indices_to_load.add(idx)
         for offset in neighbor_view_offsets:
@@ -99,7 +99,9 @@ if __name__ == "__main__":
         save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}")
         os.makedirs(save_each_depth_dir, exist_ok=True)
 
-        save_each_normal_dir = os.path.join(config.NORMAL_IMAGE_DIR, f"normal_{idx:04d}")
+        save_each_normal_dir = os.path.join(
+            config.NORMAL_IMAGE_DIR, f"normal_{idx:04d}"
+        )
         os.makedirs(save_each_normal_dir, exist_ok=True)
 
         # --- Ground Truth Depthの読み込み ---

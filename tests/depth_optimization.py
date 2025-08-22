@@ -10,6 +10,8 @@ from utils import (
     save_depth_map_as_image,
     compute_depth_metrics,
     save_normal_map_as_image,
+    initialize_csv,
+    append_to_csv,
 )
 import time  # timeモジュールをインポート
 
@@ -873,6 +875,22 @@ class DepthOptimization:
         depth_map_prev = np.zeros_like(depth_map)
         convergence_threshold = 0.001
 
+        if gt_depth is not None:
+            save_each_csv_dir = os.path.join(config.CSV_DIR, f"csv_{ref_idx:04d}")
+            os.makedirs(save_each_csv_dir, exist_ok=True)
+            csv_files = {
+                "rmse": os.path.join(save_each_csv_dir, f"rmse_{ref_idx:04d}.csv"),
+                "mae": os.path.join(save_each_csv_dir, f"mae_{ref_idx:04d}.csv"),
+                "abs_rel": os.path.join(save_each_csv_dir, f"abs_rel_{ref_idx:04d}.csv"),
+                "rmse_log": os.path.join(save_each_csv_dir, f"rmse_log_{ref_idx:04d}.csv"),
+                "delta1": os.path.join(save_each_csv_dir, f"delta1_{ref_idx:04d}.csv"),
+                "delta2": os.path.join(save_each_csv_dir, f"delta2_{ref_idx:04d}.csv"),
+                "delta3": os.path.join(save_each_csv_dir, f"delta3_{ref_idx:04d}.csv"),
+            }
+            for metric, path in csv_files.items():
+                initialize_csv(path, ["time", metric])
+                
+        start_refinement_time = time.time()
         # --- PatchMatch反復ループ ---
         for i in range(self.config.PATCHMATCH_ITERATIONS):
             iteration_start_time = time.time()
@@ -1022,6 +1040,10 @@ class DepthOptimization:
                     f"AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
+                current_time = time.time() - start_refinement_time
+                for metric, value in metrics.items():
+                    if metric in csv_files:
+                        append_to_csv(csv_files[metric], [current_time, value])
 
             iteration_end_time = time.time()
             elapsed_time = iteration_end_time - iteration_start_time
@@ -1065,9 +1087,7 @@ class DepthOptimization:
             save_each_normal_dir = os.path.join(
                 config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}"
             )
-            save_path_normal = os.path.join(
-                save_each_normal_dir, f"normal_iter_00.png"
-            )
+            save_path_normal = os.path.join(save_each_normal_dir, f"normal_iter_00.png")
             logging.info(f"Saving initial normal map to {save_path_normal}")
             save_normal_map_as_image(normal_map.copy(), save_path_normal)
 
