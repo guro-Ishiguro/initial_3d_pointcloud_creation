@@ -13,6 +13,7 @@ from utils import (
     initialize_csv,
     append_to_csv,
     clear_folder,
+    save_error_map_as_image,
 )
 import time  # timeモジュールをインポート
 
@@ -1046,6 +1047,11 @@ class DepthOptimization:
                 for metric, value in metrics.items():
                     if metric in csv_files:
                         append_to_csv(csv_files[metric], [current_time, value])
+                save_error_map_as_image(
+                    depth_map,
+                    gt_depth,
+                    os.path.join(save_each_depth_dir, f"error_iter_{i+1:02d}.png"),
+                )
 
             iteration_end_time = time.time()
             elapsed_time = iteration_end_time - iteration_start_time

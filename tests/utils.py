@@ -253,15 +253,53 @@ def save_error_map_as_image(pred_depth, gt_depth, file_path, max_error=1.0):
     error_map = np.full(pred_depth.shape, np.nan, dtype=np.float32)
     error_map[valid_mask] = np.abs(pred_depth[valid_mask] - gt_depth[valid_mask])
 
+    h, w = error_map.shape
     vis_map = np.nan_to_num(error_map)
-    vis_map[vis_map > max_error] = max_error  # エラーの上限を設定
+    vis_map[vis_map > max_error] = max_error
     vis_map = (vis_map / max_error) * 255.0
 
     colored_map = cv2.applyColorMap(vis_map.astype(np.uint8), cv2.COLORMAP_INFERNO)
-
     colored_map[~valid_mask] = [0, 0, 0]
 
-    cv2.imwrite(file_path, colored_map)
+    # カラーバー用の設定
+    colorbar_width = 80
+    total_width = w + colorbar_width
+    output_image = np.zeros((h, total_width, 3), dtype=np.uint8)
+    output_image[:, :w] = colored_map
+
+    # カラーバーの生成
+    colorbar = np.linspace(0, 255, h).reshape(h, 1)
+    colorbar_img = cv2.applyColorMap(np.uint8(colorbar), cv2.COLORMAP_INFERNO)
+    colorbar_img = cv2.flip(colorbar_img, 0)
+
+    output_image[:, w : w + 20] = cv2.resize(
+        colorbar_img, (20, h), interpolation=cv2.INTER_LINEAR
+    )
+
+    # カラーバーにテキストを追加
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(
+        output_image,
+        f"{max_error:.2f}",
+        (w + 25, 30),
+        font,
+        0.8,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        output_image,
+        f"0.00",
+        (w + 25, h - 10),
+        font,
+        0.8,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+    cv2.imwrite(file_path, output_image)
     logging.info(f"Saved depth error map to {file_path}")
 
 
