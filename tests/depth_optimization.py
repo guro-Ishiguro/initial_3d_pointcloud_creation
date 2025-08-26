@@ -1036,7 +1036,7 @@ class DepthOptimization:
             if gt_depth is not None:
                 metrics = compute_depth_metrics(depth_map, gt_depth)
                 logging.info(
-                    f"AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                    f"MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
                 current_time = time.time() - start_refinement_time

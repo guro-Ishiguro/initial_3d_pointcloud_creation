@@ -175,7 +175,7 @@ if __name__ == "__main__":
             if gt_depth is not None:
                 metrics = compute_depth_metrics(initial_depth, gt_depth)
                 logging.info(
-                    f"[Initial Depth] AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                    f"[Initial Depth] MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
                 save_error_map_as_image(
@@ -224,7 +224,7 @@ if __name__ == "__main__":
             if gt_depth is not None:
                 metrics = compute_depth_metrics(optimized_depth, gt_depth)
                 logging.info(
-                    f"[Optimized Depth] AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                    f"[Optimized Depth] MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
                 save_error_map_as_image(
@@ -249,7 +249,7 @@ if __name__ == "__main__":
                     photometrically_filtered_depth, gt_depth
                 )
                 logging.info(
-                    f"  [Photometric Filtered] AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                    f"  [Photometric Filtered] MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
                 save_error_map_as_image(
