@@ -698,7 +698,7 @@ class DepthOptimization:
         )
         cv2.putText(
             ref_image_with_point_display,
-            "Full Reference",
+            "注目画像",
             (10, 20),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
@@ -712,7 +712,7 @@ class DepthOptimization:
         )
         cv2.putText(
             ref_patch_display,
-            "Reference Patch",
+            "注目画像のパッチ",
             (10, 20),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
@@ -742,7 +742,7 @@ class DepthOptimization:
             )
             cv2.putText(
                 warped_patch_display,
-                f"Warped (View {i})",
+                f"投影変換されたパッチ",
                 (10, 20),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
@@ -777,7 +777,7 @@ class DepthOptimization:
             )
             cv2.putText(
                 source_with_box_display,
-                f"Location (View {i})",
+                f"参照画像",
                 (10, 20),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
@@ -905,12 +905,8 @@ class DepthOptimization:
             # --- 1. 空間伝播 ---
             if self.config.CHOICED_PROPAGATION_METHOD == "checkerboard":
                 logging.info("Starting checkerboard propagation ...")
-                if i % 2 == 0:
-                    neighbors_dr = np.array([-1, 0], dtype=np.int8)
-                    neighbors_dc = np.array([0, -1], dtype=np.int8)
-                else:
-                    neighbors_dr = np.array([1, 0], dtype=np.int8)
-                    neighbors_dc = np.array([0, 1], dtype=np.int8)
+                neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+                neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
                 for j in [0, 1]:
                     _propagate_spatial_one_color_jit(
                         depth_map,
