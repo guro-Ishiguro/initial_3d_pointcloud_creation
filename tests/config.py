@@ -117,3 +117,7 @@ FILTERING_MIN_CONSISTENT_VIEWS = 3  # 必要な近傍ビューの最小数
 GEOMETRIC_FILTER_ENABLED = True  # 幾何学的一貫性チェックを有効にするか
 GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD = 0.05  # 幾何学的なエラー（相対深度差）のしきい値
 GEOMETRIC_MIN_CONSISTENT_VIEWS = 2  # 一貫性があると判断するために必要な近傍ビューの最小数
+
+# --- 誤差 ---
+POSITION_ERROR_SCALE = 0.001  # 位置の誤差スケール (メートル)
+ROTATION_ERROR_SCALE = 0.001  # 回転の誤差スケール (ラジアン)

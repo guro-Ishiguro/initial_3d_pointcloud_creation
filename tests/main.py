@@ -60,7 +60,7 @@ if __name__ == "__main__":
 
     # --- パフォーマンス向上のため、必要な画像を事前に一括ロード ---
     image_indices_to_load = set()
-    neighbor_view_offsets = (-2, -1, 1, 2)
+    neighbor_view_offsets = (-3, -2, -1, 1, 2, 3)
     for idx in target_indices:
         image_indices_to_load.add(idx)
         for offset in neighbor_view_offsets:
