@@ -119,16 +119,20 @@ def _compute_homography_cuda(
     H[2, 2] = R_rel[2, 2] + T_rel_2 * n_ref_2 / d
 
     K_inv = cuda.local.array((3, 3), dtype=np.float32)
-    det = K_ref[0,0]*K_ref[1,1] - K_ref[0,1]*K_ref[1,0]
-    K_inv[0,0] = K_ref[1,1]/det
-    K_inv[0,1] = -K_ref[0,1]/det
-    K_inv[0,2] = (K_ref[0,1]*K_ref[1,2] - K_ref[1,1]*K_ref[0,2])/det
-    K_inv[1,0] = -K_ref[1,0]/det
-    K_inv[1,1] = K_ref[0,0]/det
-    K_inv[1,2] = (K_ref[1,0]*K_ref[0,2] - K_ref[0,0]*K_ref[1,2])/det
-    K_inv[2,0] = 0
-    K_inv[2,1] = 0
-    K_inv[2,2] = 1
+    fx = K_ref[0, 0]
+    fy = K_ref[1, 1]
+    cx = K_ref[0, 2]
+    cy = K_ref[1, 2]
+    # Inverse of intrinsics [[fx,0,cx],[0,fy,cy],[0,0,1]]
+    K_inv[0, 0] = 1.0 / fx
+    K_inv[0, 1] = 0.0
+    K_inv[0, 2] = -cx / fx
+    K_inv[1, 0] = 0.0
+    K_inv[1, 1] = 1.0 / fy
+    K_inv[1, 2] = -cy / fy
+    K_inv[2, 0] = 0.0
+    K_inv[2, 1] = 0.0
+    K_inv[2, 2] = 1.0
 
     temp_mat = cuda.local.array((3, 3), dtype=np.float32)
     # temp_mat = K_src @ H
@@ -433,7 +437,7 @@ def _propagate_spatial_one_color_cuda(
     src_R,
     src_T,
 ):
-    r, c = cuda.grid(2)
+    c, r = cuda.grid(2)
     h, w = depth_map.shape
 
     if r >= h or c >= w:
@@ -442,9 +446,7 @@ def _propagate_spatial_one_color_cuda(
         return
     if (r + c) % 2 != color:
         return
-    val = depth_map[r, c]
-    if math.isnan(val) or math.isinf(val):
-        return
+    # Allow propagation even if current pixel depth is invalid.
 
     for i in range(len(neighbors_dr)):
         dr = neighbors_dr[i]
@@ -459,7 +461,14 @@ def _propagate_spatial_one_color_cuda(
             continue
 
         neighbor_normal = normal_map[nr, nc]
-        new_cost = _evaluate_cost_jit(
+        # Skip invalid neighbor normals
+        if (
+            math.isnan(neighbor_normal[0]) or math.isinf(neighbor_normal[0]) or
+            math.isnan(neighbor_normal[1]) or math.isinf(neighbor_normal[1]) or
+            math.isnan(neighbor_normal[2]) or math.isinf(neighbor_normal[2])
+        ):
+            continue
+        new_cost = _evaluate_cost_cuda(
             r,
             c,
             neighbor_depth,
@@ -481,9 +490,95 @@ def _propagate_spatial_one_color_cuda(
 
         if new_cost < cost_map[r, c]:
             depth_map[r, c] = neighbor_depth
-            normal_map[r, c] = neighbor_normal
+            normal_map[r, c, 0] = neighbor_normal[0]
+            normal_map[r, c, 1] = neighbor_normal[1]
+            normal_map[r, c, 2] = neighbor_normal[2]
             cost_map[r, c] = new_cost
 
+
+@cuda.jit
+def _propagate_bucket_one_bin_cuda(
+    depth_map,
+    normal_map,
+    cost_map,
+    propagation_mask,
+    bin_rs,
+    bin_cs,
+    patch_size,
+    top_k_costs,
+    adaptive_weight_sigma_color,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
+):
+    idx = cuda.grid(1)
+    n = bin_rs.shape[0]
+    if idx >= n:
+        return
+    r = int(bin_rs[idx])
+    c = int(bin_cs[idx])
+    h, w = depth_map.shape
+    if not (0 <= r < h and 0 <= c < w):
+        return
+    if not propagation_mask[r, c]:
+        return
+
+    # Evaluate four neighbors as sources into target (r, c)
+    for k in range(4):
+        if k == 0:
+            nr = r - 1; nc = c
+        elif k == 1:
+            nr = r + 1; nc = c
+        elif k == 2:
+            nr = r; nc = c - 1
+        else:
+            nr = r; nc = c + 1
+
+        if not (0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc]):
+            continue
+
+        neighbor_depth = depth_map[nr, nc]
+        if math.isnan(neighbor_depth) or math.isinf(neighbor_depth):
+            continue
+        neighbor_normal = normal_map[nr, nc]
+        if (
+            math.isnan(neighbor_normal[0]) or math.isinf(neighbor_normal[0]) or
+            math.isnan(neighbor_normal[1]) or math.isinf(neighbor_normal[1]) or
+            math.isnan(neighbor_normal[2]) or math.isinf(neighbor_normal[2])
+        ):
+            continue
+
+        new_cost = _evaluate_cost_cuda(
+            r,
+            c,
+            neighbor_depth,
+            neighbor_normal[0],
+            neighbor_normal[1],
+            neighbor_normal[2],
+            patch_size,
+            ref_image_gray,
+            ref_pose_K,
+            ref_pose_R,
+            ref_pose_T,
+            src_images_gray,
+            src_K,
+            src_R,
+            src_T,
+            top_k_costs,
+            adaptive_weight_sigma_color,
+        )
+
+        if new_cost < cost_map[r, c]:
+            depth_map[r, c] = neighbor_depth
+            normal_map[r, c, 0] = neighbor_normal[0]
+            normal_map[r, c, 1] = neighbor_normal[1]
+            normal_map[r, c, 2] = neighbor_normal[2]
+            cost_map[r, c] = new_cost
 
 @njit(parallel=True, fastmath=True)
 def _propagate_spatial_one_color_jit(
@@ -674,7 +769,9 @@ def _propagate_bucket_jit(
                     r_target,
                     c_target,
                     source_depth,
-                    source_normal,
+                    source_normal[0],
+                    source_normal[1],
+                    source_normal[2],
                     patch_size,
                     ref_image_gray,
                     ref_pose_K,
@@ -718,7 +815,7 @@ def _random_search_cuda(
     depth_range_map,
     random_states,
 ):
-    r, c = cuda.grid(2)
+    c, r = cuda.grid(2)
     h, w = depth_map.shape
     thread_id = r * w + c
 
@@ -726,13 +823,17 @@ def _random_search_cuda(
         return
     if not search_mask[r, c]:
         return
-    val = depth_map[r, c]
-    if math.isnan(val) or math.isinf(val):
-        return
+    # If current depth is invalid, we still attempt a random proposal
 
     d_current = depth_map[r, c]
     d_range = depth_range_map[r, c]
-    d_new = d_current + (cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) * 2 - 1) * d_range
+    # Seed a valid starting depth if current is invalid
+    if math.isnan(d_current) or math.isinf(d_current) or d_current <= 0 or math.isnan(d_range) or math.isinf(d_range) or d_range <= 0:
+        base = 1.0
+        jitter = (cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) * 2 - 1) * max(1.0, d_range if not (math.isnan(d_range) or math.isinf(d_range)) else 1.0)
+        d_new = base + jitter
+    else:
+        d_new = d_current + (cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) * 2 - 1) * d_range
     if d_new <= 0:
         return
 
@@ -765,6 +866,15 @@ def _random_search_cuda(
     n_new_y = n_current[1] * cos_a + cross_product_y * sin_a + rand_axis_y * dot_product * one_minus_cos_a
     n_new_z = n_current[2] * cos_a + cross_product_z * sin_a + rand_axis_z * dot_product * one_minus_cos_a
 
+    # If current normal is invalid, start from a random unit vector around Z
+    if (
+        math.isnan(n_current[0]) or math.isinf(n_current[0]) or
+        math.isnan(n_current[1]) or math.isinf(n_current[1]) or
+        math.isnan(n_current[2]) or math.isinf(n_current[2])
+    ):
+        n_current[0] = 0.0
+        n_current[1] = 0.0
+        n_current[2] = 1.0
     norm_new = (n_new_x**2 + n_new_y**2 + n_new_z**2)**0.5
     n_new_x /= norm_new
     n_new_y /= norm_new
@@ -1065,7 +1175,7 @@ def _initialize_normals_from_depth_jit(depth_map, K):
 
 @cuda.jit
 def _initialize_normals_from_depth_cuda(normals, depth_map, K):
-    r, c = cuda.grid(2)
+    c, r = cuda.grid(2)
     h, w = depth_map.shape
     if r >= 1 and r < h - 1 and c >= 1 and c < w - 1:
         val = depth_map[r, c]
@@ -1325,11 +1435,8 @@ class DepthOptimization:
             depth_map, ref_pose["K"].astype(np.float32)
         )
 
-        valid_initial_mask = np.isfinite(initial_depth)
-        kernel = np.ones((7, 7), np.uint8)
-        propagation_mask = cv2.dilate(
-            valid_initial_mask.astype(np.uint8), kernel, iterations=1
-        ).astype(np.bool_)
+        # 初期の視差(深度)が有効な画素のみを対象にする
+        propagation_mask = np.isfinite(initial_depth)
 
         ref_image_gray = cv2.cvtColor(ref_image, cv2.COLOR_RGB2GRAY).astype(np.float32)
         ref_pose_K, ref_pose_R, ref_pose_T = (
@@ -1415,6 +1522,54 @@ class DepthOptimization:
             src_R,
             src_T,
         )
+
+        # --- Debug: cost_map statistics and CPU/GPU cost consistency check on samples ---
+        try:
+            mask = propagation_mask & np.isfinite(depth_map)
+            if np.any(mask):
+                valid_costs = cost_map[mask]
+                logging.info(
+                    f"[GPU Debug] cost_map stats (valid): min={np.nanmin(valid_costs):.6f}, max={np.nanmax(valid_costs):.6f}, mean={np.nanmean(valid_costs):.6f}"
+                )
+                h, w = depth_map.shape
+                samples = [
+                    (h // 2, w // 2),
+                    (h // 4, w // 4),
+                    (h // 4, 3 * w // 4),
+                    (3 * h // 4, w // 4),
+                    (3 * h // 4, 3 * w // 4),
+                ]
+                for (rr, cc) in samples:
+                    if 0 <= rr < h and 0 <= cc < w and mask[rr, cc]:
+                        d = float(depth_map[rr, cc])
+                        n0 = float(normal_map[rr, cc, 0])
+                        n1 = float(normal_map[rr, cc, 1])
+                        n2 = float(normal_map[rr, cc, 2])
+                        cpu_cost = _evaluate_cost_jit(
+                            rr,
+                            cc,
+                            d,
+                            n0,
+                            n1,
+                            n2,
+                            self.config.PATCHMATCH_PATCH_SIZE,
+                            ref_image_gray,
+                            ref_pose_K,
+                            ref_pose_R,
+                            ref_pose_T,
+                            src_images_gray,
+                            src_K,
+                            src_R,
+                            src_T,
+                            self.config.TOP_K_COSTS,
+                            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                        )
+                        gpu_cost = float(cost_map[rr, cc])
+                        logging.info(
+                            f"[GPU Debug] sample (r={rr}, c={cc}): gpu_cost={gpu_cost:.6f}, cpu_cost={cpu_cost:.6f}, diff={abs(gpu_cost - cpu_cost):.6f}"
+                        )
+        except Exception as e:
+            logging.warning(f"[GPU Debug] cost comparison failed: {e}")
 
         logging.info("PatchMatch MVS refinement finished.")
         final_depth_map = depth_map.copy()
@@ -1659,6 +1814,25 @@ class DepthOptimization:
         src_T,
     ):
         h, w = depth_map.shape
+
+        # Seed invalid depths with a mid-range value and use a large initial search range
+        mid_depth = 0.5 * (
+            self.config.PATCHMATCH_VANILLA_MIN_DEPTH + self.config.PATCHMATCH_VANILLA_MAX_DEPTH
+        )
+        depth_map = depth_map.copy()
+        invalid_mask = ~np.isfinite(depth_map) | (depth_map <= 0)
+        if np.any(invalid_mask):
+            depth_map[invalid_mask] = np.float32(mid_depth)
+
+        depth_range_base = initial_depth_error.astype(np.float32).copy()
+        large_range = np.float32(
+            max(
+                self.config.PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE,
+                self.config.PATCHMATCH_VANILLA_MAX_DEPTH - self.config.PATCHMATCH_VANILLA_MIN_DEPTH,
+            )
+        )
+        depth_range_base[~np.isfinite(depth_range_base) | (depth_range_base <= 0)] = large_range
+        depth_range_base[invalid_mask] = large_range
         threadsperblock = (16, 16)
         blockspergrid_x = (w + threadsperblock[0] - 1) // threadsperblock[0]
         blockspergrid_y = (h + threadsperblock[1] - 1) // threadsperblock[1]
@@ -1710,9 +1884,59 @@ class DepthOptimization:
                         d_src_R,
                         d_src_T,
                     )
+            else:
+                # Priority/bucket propagation path (GPU native)
+                # 1) Gather valid pixels and their initial error on host
+                mask = propagation_mask & np.isfinite(depth_range_base)
+                rs, cs = np.nonzero(mask)
+                if rs.size > 0:
+                    costs = depth_range_base[rs, cs]
+                    # Compute bins
+                    num_bins = getattr(self.config, "BUCKET_PROPAGATION_BINS", 4)
+                    cmin = float(np.min(costs))
+                    cmax = float(np.max(costs))
+                    if cmax - cmin < 1e-6:
+                        bin_indices = np.zeros_like(costs, dtype=np.int32)
+                        num_bins_effective = 1
+                    else:
+                        bin_width = (cmax - cmin) / num_bins
+                        bin_indices = np.floor((costs - cmin) / bin_width).astype(np.int32)
+                        bin_indices[bin_indices >= num_bins] = num_bins - 1
+                        num_bins_effective = num_bins
+
+                    # 2) Launch per-bin kernel in low-cost to high-cost order
+                    for b in range(num_bins_effective):
+                        sel = bin_indices == b
+                        if not np.any(sel):
+                            continue
+                        bin_rs = rs[sel].astype(np.int32)
+                        bin_cs = cs[sel].astype(np.int32)
+                        d_bin_rs = cuda.to_device(bin_rs)
+                        d_bin_cs = cuda.to_device(bin_cs)
+                        threads_1d = 256
+                        blocks_1d = (bin_rs.size + threads_1d - 1) // threads_1d
+                        _propagate_bucket_one_bin_cuda[blocks_1d, threads_1d](
+                            d_depth_map,
+                            d_normal_map,
+                            d_cost_map,
+                            d_propagation_mask,
+                            d_bin_rs,
+                            d_bin_cs,
+                            self.config.PATCHMATCH_PATCH_SIZE,
+                            self.config.TOP_K_COSTS,
+                            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                            d_ref_image_gray,
+                            d_ref_pose_K,
+                            d_ref_pose_R,
+                            d_ref_pose_T,
+                            d_src_images_gray,
+                            d_src_K,
+                            d_src_R,
+                            d_src_T,
+                        )
             
             # Random Search
-            depth_range_map = (initial_depth_error * (self.config.PATCHMATCH_DECAY_RATE**i)).astype(np.float32)
+            depth_range_map = (depth_range_base * (self.config.PATCHMATCH_DECAY_RATE**i)).astype(np.float32)
             cuda.to_device(depth_range_map, to=d_depth_range_map)
             
             _random_search_cuda[blockspergrid, threadsperblock](

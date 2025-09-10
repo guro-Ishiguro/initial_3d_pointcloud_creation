@@ -83,7 +83,7 @@ DEBUG_PATCH_MATCH_VISUALIZATION = False  # PatchMatch のホモグラフィ行�
 DEBUG_PIXEL_COORDS = (230, 1000)  # デバッグ用のピクセル座標 (x, y)
 
 # --- PatchMatch MVS のパラメーター ---
-PATCHMATCH_ITERATIONS = 10  # PatchMatchの反復回数
+PATCHMATCH_ITERATIONS = 7  # PatchMatchの反復回数
 PATCHMATCH_PATCH_SIZE = 7  # パッチサイズ (奇数)
 NORMAL_ESTIMATION_NEIGHBORHOOD = 7  # 法線推定に使う近傍のサイズ
 ZNCC_EPSILON = 1e-6  # ZNCCコスト計算時の小さな値
