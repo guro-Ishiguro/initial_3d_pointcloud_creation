@@ -2,7 +2,7 @@
 
 import numpy as np
 import cv2
-from numba import njit, prange
+from numba import njit, prange, cuda
 import logging
 import config
 import os
@@ -15,7 +15,32 @@ from utils import (
     clear_folder,
     save_error_map_as_image,
 )
-import time  # timeモジュールをインポート
+import time  
+from numba.cuda.random import create_xoroshiro128p_states, xoroshiro128p_uniform_float32
+import math
+
+# Constants for CUDA kernels
+PATCHMATCH_PATCH_SIZE_CONST = config.PATCHMATCH_PATCH_SIZE
+MAX_NEIGHBORS_CONST = config.MAX_NEIGHBORS
+
+
+@cuda.jit(device=True)
+def _bilinear_interpolate_cuda(image, y, x):
+    h, w = image.shape
+    x = np.float32(x)
+    y = np.float32(y)
+    x1, y1 = int(x), int(y)
+    x2, y2 = x1 + 1, y1 + 1
+    if x1 < 0 or x2 >= w or y1 < 0 or y2 >= h:
+        return 0.0
+    q11, q12, q21, q22 = image[y1, x1], image[y2, x1], image[y1, x2], image[y2, x2]
+    w1, w2, w3, w4 = (
+        (x2 - x) * (y2 - y),
+        (x - x1) * (y2 - y),
+        (x2 - x) * (y - y1),
+        (x - x1) * (y - y1),
+    )
+    return w1 * q11 + w2 * q21 + w3 * q12 + w4 * q22
 
 
 @njit(fastmath=True)
@@ -37,6 +62,92 @@ def _bilinear_interpolate_jit(image, y, x):
     return w1 * q11 + w2 * q21 + w3 * q12 + w4 * q22
 
 
+@cuda.jit(device=True)
+def _compute_homography_cuda(
+    H_out, K_ref, R_ref, T_ref, K_src, R_src, T_src, plane_point_3d_0, plane_point_3d_1, plane_point_3d_2, plane_normal_0, plane_normal_1, plane_normal_2
+):
+    R_ref_inv = cuda.local.array((3, 3), dtype=np.float32)
+    for i in range(3):
+        for j in range(3):
+            R_ref_inv[i, j] = R_ref[j, i]
+
+    T_ref_inv_0 = -(R_ref_inv[0, 0] * T_ref[0] + R_ref_inv[0, 1] * T_ref[1] + R_ref_inv[0, 2] * T_ref[2])
+    T_ref_inv_1 = -(R_ref_inv[1, 0] * T_ref[0] + R_ref_inv[1, 1] * T_ref[1] + R_ref_inv[1, 2] * T_ref[2])
+    T_ref_inv_2 = -(R_ref_inv[2, 0] * T_ref[0] + R_ref_inv[2, 1] * T_ref[1] + R_ref_inv[2, 2] * T_ref[2])
+
+    p_ref_0 = R_ref[0, 0] * plane_point_3d_0 + R_ref[0, 1] * plane_point_3d_1 + R_ref[0, 2] * plane_point_3d_2 + T_ref[0]
+    p_ref_1 = R_ref[1, 0] * plane_point_3d_0 + R_ref[1, 1] * plane_point_3d_1 + R_ref[1, 2] * plane_point_3d_2 + T_ref[1]
+    p_ref_2 = R_ref[2, 0] * plane_point_3d_0 + R_ref[2, 1] * plane_point_3d_1 + R_ref[2, 2] * plane_point_3d_2 + T_ref[2]
+
+    n_ref_0 = R_ref[0, 0] * plane_normal_0 + R_ref[0, 1] * plane_normal_1 + R_ref[0, 2] * plane_normal_2
+    n_ref_1 = R_ref[1, 0] * plane_normal_0 + R_ref[1, 1] * plane_normal_1 + R_ref[1, 2] * plane_normal_2
+    n_ref_2 = R_ref[2, 0] * plane_normal_0 + R_ref[2, 1] * plane_normal_1 + R_ref[2, 2] * plane_normal_2
+
+    R_rel = cuda.local.array((3, 3), dtype=np.float32)
+    for i in range(3):
+        for j in range(3):
+            R_rel[i, j] = 0
+            for k in range(3):
+                R_rel[i, j] += R_src[i, k] * R_ref_inv[k, j]
+
+    T_rel_0 = R_src[0, 0] * T_ref_inv_0 + R_src[0, 1] * T_ref_inv_1 + R_src[0, 2] * T_ref_inv_2 + T_src[0]
+    T_rel_1 = R_src[1, 0] * T_ref_inv_0 + R_src[1, 1] * T_ref_inv_1 + R_src[1, 2] * T_ref_inv_2 + T_src[1]
+    T_rel_2 = R_src[2, 0] * T_ref_inv_0 + R_src[2, 1] * T_ref_inv_1 + R_src[2, 2] * T_ref_inv_2 + T_src[2]
+
+    d = n_ref_0 * p_ref_0 + n_ref_1 * p_ref_1 + n_ref_2 * p_ref_2
+    if abs(d) < 1e-8:
+        H_out[0, 0] = 1.0
+        H_out[0, 1] = 0.0
+        H_out[0, 2] = 0.0
+        H_out[1, 0] = 0.0
+        H_out[1, 1] = 1.0
+        H_out[1, 2] = 0.0
+        H_out[2, 0] = 0.0
+        H_out[2, 1] = 0.0
+        H_out[2, 2] = 1.0
+        return
+
+    H = cuda.local.array((3, 3), dtype=np.float32)
+    H[0, 0] = R_rel[0, 0] + T_rel_0 * n_ref_0 / d
+    H[0, 1] = R_rel[0, 1] + T_rel_0 * n_ref_1 / d
+    H[0, 2] = R_rel[0, 2] + T_rel_0 * n_ref_2 / d
+    H[1, 0] = R_rel[1, 0] + T_rel_1 * n_ref_0 / d
+    H[1, 1] = R_rel[1, 1] + T_rel_1 * n_ref_1 / d
+    H[1, 2] = R_rel[1, 2] + T_rel_1 * n_ref_2 / d
+    H[2, 0] = R_rel[2, 0] + T_rel_2 * n_ref_0 / d
+    H[2, 1] = R_rel[2, 1] + T_rel_2 * n_ref_1 / d
+    H[2, 2] = R_rel[2, 2] + T_rel_2 * n_ref_2 / d
+
+    K_inv = cuda.local.array((3, 3), dtype=np.float32)
+    det = K_ref[0,0]*K_ref[1,1] - K_ref[0,1]*K_ref[1,0]
+    K_inv[0,0] = K_ref[1,1]/det
+    K_inv[0,1] = -K_ref[0,1]/det
+    K_inv[0,2] = (K_ref[0,1]*K_ref[1,2] - K_ref[1,1]*K_ref[0,2])/det
+    K_inv[1,0] = -K_ref[1,0]/det
+    K_inv[1,1] = K_ref[0,0]/det
+    K_inv[1,2] = (K_ref[1,0]*K_ref[0,2] - K_ref[0,0]*K_ref[1,2])/det
+    K_inv[2,0] = 0
+    K_inv[2,1] = 0
+    K_inv[2,2] = 1
+
+    temp_mat = cuda.local.array((3, 3), dtype=np.float32)
+    # temp_mat = K_src @ H
+    for i in range(3):
+        for j in range(3):
+            val = 0.0
+            for k in range(3):
+                val += K_src[i, k] * H[k, j]
+            temp_mat[i, j] = val
+
+    # H_out = temp_mat @ K_inv
+    for i in range(3):
+        for j in range(3):
+            val = 0.0
+            for k in range(3):
+                val += temp_mat[i, k] * K_inv[k, j]
+            H_out[i, j] = val
+
+
 @njit(fastmath=True)
 def _compute_homography_jit(
     K_ref, R_ref, T_ref, K_src, R_src, T_src, plane_point_3d, plane_normal
@@ -54,6 +165,51 @@ def _compute_homography_jit(
         return np.eye(3, dtype=np.float32)
     H = R_rel + (T_rel.reshape(3, 1) @ n_ref.reshape(1, 3)) / d
     return np.ascontiguousarray(K_src) @ np.ascontiguousarray(H) @ np.linalg.inv(K_ref)
+
+
+@cuda.jit(device=True)
+def _compute_weighted_zncc_cost_cuda(patch_ref, warped_patch_src, sigma_color):
+    patch_size = patch_ref.shape[0]
+    half = patch_size // 2
+    center_val = patch_ref[half, half]
+    weights = cuda.local.array((PATCHMATCH_PATCH_SIZE_CONST, PATCHMATCH_PATCH_SIZE_CONST), dtype=np.float32)
+    for r in range(patch_size):
+        for c in range(patch_size):
+            color_diff_sq = (patch_ref[r, c] - center_val) ** 2
+            weights[r, c] = math.exp(-color_diff_sq / (2.0 * (sigma_color ** 2)))
+    sum_w = 0.0
+    for r in range(patch_size):
+        for c in range(patch_size):
+            sum_w += weights[r, c]
+    if sum_w < 1e-6:
+        return 1.0
+    mean_ref = 0.0
+    mean_src = 0.0
+    for r in range(patch_size):
+        for c in range(patch_size):
+            mean_ref += patch_ref[r, c] * weights[r, c]
+            mean_src += warped_patch_src[r, c] * weights[r, c]
+    mean_ref /= sum_w
+    mean_src /= sum_w
+    var_ref = 0.0
+    var_src = 0.0
+    for r in range(patch_size):
+        for c in range(patch_size):
+            var_ref += weights[r, c] * (patch_ref[r, c] - mean_ref) ** 2
+            var_src += weights[r, c] * (warped_patch_src[r, c] - mean_src) ** 2
+    var_ref /= sum_w
+    var_src /= sum_w
+    std_ref = math.sqrt(var_ref)
+    std_src = math.sqrt(var_src)
+    if std_ref < config.ZNCC_EPSILON or std_src < config.ZNCC_EPSILON:
+        return 1.0
+    numerator = 0.0
+    for r in range(patch_size):
+        for c in range(patch_size):
+            numerator += weights[r, c] * (patch_ref[r, c] - mean_ref) * (warped_patch_src[r, c] - mean_src)
+    numerator /= sum_w
+    denominator = std_ref * std_src
+    return (1.0 - (numerator / denominator)) / 2.0
 
 
 @njit(fastmath=True)
@@ -99,12 +255,99 @@ def _compute_weighted_zncc_cost_jit(patch_ref, warped_patch_src, sigma_color):
     return (1.0 - (numerator / denominator)) / 2.0
 
 
+@cuda.jit(device=True)
+def _evaluate_cost_cuda(
+    r,
+    c,
+    depth,
+    normal_0,
+    normal_1,
+    normal_2,
+    patch_size,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
+    top_k_costs,
+    adaptive_weight_sigma_color,
+):
+    h, w = ref_image_gray.shape
+    half = patch_size // 2
+    if r - half < 0 or r + half + 1 > h or c - half < 0 or c + half + 1 > w:
+        return 1.0
+    x_cam = (c - ref_pose_K[0, 2]) * depth / ref_pose_K[0, 0]
+    y_cam = (r - ref_pose_K[1, 2]) * depth / ref_pose_K[1, 1]
+    point_3d_cam_0 = x_cam
+    point_3d_cam_1 = y_cam
+    point_3d_cam_2 = depth
+    R_ref_inv = cuda.local.array((3, 3), dtype=np.float32)
+    for i in range(3):
+        for j in range(3):
+            R_ref_inv[i, j] = ref_pose_R[j, i]
+    point_3d_world_0 = R_ref_inv[0, 0] * (point_3d_cam_0 - ref_pose_T[0]) + R_ref_inv[0, 1] * (point_3d_cam_1 - ref_pose_T[1]) + R_ref_inv[0, 2] * (point_3d_cam_2 - ref_pose_T[2])
+    point_3d_world_1 = R_ref_inv[1, 0] * (point_3d_cam_0 - ref_pose_T[0]) + R_ref_inv[1, 1] * (point_3d_cam_1 - ref_pose_T[1]) + R_ref_inv[1, 2] * (point_3d_cam_2 - ref_pose_T[2])
+    point_3d_world_2 = R_ref_inv[2, 0] * (point_3d_cam_0 - ref_pose_T[0]) + R_ref_inv[2, 1] * (point_3d_cam_1 - ref_pose_T[1]) + R_ref_inv[2, 2] * (point_3d_cam_2 - ref_pose_T[2])
+    normal_world_0 = R_ref_inv[0, 0] * normal_0 + R_ref_inv[0, 1] * normal_1 + R_ref_inv[0, 2] * normal_2
+    normal_world_1 = R_ref_inv[1, 0] * normal_0 + R_ref_inv[1, 1] * normal_1 + R_ref_inv[1, 2] * normal_2
+    normal_world_2 = R_ref_inv[2, 0] * normal_0 + R_ref_inv[2, 1] * normal_1 + R_ref_inv[2, 2] * normal_2
+    patch_ref = cuda.local.array((PATCHMATCH_PATCH_SIZE_CONST, PATCHMATCH_PATCH_SIZE_CONST), dtype=np.float32)
+    for pr in range(patch_size):
+        for pc in range(patch_size):
+            patch_ref[pr, pc] = ref_image_gray[r - half + pr, c - half + pc]
+    num_neighbors = src_images_gray.shape[0]
+    costs = cuda.local.array(MAX_NEIGHBORS_CONST, dtype=np.float32)
+    H = cuda.local.array((3, 3), dtype=np.float32)
+    for i in range(num_neighbors):
+        _compute_homography_cuda(
+            H,
+            ref_pose_K, ref_pose_R, ref_pose_T,
+            src_K[i], src_R[i], src_T[i],
+            point_3d_world_0, point_3d_world_1, point_3d_world_2,
+            normal_world_0, normal_world_1, normal_world_2
+        )
+        warped_patch = cuda.local.array((PATCHMATCH_PATCH_SIZE_CONST, PATCHMATCH_PATCH_SIZE_CONST), dtype=np.float32)
+        for pr in range(patch_size):
+            for pc in range(patch_size):
+                u_ref, v_ref = c - half + pc, r - half + pr
+                p_ref_h_0 = u_ref
+                p_ref_h_1 = v_ref
+                p_ref_h_2 = 1.0
+                p_src_h_0 = H[0, 0] * p_ref_h_0 + H[0, 1] * p_ref_h_1 + H[0, 2] * p_ref_h_2
+                p_src_h_1 = H[1, 0] * p_ref_h_0 + H[1, 1] * p_ref_h_1 + H[1, 2] * p_ref_h_2
+                p_src_h_2 = H[2, 0] * p_ref_h_0 + H[2, 1] * p_ref_h_1 + H[2, 2] * p_ref_h_2
+                if abs(p_src_h_2) < 1e-8:
+                    warped_patch[pr, pc] = 0.0
+                    continue
+                u_src, v_src = p_src_h_0 / p_src_h_2, p_src_h_1 / p_src_h_2
+                warped_patch[pr, pc] = _bilinear_interpolate_cuda(
+                    src_images_gray[i], v_src, u_src
+                )
+        costs[i] = _compute_weighted_zncc_cost_cuda(
+            patch_ref, warped_patch, adaptive_weight_sigma_color
+        )
+    for i in range(num_neighbors):
+        for j in range(i + 1, num_neighbors):
+            if costs[i] > costs[j]:
+                costs[i], costs[j] = costs[j], costs[i]
+    top_k = min(top_k_costs, num_neighbors)
+    total_cost = 0.0
+    for i in range(top_k):
+        total_cost += costs[i]
+    return total_cost / top_k
+
+
 @njit(fastmath=True)
 def _evaluate_cost_jit(
     r,
     c,
     depth,
-    normal,
+    normal_0,
+    normal_1,
+    normal_2,
     patch_size,
     ref_image_gray,
     ref_pose_K,
@@ -128,6 +371,7 @@ def _evaluate_cost_jit(
     point_3d_cam = np.array([x_cam, y_cam, depth], dtype=np.float32)
     R_ref_inv = ref_pose_R.T
     point_3d_world = R_ref_inv @ (point_3d_cam - ref_pose_T)
+    normal = np.array([normal_0, normal_1, normal_2], dtype=np.float32)
     normal_world = R_ref_inv @ normal
     patch_ref = ref_image_gray[r - half : r + half + 1, c - half : c + half + 1]
     num_neighbors = src_images_gray.shape[0]
@@ -166,6 +410,79 @@ def _evaluate_cost_jit(
     costs = np.sort(costs)
     top_k = min(top_k_costs, len(costs))
     return np.mean(costs[:top_k])
+
+
+@cuda.jit
+def _propagate_spatial_one_color_cuda(
+    depth_map,
+    normal_map,
+    cost_map,
+    propagation_mask,
+    neighbors_dr,
+    neighbors_dc,
+    color,
+    patch_size,
+    top_k_costs,
+    adaptive_weight_sigma_color,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
+):
+    r, c = cuda.grid(2)
+    h, w = depth_map.shape
+
+    if r >= h or c >= w:
+        return
+    if not propagation_mask[r, c]:
+        return
+    if (r + c) % 2 != color:
+        return
+    val = depth_map[r, c]
+    if math.isnan(val) or math.isinf(val):
+        return
+
+    for i in range(len(neighbors_dr)):
+        dr = neighbors_dr[i]
+        dc = neighbors_dc[i]
+        nr, nc = r + dr, c + dc
+
+        if not (0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc]):
+            continue
+
+        neighbor_depth = depth_map[nr, nc]
+        if math.isnan(neighbor_depth) or math.isinf(neighbor_depth):
+            continue
+
+        neighbor_normal = normal_map[nr, nc]
+        new_cost = _evaluate_cost_jit(
+            r,
+            c,
+            neighbor_depth,
+            neighbor_normal[0],
+            neighbor_normal[1],
+            neighbor_normal[2],
+            patch_size,
+            ref_image_gray,
+            ref_pose_K,
+            ref_pose_R,
+            ref_pose_T,
+            src_images_gray,
+            src_K,
+            src_R,
+            src_T,
+            top_k_costs,
+            adaptive_weight_sigma_color,
+        )
+
+        if new_cost < cost_map[r, c]:
+            depth_map[r, c] = neighbor_depth
+            normal_map[r, c] = neighbor_normal
+            cost_map[r, c] = new_cost
 
 
 @njit(parallel=True, fastmath=True)
@@ -210,7 +527,7 @@ def _propagate_spatial_one_color_jit(
             if (r + c) % 2 != color:
                 continue
 
-            if not np.isfinite(depth_map[r, c]):
+            if math.isnan(depth_map[r, c]) or math.isinf(depth_map[r, c]):
                 continue
 
             # 隣接ピクセルからより良い平面（深度と法線）を伝播させる
@@ -224,7 +541,7 @@ def _propagate_spatial_one_color_jit(
                     continue
 
                 neighbor_depth = depth_map[nr, nc]
-                if not np.isfinite(neighbor_depth):
+                if math.isnan(neighbor_depth) or math.isinf(neighbor_depth):
                     continue
 
                 # 現在のピクセル(r, c)の位置で、隣接ピクセル(nr, nc)の平面を評価
@@ -233,7 +550,9 @@ def _propagate_spatial_one_color_jit(
                     r,
                     c,
                     neighbor_depth,
-                    neighbor_normal,
+                    neighbor_normal[0],
+                    neighbor_normal[1],
+                    neighbor_normal[2],
                     patch_size,
                     ref_image_gray,
                     ref_pose_K,
@@ -331,7 +650,7 @@ def _propagate_bucket_jit(
             # 伝播元となるピクセル（source）の情報を取得
             r_source, c_source = valid_pixels_coords[i]
             source_depth = depth_map[r_source, c_source]
-            if not np.isfinite(source_depth):
+            if math.isnan(source_depth) or math.isinf(source_depth):
                 continue
             source_normal = normal_map[r_source, c_source]
 
@@ -376,6 +695,114 @@ def _propagate_bucket_jit(
                     cost_map[r_target, c_target] = new_cost
 
 
+@cuda.jit
+def _random_search_cuda(
+    depth_map,
+    normal_map,
+    cost_map,
+    search_mask,
+    iteration,
+    patch_size,
+    top_k_costs,
+    decay_rate,
+    normal_search_angle,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
+    adaptive_weight_sigma_color,
+    depth_range_map,
+    random_states,
+):
+    r, c = cuda.grid(2)
+    h, w = depth_map.shape
+    thread_id = r * w + c
+
+    if r >= h or c >= w:
+        return
+    if not search_mask[r, c]:
+        return
+    val = depth_map[r, c]
+    if math.isnan(val) or math.isinf(val):
+        return
+
+    d_current = depth_map[r, c]
+    d_range = depth_range_map[r, c]
+    d_new = d_current + (cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) * 2 - 1) * d_range
+    if d_new <= 0:
+        return
+
+    n_current = normal_map[r, c]
+    angle_rad = (
+        (cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) * 2 - 1)
+        * normal_search_angle
+        * (decay_rate**iteration)
+    ) * math.pi / 180.0
+
+    rand_axis_x = cuda.random.xoroshiro128p_normal_float32(random_states, thread_id)
+    rand_axis_y = cuda.random.xoroshiro128p_normal_float32(random_states, thread_id)
+    rand_axis_z = cuda.random.xoroshiro128p_normal_float32(random_states, thread_id)
+    norm = (rand_axis_x**2 + rand_axis_y**2 + rand_axis_z**2)**0.5
+    rand_axis_x /= norm
+    rand_axis_y /= norm
+    rand_axis_z /= norm
+
+    cos_a = math.cos(angle_rad)
+    sin_a = math.sin(angle_rad)
+    one_minus_cos_a = 1.0 - cos_a
+
+    dot_product = rand_axis_x * n_current[0] + rand_axis_y * n_current[1] + rand_axis_z * n_current[2]
+
+    cross_product_x = rand_axis_y * n_current[2] - rand_axis_z * n_current[1]
+    cross_product_y = rand_axis_z * n_current[0] - rand_axis_x * n_current[2]
+    cross_product_z = rand_axis_x * n_current[1] - rand_axis_y * n_current[0]
+
+    n_new_x = n_current[0] * cos_a + cross_product_x * sin_a + rand_axis_x * dot_product * one_minus_cos_a
+    n_new_y = n_current[1] * cos_a + cross_product_y * sin_a + rand_axis_y * dot_product * one_minus_cos_a
+    n_new_z = n_current[2] * cos_a + cross_product_z * sin_a + rand_axis_z * dot_product * one_minus_cos_a
+
+    norm_new = (n_new_x**2 + n_new_y**2 + n_new_z**2)**0.5
+    n_new_x /= norm_new
+    n_new_y /= norm_new
+    n_new_z /= norm_new
+    
+    n_new = cuda.local.array(3, dtype=np.float32)
+    n_new[0] = n_new_x
+    n_new[1] = n_new_y
+    n_new[2] = n_new_z
+
+
+    new_cost = _evaluate_cost_cuda(
+        r,
+        c,
+        d_new,
+        n_new[0],
+        n_new[1],
+        n_new[2],
+        patch_size,
+        ref_image_gray,
+        ref_pose_K,
+        ref_pose_R,
+        ref_pose_T,
+        src_images_gray,
+        src_K,
+        src_R,
+        src_T,
+        top_k_costs,
+        adaptive_weight_sigma_color,
+    )
+    if new_cost < cost_map[r, c]:
+        depth_map[r, c] = d_new
+        normal_map[r, c, 0] = n_new[0]
+        normal_map[r, c, 1] = n_new[1]
+        normal_map[r, c, 2] = n_new[2]
+        cost_map[r, c] = new_cost
+
+
 @njit(parallel=True, fastmath=True)
 def _random_search_jit(
     depth_map,
@@ -405,7 +832,7 @@ def _random_search_jit(
             if not search_mask[r, c]:
                 continue
 
-            if not np.isfinite(depth_map[r, c]):
+            if math.isnan(depth_map[r, c]) or math.isinf(depth_map[r, c]):
                 continue
             d_current = depth_map[r, c]
             d_range = depth_range_map[r, c]
@@ -434,7 +861,9 @@ def _random_search_jit(
                 r,
                 c,
                 d_new,
-                n_new,
+                n_new[0],
+                n_new[1],
+                n_new[2],
                 patch_size,
                 ref_image_gray,
                 ref_pose_K,
@@ -634,6 +1063,63 @@ def _initialize_normals_from_depth_jit(depth_map, K):
     return normals
 
 
+@cuda.jit
+def _initialize_normals_from_depth_cuda(normals, depth_map, K):
+    r, c = cuda.grid(2)
+    h, w = depth_map.shape
+    if r >= 1 and r < h - 1 and c >= 1 and c < w - 1:
+        val = depth_map[r, c]
+        if math.isnan(val) or math.isinf(val):
+            return
+
+        cx, cy = K[0, 2], K[1, 2]
+        fx, fy = K[0, 0], K[1, 1]
+
+        p_center_x = (c - cx) * depth_map[r, c] / fx
+        p_center_y = (r - cy) * depth_map[r, c] / fy
+        p_center_z = depth_map[r, c]
+
+        p_right_x = (c + 1 - cx) * depth_map[r, c + 1] / fx
+        p_right_y = (r - cy) * depth_map[r, c + 1] / fy
+        p_right_z = depth_map[r, c + 1]
+
+        p_down_x = (c - cx) * depth_map[r + 1, c] / fx
+        p_down_y = (r + 1 - cy) * depth_map[r + 1, c] / fy
+        p_down_z = depth_map[r + 1, c]
+
+        if (
+            (math.isnan(p_right_x) or math.isinf(p_right_x))
+            or (math.isnan(p_right_y) or math.isinf(p_right_y))
+            or (math.isnan(p_right_z) or math.isinf(p_right_z))
+            or (math.isnan(p_down_x) or math.isinf(p_down_x))
+            or (math.isnan(p_down_y) or math.isinf(p_down_y))
+            or (math.isnan(p_down_z) or math.isinf(p_down_z))
+        ):
+            return
+
+        v_c_x = p_right_x - p_center_x
+        v_c_y = p_right_y - p_center_y
+        v_c_z = p_right_z - p_center_z
+
+        v_r_x = p_down_x - p_center_x
+        v_r_y = p_down_y - p_center_y
+        v_r_z = p_down_z - p_center_z
+
+        normal_x = v_r_y * v_c_z - v_r_z * v_c_y
+        normal_y = v_r_z * v_c_x - v_r_x * v_c_z
+        normal_z = v_r_x * v_c_y - v_r_y * v_c_x
+
+        norm = (normal_x**2 + normal_y**2 + normal_z**2) ** 0.5
+        if norm > 1e-6:
+            normals[r, c, 0] = normal_x / norm
+            normals[r, c, 1] = normal_y / norm
+            normals[r, c, 2] = normal_z / norm
+        else:
+            normals[r, c, 0] = 0.0
+            normals[r, c, 1] = 0.0
+            normals[r, c, 2] = 1.0
+
+
 class DepthOptimization:
     def __init__(self, config):
         self.config = config
@@ -646,6 +1132,22 @@ class DepthOptimization:
             logging.warning(
                 "BUCKET_PROPAGATION_BINS not found in config. Using default value 16."
             )
+
+    def _initialize_normals_gpu(self, depth_map, K):
+        h, w = depth_map.shape
+        d_depth_map = cuda.to_device(depth_map.astype(np.float32))
+        d_normals = cuda.device_array((h, w, 3), dtype=np.float32)
+        d_K = cuda.to_device(K.astype(np.float32))
+
+        threadsperblock = (16, 16)
+        blockspergrid_x = (w + threadsperblock[0] - 1) // threadsperblock[0]
+        blockspergrid_y = (h + threadsperblock[1] - 1) // threadsperblock[1]
+        blockspergrid = (blockspergrid_x, blockspergrid_y)
+
+        _initialize_normals_from_depth_cuda[blockspergrid, threadsperblock](
+            d_normals, d_depth_map, d_K
+        )
+        return d_normals.copy_to_host()
 
     def _debug_patch_visualization(
         self,
@@ -819,7 +1321,7 @@ class DepthOptimization:
 
         h, w = initial_depth.shape
         depth_map = initial_depth.astype(np.float32)
-        normal_map = _initialize_normals_from_depth_jit(
+        normal_map = self._initialize_normals_gpu(
             depth_map, ref_pose["K"].astype(np.float32)
         )
 
@@ -860,7 +1362,9 @@ class DepthOptimization:
                         r,
                         c,
                         depth_map[r, c],
-                        normal_map[r, c],
+                        normal_map[r, c, 0],
+                        normal_map[r, c, 1],
+                        normal_map[r, c, 2],
                         self.config.PATCHMATCH_PATCH_SIZE,
                         ref_image_gray,
                         ref_pose_K,
@@ -894,164 +1398,23 @@ class DepthOptimization:
                 initialize_csv(path, ["time", metric])
                 
         start_refinement_time = time.time()
-        # --- PatchMatch反復ループ ---
-        for i in range(self.config.PATCHMATCH_ITERATIONS):
-            iteration_start_time = time.time()
-            np.copyto(depth_map_prev, depth_map)
-            logging.info(
-                f"PatchMatch Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
-            )
-
-            # --- 1. 空間伝播 ---
-            if self.config.CHOICED_PROPAGATION_METHOD == "checkerboard":
-                logging.info("Starting checkerboard propagation ...")
-                neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
-                neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
-                for j in [0, 1]:
-                    _propagate_spatial_one_color_jit(
-                        depth_map,
-                        normal_map,
-                        cost_map,
-                        propagation_mask,
-                        neighbors_dr,
-                        neighbors_dc,
-                        j,
-                        0,
-                        h,
-                        0,
-                        w,
-                        self.config.PATCHMATCH_PATCH_SIZE,
-                        self.config.TOP_K_COSTS,
-                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                        ref_image_gray,
-                        ref_pose_K,
-                        ref_pose_R,
-                        ref_pose_T,
-                        src_images_gray,
-                        src_K,
-                        src_R,
-                        src_T,
-                    )
-
-            elif self.config.CHOICED_PROPAGATION_METHOD == "priority":
-                if i > 0:
-                    logging.info("Starting priority propagation ...")
-                    _propagate_bucket_jit(
-                        depth_map,
-                        normal_map,
-                        cost_map,
-                        initial_depth_error,
-                        propagation_mask,
-                        self.config.BUCKET_PROPAGATION_BINS,
-                        self.config.PATCHMATCH_PATCH_SIZE,
-                        self.config.TOP_K_COSTS,
-                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                        ref_image_gray,
-                        ref_pose_K,
-                        ref_pose_R,
-                        ref_pose_T,
-                        src_images_gray,
-                        src_K,
-                        src_R,
-                        src_T,
-                    )
-
-            # --- 2. ランダム探索 ---
-            depth_range_map = (
-                initial_depth_error * (self.config.PATCHMATCH_DECAY_RATE**i)
-            ).astype(np.float32)
-            logging.info("Starting random search ...")
-            _random_search_jit(
-                depth_map,
-                normal_map,
-                cost_map,
-                propagation_mask,
-                i,
-                self.config.PATCHMATCH_PATCH_SIZE,
-                self.config.TOP_K_COSTS,
-                self.config.PATCHMATCH_DECAY_RATE,
-                self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE,
-                ref_image_gray,
-                ref_pose_K,
-                ref_pose_R,
-                ref_pose_T,
-                src_images_gray,
-                src_K,
-                src_R,
-                src_T,
-                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                depth_range_map,
-            )
-
-            if self.config.DEBUG_PATCH_MATCH_VISUALIZATION:
-                y_debug, x_debug = self.config.DEBUG_PIXEL_COORDS
-                self._debug_patch_visualization(
-                    y_debug,
-                    x_debug,
-                    depth_map[y_debug, x_debug],
-                    normal_map[y_debug, x_debug],
-                    ref_image,
-                    ref_pose,
-                    neighbor_views_data,
-                    title_prefix=f"Iteration {i+1}",
-                )
-                cv2.waitKey(0)
-
-            if self.config.DEBUG_SAVE_DEPTH_MAPS:
-                save_each_depth_dir = os.path.join(
-                    config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}"
-                )
-                save_path = os.path.join(
-                    save_each_depth_dir, f"depth_iter_{i+1:02d}.png"
-                )
-                logging.info(f"Saving intermediate depth map to {save_path}")
-                save_depth_map_as_image(depth_map.copy(), save_path)
-            if self.config.DEBUG_SAVE_NORMAL_MAPS:
-                save_each_normal_dir = os.path.join(
-                    config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}"
-                )
-                save_path_normal = os.path.join(
-                    save_each_normal_dir, f"normal_iter_{i+1:02d}.png"
-                )
-                logging.info(f"Saving intermediate normal map to {save_path_normal}")
-                save_normal_map_as_image(normal_map.copy(), save_path_normal)
-
-            diff = np.abs(depth_map_prev - depth_map)
-            valid_mask = (
-                np.isfinite(depth_map_prev)
-                & (depth_map_prev != 0)
-                & np.isfinite(depth_map)
-            )
-            if np.sum(valid_mask) > 0:
-                mean_change = np.mean(diff[valid_mask] / depth_map_prev[valid_mask])
-                logging.info(f"Average depth change: {mean_change:.5f}")
-                if mean_change < convergence_threshold:
-                    logging.info(
-                        f"Convergence reached at iteration {i+1}. Stopping early."
-                    )
-                    break
-            else:
-                logging.warning("No valid pixels for convergence check.")
-
-            if gt_depth is not None:
-                metrics = compute_depth_metrics(depth_map, gt_depth)
-                logging.info(
-                    f"MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
-                    f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
-                )
-                current_time = time.time() - start_refinement_time
-                for metric, value in metrics.items():
-                    if metric in csv_files:
-                        append_to_csv(csv_files[metric], [current_time, value])
-                save_error_map_as_image(
-                    depth_map,
-                    gt_depth,
-                    os.path.join(save_each_depth_dir, f"error_iter_{i+1:02d}.png"),
-                )
-
-            iteration_end_time = time.time()
-            elapsed_time = iteration_end_time - iteration_start_time
-            logging.info(f"Iteration {i+1} took {elapsed_time:.2f} seconds.")
+        
+        # --- PatchMatch反復ループ (GPU) ---
+        depth_map, normal_map, cost_map = self._propagate_and_search_gpu(
+            depth_map,
+            normal_map,
+            cost_map,
+            propagation_mask,
+            initial_depth_error,
+            ref_image_gray,
+            ref_pose_K,
+            ref_pose_R,
+            ref_pose_T,
+            src_images_gray,
+            src_K,
+            src_R,
+            src_T,
+        )
 
         logging.info("PatchMatch MVS refinement finished.")
         final_depth_map = depth_map.copy()
@@ -1083,7 +1446,7 @@ class DepthOptimization:
             save_depth_map_as_image(depth_map, save_depth_path)
 
         # 2. 法線マップを初期化
-        normal_map = _initialize_normals_from_depth_jit(
+        normal_map = self._initialize_normals_gpu(
             depth_map, ref_pose["K"].astype(np.float32)
         )
 
@@ -1120,97 +1483,26 @@ class DepthOptimization:
         )
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
         propagation_mask = np.full((h, w), True, dtype=np.bool_)
+        
+        # ダミーの initial_depth_error を作成
+        initial_depth_error = np.full_like(depth_map, self.config.PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE, dtype=np.float32)
 
-        # 4. PatchMatch反復ループ
-        for i in range(self.config.PATCHMATCH_ITERATIONS):
-            logging.info(
-                f"Vanilla PatchMatch Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
-            )
-
-            # --- 空間伝播 ---
-            if i % 2 == 0:
-                neighbors_dr = np.array([-1, 0], dtype=np.int8)
-                neighbors_dc = np.array([0, -1], dtype=np.int8)
-            else:
-                neighbors_dr = np.array([1, 0], dtype=np.int8)
-                neighbors_dc = np.array([0, 1], dtype=np.int8)
-
-            for color_idx in [0, 1]:
-                _propagate_spatial_one_color_jit(
-                    depth_map,
-                    normal_map,
-                    cost_map,
-                    propagation_mask,
-                    neighbors_dr,
-                    neighbors_dc,
-                    color_idx,
-                    0,
-                    h,
-                    0,
-                    w,
-                    self.config.PATCHMATCH_PATCH_SIZE,
-                    self.config.TOP_K_COSTS,
-                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                    ref_image_gray,
-                    ref_pose_K,
-                    ref_pose_R,
-                    ref_pose_T,
-                    src_images_gray,
-                    src_K,
-                    src_R,
-                    src_T,
-                )
-
-            # --- ランダム探索 ---
-            depth_range_map = np.full(
-                (h, w),
-                self.config.PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE
-                * (self.config.PATCHMATCH_DECAY_RATE**i),
-                dtype=np.float32,
-            )
-            search_mask = np.full((h, w), True, dtype=np.bool_)
-            _random_search_jit(
-                depth_map,
-                normal_map,
-                cost_map,
-                search_mask,
-                i,
-                self.config.PATCHMATCH_PATCH_SIZE,
-                self.config.TOP_K_COSTS,
-                self.config.PATCHMATCH_DECAY_RATE,
-                self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE,
-                ref_image_gray,
-                ref_pose_K,
-                ref_pose_R,
-                ref_pose_T,
-                src_images_gray,
-                src_K,
-                src_R,
-                src_T,
-                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                depth_range_map,
-            )
-
-            # イテレーションごとのデプスマップ保存
-            if self.config.DEBUG_SAVE_DEPTH_MAPS:
-                save_each_depth_dir = os.path.join(
-                    config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}"
-                )
-                save_path = os.path.join(
-                    save_each_depth_dir, f"depth_iter_{i+1:02d}.png"
-                )
-                logging.info(f"Saving intermediate depth map to {save_path}")
-                save_depth_map_as_image(depth_map.copy(), save_path)
-
-            if self.config.DEBUG_SAVE_NORMAL_MAPS:
-                save_each_normal_dir = os.path.join(
-                    config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}"
-                )
-                save_path_normal = os.path.join(
-                    save_each_normal_dir, f"normal_iter_{i+1:02d}.png"
-                )
-                logging.info(f"Saving intermediate normal map to {save_path_normal}")
-                save_normal_map_as_image(normal_map.copy(), save_path_normal)
+        # 4. PatchMatch反復ループ (GPU)
+        depth_map, normal_map, cost_map = self._propagate_and_search_gpu(
+            depth_map,
+            normal_map,
+            cost_map,
+            propagation_mask,
+            initial_depth_error,
+            ref_image_gray,
+            ref_pose_K,
+            ref_pose_R,
+            ref_pose_T,
+            src_images_gray,
+            src_K,
+            src_R,
+            src_T,
+        )
 
         logging.info("Vanilla PatchMatch MVS refinement finished.")
         return depth_map
@@ -1324,7 +1616,7 @@ class DepthOptimization:
         consistency_failures = 0
         for r in range(h):
             for c in range(w):
-                if not np.isfinite(filtered_depth_map[r, c]):
+                if math.isnan(filtered_depth_map[r, c]) or math.isinf(filtered_depth_map[r, c]):
                     continue
 
                 consistent_views = _check_photometric_consistency_jit(
@@ -1349,3 +1641,106 @@ class DepthOptimization:
         )
 
         return filtered_depth_map
+
+    def _propagate_and_search_gpu(
+        self,
+        depth_map,
+        normal_map,
+        cost_map,
+        propagation_mask,
+        initial_depth_error,
+        ref_image_gray,
+        ref_pose_K,
+        ref_pose_R,
+        ref_pose_T,
+        src_images_gray,
+        src_K,
+        src_R,
+        src_T,
+    ):
+        h, w = depth_map.shape
+        threadsperblock = (16, 16)
+        blockspergrid_x = (w + threadsperblock[0] - 1) // threadsperblock[0]
+        blockspergrid_y = (h + threadsperblock[1] - 1) // threadsperblock[1]
+        blockspergrid = (blockspergrid_x, blockspergrid_y)
+
+        # Device arrays
+        d_depth_map = cuda.to_device(depth_map)
+        d_normal_map = cuda.to_device(normal_map)
+        d_cost_map = cuda.to_device(cost_map)
+        d_propagation_mask = cuda.to_device(propagation_mask)
+        d_ref_image_gray = cuda.to_device(ref_image_gray)
+        d_ref_pose_K = cuda.to_device(ref_pose_K)
+        d_ref_pose_R = cuda.to_device(ref_pose_R)
+        d_ref_pose_T = cuda.to_device(ref_pose_T)
+        d_src_images_gray = cuda.to_device(np.ascontiguousarray(src_images_gray))
+        d_src_K = cuda.to_device(np.ascontiguousarray(src_K))
+        d_src_R = cuda.to_device(np.ascontiguousarray(src_R))
+        d_src_T = cuda.to_device(np.ascontiguousarray(src_T))
+        d_depth_range_map = cuda.device_array_like(depth_map)
+        rng_states = create_xoroshiro128p_states(threadsperblock[0] * threadsperblock[1] * blockspergrid_x * blockspergrid_y, seed=1)
+
+        for i in range(self.config.PATCHMATCH_ITERATIONS):
+            logging.info(f"PatchMatch GPU Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}")
+
+            # Propagation
+            if self.config.CHOICED_PROPAGATION_METHOD == "checkerboard":
+                neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+                neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
+                d_neighbors_dr = cuda.to_device(neighbors_dr)
+                d_neighbors_dc = cuda.to_device(neighbors_dc)
+                for j in [0, 1]:
+                    _propagate_spatial_one_color_cuda[blockspergrid, threadsperblock](
+                        d_depth_map,
+                        d_normal_map,
+                        d_cost_map,
+                        d_propagation_mask,
+                        d_neighbors_dr,
+                        d_neighbors_dc,
+                        j,
+                        self.config.PATCHMATCH_PATCH_SIZE,
+                        self.config.TOP_K_COSTS,
+                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                        d_ref_image_gray,
+                        d_ref_pose_K,
+                        d_ref_pose_R,
+                        d_ref_pose_T,
+                        d_src_images_gray,
+                        d_src_K,
+                        d_src_R,
+                        d_src_T,
+                    )
+            
+            # Random Search
+            depth_range_map = (initial_depth_error * (self.config.PATCHMATCH_DECAY_RATE**i)).astype(np.float32)
+            cuda.to_device(depth_range_map, to=d_depth_range_map)
+            
+            _random_search_cuda[blockspergrid, threadsperblock](
+                d_depth_map,
+                d_normal_map,
+                d_cost_map,
+                d_propagation_mask,
+                i,
+                self.config.PATCHMATCH_PATCH_SIZE,
+                self.config.TOP_K_COSTS,
+                self.config.PATCHMATCH_DECAY_RATE,
+                self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE,
+                d_ref_image_gray,
+                d_ref_pose_K,
+                d_ref_pose_R,
+                d_ref_pose_T,
+                d_src_images_gray,
+                d_src_K,
+                d_src_R,
+                d_src_T,
+                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                d_depth_range_map,
+                rng_states,
+            )
+            cuda.synchronize()
+
+        depth_map = d_depth_map.copy_to_host()
+        normal_map = d_normal_map.copy_to_host()
+        cost_map = d_cost_map.copy_to_host()
+
+        return depth_map, normal_map, cost_map

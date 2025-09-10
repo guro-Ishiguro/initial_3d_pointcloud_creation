@@ -96,6 +96,9 @@ DEBUG_SAVE_DEPTH_MAPS = True  # 最適化前後のデプスマップを画像と
 DEBUG_SAVE_NORMAL_MAPS = True  # 法線マップを画像として保存するか
 TARGET_INDICES = [7]  # 対象の画像インデックス
 
+# --- PatchMatch MVS のパラメーター ---
+MAX_NEIGHBORS = 10  # 最大の近傍ビューの数
+
 # --- 伝播の方法の選択 ---
 PROPAGATION_METHOD = ["checkerboard", "priority"]
 CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[1]
