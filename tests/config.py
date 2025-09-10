@@ -119,5 +119,5 @@ GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD = 0.05  # 幾何学的なエラー（相�
 GEOMETRIC_MIN_CONSISTENT_VIEWS = 2  # 一貫性があると判断するために必要な近傍ビューの最小数
 
 # --- 誤差 ---
-POSITION_ERROR_SCALE = 0.001  # 位置の誤差スケール (メートル)
-ROTATION_ERROR_SCALE = 0.001  # 回転の誤差スケール (ラジアン)
+POSITION_ERROR_SCALE = 0.0  # 位置の誤差スケール (メートル)
+ROTATION_ERROR_SCALE = 0.0  # 回転の誤差スケール (ラジアン)

@@ -78,6 +78,7 @@ class DataLoader:
             pos_unity, quat_unity = self._add_noise_to_pose(
                 pos_unity, quat_unity, position_error_scale, rotation_error_scale
             )
+            print(pos_unity, quat_unity)
             # --- Unity(左手系) -> OpenCV(右手系) 座標変換 ---
 
             # 1. 位置(Position)の変換
