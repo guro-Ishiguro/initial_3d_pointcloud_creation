@@ -21,7 +21,7 @@ from data_loader import DataLoader
 from disparity_estimation import ImageProcessor
 from depth_estimation import DepthEstimator
 from point_cloud_integrator import PointCloudIntegrator
-from depth_optimization import DepthOptimization
+from depth_optimization import DepthOptimization, is_gpu_enabled
 
 
 if __name__ == "__main__":
@@ -33,6 +33,7 @@ if __name__ == "__main__":
     image_processor = ImageProcessor(config)
     depth_estimator = DepthEstimator(config)
     depth_optimization = DepthOptimization(config)
+    logging.info(f"DepthOptimization backend: {'GPU' if is_gpu_enabled() else 'CPU'}")
     point_cloud_integrator = PointCloudIntegrator(config)
 
     os.makedirs(config.POINT_CLOUD_DIR, exist_ok=True)
