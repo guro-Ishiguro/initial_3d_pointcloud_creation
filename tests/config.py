@@ -83,7 +83,7 @@ DEBUG_PATCH_MATCH_VISUALIZATION = False  # PatchMatch のホモグラフィ行�
 DEBUG_PIXEL_COORDS = (230, 1000)  # デバッグ用のピクセル座標 (x, y)
 
 # --- PatchMatch MVS のパラメーター ---
-PATCHMATCH_ITERATIONS = 10  # PatchMatchの反復回数
+PATCHMATCH_ITERATIONS = 7  # PatchMatchの反復回数
 PATCHMATCH_PATCH_SIZE = 7  # パッチサイズ (奇数)
 NORMAL_ESTIMATION_NEIGHBORHOOD = 7  # 法線推定に使う近傍のサイズ
 ZNCC_EPSILON = 1e-6  # ZNCCコスト計算時の小さな値
@@ -95,6 +95,9 @@ DEBUG_VISUALIZATION = True  # 処理中の点群などをウィンドウで表�
 DEBUG_SAVE_DEPTH_MAPS = True  # 最適化前後のデプスマップを画像として保存するか
 DEBUG_SAVE_NORMAL_MAPS = True  # 法線マップを画像として保存するか
 TARGET_INDICES = [7]  # 対象の画像インデックス
+
+# --- PatchMatch MVS のパラメーター ---
+MAX_NEIGHBORS = 10  # 最大の近傍ビューの数
 
 # --- 伝播の方法の選択 ---
 PROPAGATION_METHOD = ["checkerboard", "priority"]
