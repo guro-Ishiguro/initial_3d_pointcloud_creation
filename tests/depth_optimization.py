@@ -555,6 +555,7 @@ def _propagate_bucket_push_dir_cuda(
     src_K,
     src_R,
     src_T,
+    update_counter,
 ):
     idx = cuda.grid(1)
     n = bin_rs.shape[0]
@@ -613,6 +614,7 @@ def _propagate_bucket_push_dir_cuda(
         normal_map[nr, nc, 1] = src_normal[1]
         normal_map[nr, nc, 2] = src_normal[2]
         cost_map[nr, nc] = new_cost
+        cuda.atomic.add(update_counter, 0, 1)
 
 
 @cuda.jit
@@ -2031,28 +2033,36 @@ class DepthOptimization:
                             threads_1d = 256
                             blocks_1d = (bin_rs.size + threads_1d - 1) // threads_1d
                             # Push per-direction (up, down, left, right) with synchronization to avoid write conflicts
-                            for dir_code in range(4):
-                                _propagate_bucket_push_dir_cuda[blocks_1d, threads_1d](
-                                    d_depth_map,
-                                    d_normal_map,
-                                    d_cost_map,
-                                    d_propagation_mask,
-                                    d_bin_rs,
-                                    d_bin_cs,
-                                    dir_code,
-                                    self.config.PATCHMATCH_PATCH_SIZE,
-                                    self.config.TOP_K_COSTS,
-                                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                                    d_ref_image_gray,
-                                    d_ref_pose_K,
-                                    d_ref_pose_R,
-                                    d_ref_pose_T,
-                                    d_src_images_gray,
-                                    d_src_K,
-                                    d_src_R,
-                                    d_src_T,
-                                )
-                                cuda.synchronize()
+                            # In-bin iterative propagation until no more updates or small cap
+                            max_inner_sweeps = 4
+                            for _ in range(max_inner_sweeps):
+                                d_update_counter = cuda.to_device(np.array([0], dtype=np.int32))
+                                for dir_code in range(4):
+                                    _propagate_bucket_push_dir_cuda[blocks_1d, threads_1d](
+                                        d_depth_map,
+                                        d_normal_map,
+                                        d_cost_map,
+                                        d_propagation_mask,
+                                        d_bin_rs,
+                                        d_bin_cs,
+                                        dir_code,
+                                        self.config.PATCHMATCH_PATCH_SIZE,
+                                        self.config.TOP_K_COSTS,
+                                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                                        d_ref_image_gray,
+                                        d_ref_pose_K,
+                                        d_ref_pose_R,
+                                        d_ref_pose_T,
+                                        d_src_images_gray,
+                                        d_src_K,
+                                        d_src_R,
+                                        d_src_T,
+                                        d_update_counter,
+                                    )
+                                    cuda.synchronize()
+                                updates = d_update_counter.copy_to_host()[0]
+                                if updates == 0:
+                                    break
             
             # Random Search
             depth_range_map = (initial_depth_error.astype(np.float32) * (self.config.PATCHMATCH_DECAY_RATE**i)).astype(np.float32)
