@@ -83,7 +83,7 @@ DEBUG_PATCH_MATCH_VISUALIZATION = False  # PatchMatch のホモグラフィ行�
 DEBUG_PIXEL_COORDS = (230, 1000)  # デバッグ用のピクセル座標 (x, y)
 
 # --- PatchMatch MVS のパラメーター ---
-PATCHMATCH_ITERATIONS = 7  # PatchMatchの反復回数
+PATCHMATCH_ITERATIONS = 3  # PatchMatchの反復回数
 PATCHMATCH_PATCH_SIZE = 7  # パッチサイズ (奇数)
 NORMAL_ESTIMATION_NEIGHBORHOOD = 7  # 法線推定に使う近傍のサイズ
 ZNCC_EPSILON = 1e-6  # ZNCCコスト計算時の小さな値
@@ -94,10 +94,20 @@ PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE = 50.0  # ランダム探索の初期探
 DEBUG_VISUALIZATION = True  # 処理中の点群などをウィンドウで表示するか
 DEBUG_SAVE_DEPTH_MAPS = True  # 最適化前後のデプスマップを画像として保存するか
 DEBUG_SAVE_NORMAL_MAPS = True  # 法線マップを画像として保存するか
-TARGET_INDICES = [7]  # 対象の画像インデックス
+TARGET_INDICES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]  # 対象の画像インデックス
 
 # --- PatchMatch MVS のパラメーター ---
 MAX_NEIGHBORS = 10  # 最大の近傍ビューの数
+
+# --- ビューワー ---
+STREAMING_VIEWER = False  # 逐次点群をビューワーに反映するか
+VIEWER_TOPDOWN_FRONT = [0.0, -1.0, 0.0]  # Unity想定: 上から俯瞰（-Y を見る）
+VIEWER_TOPDOWN_UP = [0.0, 0.0, 1.0]      # 上ベクトル（Z軸を上に）
+VIEWER_TOPDOWN_ZOOM = 0.7                # ズーム係数（0～1）
+VIEWER_ROLL_DEG = -90.0                   # 俯瞰視点でのロール回転（+は画面を半時計回りに回転）
+
+# --- 深度融合（逐次統合） ---
+DEPTH_FUSION_ENABLE = True
 
 # --- 伝播の方法の選択 ---
 PROPAGATION_METHOD = ["checkerboard", "priority"]
