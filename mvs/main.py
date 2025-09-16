@@ -1,4 +1,4 @@
-# tests/main.py
+# mvs/main.py
 
 import os
 import config

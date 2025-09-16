@@ -1,4 +1,4 @@
-# tests/depth_optimization.py
+# mvs/depth_optimization.py
 
 import numpy as np
 import cv2
