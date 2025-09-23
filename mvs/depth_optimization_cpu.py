@@ -279,8 +279,8 @@ def _propagate_bucket_jit(
     コストをビンに分割し、低コストのビンから優先的に並列伝播を実行する。
     """
     h, w = depth_map.shape
-    neighbors_dr = np.array([-1, -1, -1, 0, 0, 1, 1, 1], dtype=np.int8)
-    neighbors_dc = np.array([-1, 0, 1, -1, 1, -1, 0, 1], dtype=np.int8)
+    neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+    neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
 
     # --- 1. 有効なピクセルを抽出し、コストに基づいてビンに分類 ---
     valid_pixels_coords = np.empty((h * w, 2), dtype=np.int32)
@@ -883,17 +883,38 @@ class DepthOptimization:
             os.makedirs(save_each_csv_dir, exist_ok=True)
             clear_folder(save_each_csv_dir)
             csv_files = {
-                "rmse": os.path.join(save_each_csv_dir, f"rmse_{self.config.CHOICED_PROPAGATION_METHOD}.csv"),
-                "mae": os.path.join(save_each_csv_dir, f"mae_{self.config.CHOICED_PROPAGATION_METHOD}.csv"),
-                "abs_rel": os.path.join(save_each_csv_dir, f"abs_rel_{self.config.CHOICED_PROPAGATION_METHOD}.csv"),
-                "rmse_log": os.path.join(save_each_csv_dir, f"rmse_log_{self.config.CHOICED_PROPAGATION_METHOD}.csv"),
-                "delta1": os.path.join(save_each_csv_dir, f"delta1_{self.config.CHOICED_PROPAGATION_METHOD}.csv"),
-                "delta2": os.path.join(save_each_csv_dir, f"delta2_{self.config.CHOICED_PROPAGATION_METHOD}.csv"),
-                "delta3": os.path.join(save_each_csv_dir, f"delta3_{self.config.CHOICED_PROPAGATION_METHOD}.csv"),
+                "rmse": os.path.join(
+                    save_each_csv_dir,
+                    f"rmse_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
+                ),
+                "mae": os.path.join(
+                    save_each_csv_dir,
+                    f"mae_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
+                ),
+                "abs_rel": os.path.join(
+                    save_each_csv_dir,
+                    f"abs_rel_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
+                ),
+                "rmse_log": os.path.join(
+                    save_each_csv_dir,
+                    f"rmse_log_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
+                ),
+                "delta1": os.path.join(
+                    save_each_csv_dir,
+                    f"delta1_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
+                ),
+                "delta2": os.path.join(
+                    save_each_csv_dir,
+                    f"delta2_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
+                ),
+                "delta3": os.path.join(
+                    save_each_csv_dir,
+                    f"delta3_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
+                ),
             }
             for metric, path in csv_files.items():
                 initialize_csv(path, ["time", metric])
-                
+
         start_refinement_time = time.time()
         iter_times = []
         # --- PatchMatch反復ループ ---
@@ -1061,14 +1082,16 @@ class DepthOptimization:
         final_depth_map = depth_map.copy()
         # Save per-iteration timing plot
         try:
-            save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}")
+            save_each_depth_dir = os.path.join(
+                config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}"
+            )
             os.makedirs(save_each_depth_dir, exist_ok=True)
             fig_path = os.path.join(save_each_depth_dir, f"iter_times_cpu.png")
             plt.figure(figsize=(6, 4))
-            plt.plot(np.arange(1, len(iter_times)+1), iter_times, marker='o')
-            plt.xlabel('Iteration')
-            plt.ylabel('Time (s)')
-            plt.title('CPU PatchMatch Iteration Times')
+            plt.plot(np.arange(1, len(iter_times) + 1), iter_times, marker="o")
+            plt.xlabel("Iteration")
+            plt.ylabel("Time (s)")
+            plt.title("CPU PatchMatch Iteration Times")
             plt.grid(True)
             plt.tight_layout()
             plt.savefig(fig_path)

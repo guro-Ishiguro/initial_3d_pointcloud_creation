@@ -79,11 +79,13 @@ pixel_size = scene_width / width
 window_size, min_disp, num_disp = 7, 0, 216
 
 # --- デバッグ用の設定 ---
-DEBUG_PATCH_MATCH_VISUALIZATION = False  # PatchMatch のホモグラフィ行列の移動先デバッグ可視化を行うか
+DEBUG_PATCH_MATCH_VISUALIZATION = (
+    False  # PatchMatch のホモグラフィ行列の移動先デバッグ可視化を行うか
+)
 DEBUG_PIXEL_COORDS = (230, 1000)  # デバッグ用のピクセル座標 (x, y)
 
 # --- PatchMatch MVS のパラメーター ---
-PATCHMATCH_ITERATIONS = 3  # PatchMatchの反復回数
+PATCHMATCH_ITERATIONS = 4  # PatchMatchの反復回数
 PATCHMATCH_PATCH_SIZE = 7  # パッチサイズ (奇数)
 NORMAL_ESTIMATION_NEIGHBORHOOD = 7  # 法線推定に使う近傍のサイズ
 ZNCC_EPSILON = 1e-6  # ZNCCコスト計算時の小さな値
@@ -102,9 +104,9 @@ MAX_NEIGHBORS = 4  # 最大の近傍ビューの数
 # --- ビューワー ---
 STREAMING_VIEWER = False  # 逐次点群をビューワーに反映するか
 VIEWER_TOPDOWN_FRONT = [0.0, -1.0, 0.0]  # Unity想定: 上から俯瞰（-Y を見る）
-VIEWER_TOPDOWN_UP = [0.0, 0.0, 1.0]      # 上ベクトル（Z軸を上に）
-VIEWER_TOPDOWN_ZOOM = 0.7                # ズーム係数（0～1）
-VIEWER_ROLL_DEG = -90.0                   # 俯瞰視点でのロール回転（+は画面を半時計回りに回転）
+VIEWER_TOPDOWN_UP = [0.0, 0.0, 1.0]  # 上ベクトル（Z軸を上に）
+VIEWER_TOPDOWN_ZOOM = 0.7  # ズーム係数（0～1）
+VIEWER_ROLL_DEG = -90.0  # 俯瞰視点でのロール回転（+は画面を半時計回りに回転）
 
 # --- 深度融合（逐次統合） ---
 DEPTH_FUSION_ENABLE = True
@@ -129,7 +131,9 @@ FILTERING_MIN_CONSISTENT_VIEWS = 3  # 必要な近傍ビューの最小数
 # --- 幾何学的一貫性フィルターの設定 ---
 GEOMETRIC_FILTER_ENABLED = True  # 幾何学的一貫性チェックを有効にするか
 GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD = 0.05  # 幾何学的なエラー（相対深度差）のしきい値
-GEOMETRIC_MIN_CONSISTENT_VIEWS = 2  # 一貫性があると判断するために必要な近傍ビューの最小数
+GEOMETRIC_MIN_CONSISTENT_VIEWS = (
+    2  # 一貫性があると判断するために必要な近傍ビューの最小数
+)
 
 # --- 誤差 ---
 POSITION_ERROR_SCALE = 0.0  # 位置の誤差スケール (メートル)

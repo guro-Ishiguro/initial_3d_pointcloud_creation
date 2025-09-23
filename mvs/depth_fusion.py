@@ -16,7 +16,14 @@ class CameraPlaneMedianFuser:
       -> ラスタ結果をレイヤとして保持し、np.nanmedian で融合
     """
 
-    def __init__(self, height: int, width: int, K: np.ndarray, R_ref: np.ndarray, T_ref: np.ndarray):
+    def __init__(
+        self,
+        height: int,
+        width: int,
+        K: np.ndarray,
+        R_ref: np.ndarray,
+        T_ref: np.ndarray,
+    ):
         self.h = int(height)
         self.w = int(width)
         self.K = K.astype(np.float32)
@@ -31,7 +38,9 @@ class CameraPlaneMedianFuser:
         v = np.arange(self.h, dtype=np.float32)
         self.U, self.V = np.meshgrid(u, v)
 
-    def _warp_to_ref(self, depth_src: np.ndarray, R_src: np.ndarray, T_src: np.ndarray) -> np.ndarray:
+    def _warp_to_ref(
+        self, depth_src: np.ndarray, R_src: np.ndarray, T_src: np.ndarray
+    ) -> np.ndarray:
         img_ref = np.full((self.h, self.w), np.nan, dtype=np.float32)
         d = depth_src.astype(np.float32)
         mask = np.isfinite(d) & (d > 0)
@@ -73,7 +82,9 @@ class CameraPlaneMedianFuser:
                 img_ref[vv, uu] = zz
         return img_ref
 
-    def add_depth_from_source(self, depth_src: np.ndarray, R_src: np.ndarray, T_src: np.ndarray) -> np.ndarray:
+    def add_depth_from_source(
+        self, depth_src: np.ndarray, R_src: np.ndarray, T_src: np.ndarray
+    ) -> np.ndarray:
         warped = self._warp_to_ref(depth_src, R_src, T_src)
         self._layers.append(warped)
         stack = np.stack(self._layers, axis=0)
@@ -83,7 +94,9 @@ class CameraPlaneMedianFuser:
     def get_fused_depth(self) -> Optional[np.ndarray]:
         return self._fused
 
-    def save_fused(self, save_dir: str, filename: str = "fused_camera_plane_running.png") -> Optional[str]:
+    def save_fused(
+        self, save_dir: str, filename: str = "fused_camera_plane_running.png"
+    ) -> Optional[str]:
         if self._fused is None:
             return None
         os.makedirs(save_dir, exist_ok=True)
@@ -119,7 +132,9 @@ class OrthoDepthMedianFuser:
         self._fused = np.nanmedian(stack, axis=0).astype(np.float32)
         return self._fused
 
-    def save_fused(self, save_dir: str, filename: str = "fused_ortho_running.png") -> Optional[str]:
+    def save_fused(
+        self, save_dir: str, filename: str = "fused_ortho_running.png"
+    ) -> Optional[str]:
         if self._fused is None:
             return None
         os.makedirs(save_dir, exist_ok=True)
@@ -135,12 +150,21 @@ class WorldOrthoMedianFuser:
     各セルの深さ(Z)を逐次的に中央値融合する。
     """
 
-    def __init__(self, x_min: Optional[float], x_max: Optional[float], y_min: Optional[float], y_max: Optional[float], pixel_size: float,
-                 plane_axes=(0, 2), depth_axis=1, depth_invert=False):
+    def __init__(
+        self,
+        x_min: Optional[float],
+        x_max: Optional[float],
+        y_min: Optional[float],
+        y_max: Optional[float],
+        pixel_size: float,
+        plane_axes=(0, 2),
+        depth_axis=1,
+        depth_invert=False,
+    ):
         # 平面に使う世界座標軸（デフォルト: (X,Z)）、深度に使う軸（デフォルト: Y）
         self.axis_u = int(plane_axes[0])  # 横軸
         self.axis_v = int(plane_axes[1])  # 縦軸
-        self.axis_d = int(depth_axis)     # 深度軸
+        self.axis_d = int(depth_axis)  # 深度軸
         self.depth_invert = bool(depth_invert)
         self.u_min = float(x_min) if x_min is not None else None
         self.v_min = float(y_min) if y_min is not None else None
@@ -172,9 +196,12 @@ class WorldOrthoMedianFuser:
         # margin 10%
         du = max(umax - umin, 1e-3)
         dv = max(vmax - vmin, 1e-3)
-        umin -= 0.1 * du; umax += 0.1 * du
-        vmin -= 0.1 * dv; vmax += 0.1 * dv
-        self.u_min = umin; self.v_min = vmin
+        umin -= 0.1 * du
+        umax += 0.1 * du
+        vmin -= 0.1 * dv
+        vmax += 0.1 * dv
+        self.u_min = umin
+        self.v_min = vmin
         self.w = int(np.ceil((umax - umin) / self.pixel_size))
         self.h = int(np.ceil((vmax - vmin) / self.pixel_size))
         self.initialized = True
@@ -194,7 +221,9 @@ class WorldOrthoMedianFuser:
         gx = np.floor((u - self.u_min) / self.pixel_size).astype(np.int32)
         gy = np.floor((v - self.v_min) / self.pixel_size).astype(np.int32)
         valid = (gx >= 0) & (gx < self.w) & (gy >= 0) & (gy < self.h) & np.isfinite(d)
-        gx = gx[valid]; gy = gy[valid]; dv = d[valid].astype(np.float32)
+        gx = gx[valid]
+        gy = gy[valid]
+        dv = d[valid].astype(np.float32)
         for x, y, z in zip(gx, gy, dv):
             if np.isnan(grid[y, x]) or z < grid[y, x]:
                 grid[y, x] = z
@@ -210,7 +239,14 @@ class WorldOrthoMedianFuser:
     def get_fused_depth(self) -> Optional[np.ndarray]:
         return self._fused
 
-    def save_fused_depth(self, save_path: str, *, swap_axes: bool = False, flip_x: bool = True, flip_y: bool = False) -> Optional[str]:
+    def save_fused_depth(
+        self,
+        save_path: str,
+        *,
+        swap_axes: bool = False,
+        flip_x: bool = True,
+        flip_y: bool = False,
+    ) -> Optional[str]:
         fused = self.get_fused_depth()
         if fused is None:
             logging.warning("No fused world-ortho depth to save yet.")
@@ -226,5 +262,3 @@ class WorldOrthoMedianFuser:
         save_depth_map_as_image(img, save_path)
         logging.info(f"Saved fused world-orthographic depth to {save_path}")
         return save_path
-
-

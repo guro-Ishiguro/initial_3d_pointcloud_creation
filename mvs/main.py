@@ -21,7 +21,11 @@ from data_loader import DataLoader
 from disparity_estimation import ImageProcessor
 from depth_estimation import DepthEstimator
 from point_cloud_integrator import PointCloudIntegrator
-from depth_fusion import CameraPlaneMedianFuser, OrthoDepthMedianFuser, WorldOrthoMedianFuser
+from depth_fusion import (
+    CameraPlaneMedianFuser,
+    OrthoDepthMedianFuser,
+    WorldOrthoMedianFuser,
+)
 from depth_optimization import DepthOptimization, is_gpu_enabled
 
 
@@ -91,12 +95,26 @@ if __name__ == "__main__":
     merged_pts_list, merged_cols_list = [], []
     # 逐次深度融合: カメラ平面（参照ビュー）へワープして中央値融合
     cam_fuser = None
-    ortho_fuser = OrthoDepthMedianFuser() if getattr(config, "DEPTH_FUSION_ENABLE", False) else None
+    ortho_fuser = (
+        OrthoDepthMedianFuser()
+        if getattr(config, "DEPTH_FUSION_ENABLE", False)
+        else None
+    )
     # Unityの鉛直下向き(Y-)視点に合わせ、平面=(X,Z)、深度=Y を採用（必要なら depth_invert=True）
-    world_ortho_fuser = WorldOrthoMedianFuser(
-        x_min=None, x_max=None, y_min=None, y_max=None, pixel_size=config.pixel_size,
-        plane_axes=(0, 2), depth_axis=1, depth_invert=False
-    ) if getattr(config, "DEPTH_FUSION_ENABLE", False) else None
+    world_ortho_fuser = (
+        WorldOrthoMedianFuser(
+            x_min=None,
+            x_max=None,
+            y_min=None,
+            y_max=None,
+            pixel_size=config.pixel_size,
+            plane_axes=(0, 2),
+            depth_axis=1,
+            depth_invert=False,
+        )
+        if getattr(config, "DEPTH_FUSION_ENABLE", False)
+        else None
+    )
 
     # 参照カメラ（最初のターゲット）で融合先を固定
     if getattr(config, "DEPTH_FUSION_ENABLE", False) and target_indices:
@@ -108,7 +126,9 @@ if __name__ == "__main__":
             # フォールバック：最初の読み込み済み画像サイズ
             any_idx = next(iter(loaded_images))
             ref_h0, ref_w0, _ = loaded_images[any_idx].shape
-        cam_fuser = CameraPlaneMedianFuser(height=ref_h0, width=ref_w0, K=config.K, R_ref=ref_R0, T_ref=ref_T0)
+        cam_fuser = CameraPlaneMedianFuser(
+            height=ref_h0, width=ref_w0, K=config.K, R_ref=ref_R0, T_ref=ref_T0
+        )
 
     for idx in target_indices:
         if idx not in loaded_images:
@@ -244,7 +264,9 @@ if __name__ == "__main__":
                 ref_idx=idx,
             )
             refine_elapsed = time.time() - refine_start
-            logging.info(f"[Timing] refine_depth_with_patchmatch total time: {refine_elapsed:.2f}s for index {idx}")
+            logging.info(
+                f"[Timing] refine_depth_with_patchmatch total time: {refine_elapsed:.2f}s for index {idx}"
+            )
             # optimized_depth = depth_optimization.refine_depth_with_patchmatch_vanilla(
             #     ref_image=li_rgb,
             #     ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
@@ -306,11 +328,13 @@ if __name__ == "__main__":
 
             # --- 幾何学的一貫性フィルタリングを即時適用 ---
             try:
-                geometrically_filtered_depth = depth_optimization.filter_depth_map_by_geometric_consistency(
-                    ref_depth_map=photometrically_filtered_depth,
-                    ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
-                    neighbor_views_data=neighbor_views_data,
-                    all_optimized_depths=all_optimized_depths,
+                geometrically_filtered_depth = (
+                    depth_optimization.filter_depth_map_by_geometric_consistency(
+                        ref_depth_map=photometrically_filtered_depth,
+                        ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
+                        neighbor_views_data=neighbor_views_data,
+                        all_optimized_depths=all_optimized_depths,
+                    )
                 )
                 if gt_depth is not None:
                     metrics = compute_depth_metrics(
@@ -333,10 +357,13 @@ if __name__ == "__main__":
                         f"Saving geometrically filtered depth map to {save_geometrically_filtered_depth_path}"
                     )
                     save_depth_map_as_image(
-                        geometrically_filtered_depth, save_geometrically_filtered_depth_path
+                        geometrically_filtered_depth,
+                        save_geometrically_filtered_depth_path,
                     )
             except Exception as e:
-                logging.warning(f"Geometric consistency filtering skipped for {idx}: {e}")
+                logging.warning(
+                    f"Geometric consistency filtering skipped for {idx}: {e}"
+                )
                 geometrically_filtered_depth = photometrically_filtered_depth
 
             # --- 逐次で点群へ変換し、これまでのものと統合して表示 ---
@@ -350,12 +377,8 @@ if __name__ == "__main__":
                 save_ortho_depth_path = os.path.join(
                     save_each_depth_dir, f"ortho_depth.png"
                 )
-                logging.info(
-                    f"Saving ortho depth map to {save_ortho_depth_path}"
-                )
-                save_depth_map_as_image(
-                    ortho_depth_map, save_ortho_depth_path
-                )
+                logging.info(f"Saving ortho depth map to {save_ortho_depth_path}")
+                save_depth_map_as_image(ortho_depth_map, save_ortho_depth_path)
             world_points, world_colors = depth_estimator.ortho_depth_to_world(
                 ortho_depth_map, ortho_color_map, R_mat, T_pos, config.pixel_size
             )
@@ -367,8 +390,14 @@ if __name__ == "__main__":
                 fused_world_ortho = world_ortho_fuser.add_world_points(world_points)
                 if config.DEBUG_SAVE_DEPTH_MAPS and fused_world_ortho is not None:
                     world_ortho_fuser.save_fused_depth(
-                        os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}", "fused_ortho_running.png"),
-                        swap_axes=True, flip_y=True, flip_x=True
+                        os.path.join(
+                            config.DEPTH_IMAGE_DIR,
+                            f"depth_{idx:04d}",
+                            "fused_ortho_running.png",
+                        ),
+                        swap_axes=True,
+                        flip_y=True,
+                        flip_x=True,
                     )
 
             integ_pts, integ_cols = point_cloud_integrator.integrate_depth_maps_median(
@@ -378,7 +407,12 @@ if __name__ == "__main__":
                 try:
                     if vis is None:
                         vis = o3d.visualization.Visualizer()
-                        vis.create_window(window_name="Streaming Point Cloud", width=1280, height=720, visible=True)
+                        vis.create_window(
+                            window_name="Streaming Point Cloud",
+                            width=1280,
+                            height=720,
+                            visible=True,
+                        )
                         opt = vis.get_render_option()
                         opt.background_color = np.asarray([0, 0, 0])
                         added = False
@@ -388,18 +422,33 @@ if __name__ == "__main__":
                         vis.add_geometry(live_pcd)
                         # 初回のみカメラ姿勢を設定
                         ctr = vis.get_view_control()
-                        front = np.asarray(getattr(config, "VIEWER_TOPDOWN_FRONT", [0.0, -1.0, 0.0]))
-                        up = np.asarray(getattr(config, "VIEWER_TOPDOWN_UP", [0.0, 0.0, 1.0]))
+                        front = np.asarray(
+                            getattr(config, "VIEWER_TOPDOWN_FRONT", [0.0, -1.0, 0.0])
+                        )
+                        up = np.asarray(
+                            getattr(config, "VIEWER_TOPDOWN_UP", [0.0, 0.0, 1.0])
+                        )
                         # ロール回転（画面の回転）を up ベクトルに反映
                         roll_deg = float(getattr(config, "VIEWER_ROLL_DEG", 0.0))
                         if abs(roll_deg) > 1e-3:
                             theta = np.deg2rad(roll_deg)
                             # front 軸まわり回転（Rodrigues）
                             f = front / (np.linalg.norm(front) + 1e-9)
-                            Kx = np.array([[0, -f[2], f[1]], [f[2], 0, -f[0]], [-f[1], f[0], 0]], dtype=float)
-                            Rf = np.eye(3) + np.sin(theta) * Kx + (1 - np.cos(theta)) * (Kx @ Kx)
+                            Kx = np.array(
+                                [[0, -f[2], f[1]], [f[2], 0, -f[0]], [-f[1], f[0], 0]],
+                                dtype=float,
+                            )
+                            Rf = (
+                                np.eye(3)
+                                + np.sin(theta) * Kx
+                                + (1 - np.cos(theta)) * (Kx @ Kx)
+                            )
                             up = (Rf @ up.reshape(3, 1)).ravel()
-                        center = np.mean(integ_pts, axis=0) if integ_pts.size > 0 else np.array([0, 0, 0], dtype=float)
+                        center = (
+                            np.mean(integ_pts, axis=0)
+                            if integ_pts.size > 0
+                            else np.array([0, 0, 0], dtype=float)
+                        )
                         zoom = float(getattr(config, "VIEWER_TOPDOWN_ZOOM", 0.7))
                         try:
                             ctr.set_front(front)
@@ -422,22 +471,33 @@ if __name__ == "__main__":
 
         evaluation_results.append(view_metrics)
 
-
     # --- 最終保存 ---
     logging.info("\n--- Final: Saving the last integrated point cloud ---")
     if merged_pts_list:
-        merged_pts = last_integ_pts if last_integ_pts is not None else np.vstack(merged_pts_list)
-        merged_cols = last_integ_cols if last_integ_cols is not None else np.vstack(merged_cols_list)
+        merged_pts = (
+            last_integ_pts if last_integ_pts is not None else np.vstack(merged_pts_list)
+        )
+        merged_cols = (
+            last_integ_cols
+            if last_integ_cols is not None
+            else np.vstack(merged_cols_list)
+        )
         final_pcd = point_cloud_integrator.process_and_save_final_point_cloud(
             merged_pts, merged_cols, config.POINT_CLOUD_FILE_PATH
         )
         if final_pcd and len(final_pcd.points) > 0:
             if getattr(config, "STREAMING_VIEWER", False):
                 try:
-                    live_pcd.points = o3d.utility.Vector3dVector(np.asarray(final_pcd.points))
-                    live_pcd.colors = o3d.utility.Vector3dVector(np.asarray(final_pcd.colors))
+                    live_pcd.points = o3d.utility.Vector3dVector(
+                        np.asarray(final_pcd.points)
+                    )
+                    live_pcd.colors = o3d.utility.Vector3dVector(
+                        np.asarray(final_pcd.colors)
+                    )
                     vis.update_geometry(live_pcd)
-                    logging.info("Final cloud shown in streaming window. Close to exit.")
+                    logging.info(
+                        "Final cloud shown in streaming window. Close to exit."
+                    )
                     vis.run()
                     vis.destroy_window()
                 except Exception as e:

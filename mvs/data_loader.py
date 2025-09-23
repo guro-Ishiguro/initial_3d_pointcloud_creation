@@ -38,7 +38,11 @@ class DataLoader:
     def _add_noise_to_pose(self, pos, quat, pos_scale, rot_scale):
         """位置と姿勢のデータにノイズを追加する"""
         pos_error = np.random.randn(3) * pos_scale
-        pos_with_error = (pos[0] + pos_error[0], pos[1] + pos_error[1], pos[2] + pos_error[2])
+        pos_with_error = (
+            pos[0] + pos_error[0],
+            pos[1] + pos_error[1],
+            pos[2] + pos_error[2],
+        )
         rot_vec_error = np.random.randn(3) * rot_scale
         error_rotation = Rotation.from_rotvec(rot_vec_error)
         original_rotation = Rotation.from_quat(quat)

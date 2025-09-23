@@ -575,25 +575,15 @@ def _propagate_bucket_push_dir_cuda(
         return
     src_normal = normal_map[r, c]
 
-    nr = r
-    nc = c
-    # 8-neighborhood: [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]
+    # 4-neighborhood: up, down, left, right
     if dir_code == 0:
-        nr = r - 1; nc = c - 1
-    elif dir_code == 1:
         nr = r - 1; nc = c
-    elif dir_code == 2:
-        nr = r - 1; nc = c + 1
-    elif dir_code == 3:
-        nr = r; nc = c - 1
-    elif dir_code == 4:
-        nr = r; nc = c + 1
-    elif dir_code == 5:
-        nr = r + 1; nc = c - 1
-    elif dir_code == 6:
+    elif dir_code == 1:
         nr = r + 1; nc = c
+    elif dir_code == 2:
+        nr = r; nc = c - 1
     else:
-        nr = r + 1; nc = c + 1
+        nr = r; nc = c + 1
 
     if not (0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc]):
         return
@@ -2067,7 +2057,7 @@ class DepthOptimization:
                             max_inner_sweeps = 4
                             for _ in range(max_inner_sweeps):
                                 d_update_counter = cuda.to_device(np.array([0], dtype=np.int32))
-                                for dir_code in range(8):
+                                for dir_code in range(4):
                                     _propagate_bucket_push_dir_cuda[blocks_1d, threads_1d](
                                         d_depth_map,
                                         d_normal_map,
