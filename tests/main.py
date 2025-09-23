@@ -232,7 +232,8 @@ if __name__ == "__main__":
                         }
                     )
 
-            # PatchMatchを実行
+            # PatchMatchを実行（全体計測とイテレーション内計測は関数側で行う）
+            refine_start = time.time()
             optimized_depth = depth_optimization.refine_depth_with_patchmatch(
                 initial_depth=initial_depth,
                 initial_depth_error=d_cost,
@@ -242,6 +243,8 @@ if __name__ == "__main__":
                 gt_depth=gt_depth,
                 ref_idx=idx,
             )
+            refine_elapsed = time.time() - refine_start
+            logging.info(f"[Timing] refine_depth_with_patchmatch total time: {refine_elapsed:.2f}s for index {idx}")
             # optimized_depth = depth_optimization.refine_depth_with_patchmatch_vanilla(
             #     ref_image=li_rgb,
             #     ref_pose={"R": R_mat, "T": T_pos, "K": config.K},

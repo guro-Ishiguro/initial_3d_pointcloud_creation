@@ -18,6 +18,7 @@ from utils import (
 import time  
 from numba.cuda.random import create_xoroshiro128p_states, xoroshiro128p_uniform_float32
 import math
+import matplotlib.pyplot as plt
 
 # Constants for CUDA kernels
 PATCHMATCH_PATCH_SIZE_CONST = config.PATCHMATCH_PATCH_SIZE
@@ -1639,6 +1640,7 @@ class DepthOptimization:
             save_path0 = os.path.join(save_each_depth_dir, f"depth_iter_00.png")
             logging.info(f"Saving initial depth map to {save_path0}")
             save_depth_map_as_image(depth_map, save_path0)
+        iter_times_gpu = []
         depth_map, normal_map, cost_map = self._propagate_and_search_gpu(
             depth_map,
             normal_map,
@@ -1656,6 +1658,7 @@ class DepthOptimization:
             save_per_iter=config.DEBUG_SAVE_DEPTH_MAPS,
             save_dir=save_each_depth_dir,
             gt_depth=gt_depth,
+            iter_times=iter_times_gpu,
         )
 
         # --- Debug: cost_map statistics and CPU/GPU cost consistency check on samples ---
@@ -1709,6 +1712,20 @@ class DepthOptimization:
         logging.info("PatchMatch MVS refinement finished.")
         final_depth_map = depth_map.copy()
         final_depth_map[~propagation_mask] = np.nan
+        # Save per-iteration timing plot
+        try:
+            fig_path = os.path.join(save_each_depth_dir, f"iter_times_gpu.png")
+            plt.figure(figsize=(6, 4))
+            plt.plot(np.arange(1, len(iter_times_gpu)+1), iter_times_gpu, marker='o')
+            plt.xlabel('Iteration')
+            plt.ylabel('Time (s)')
+            plt.title('GPU PatchMatch Iteration Times')
+            plt.grid(True)
+            plt.tight_layout()
+            plt.savefig(fig_path)
+            plt.close()
+        except Exception as e:
+            logging.warning(f"Could not save GPU iteration time plot: {e}")
         return final_depth_map
 
     def refine_depth_with_patchmatch_vanilla(
@@ -1952,6 +1969,7 @@ class DepthOptimization:
         save_per_iter=False,
         save_dir=None,
         gt_depth=None,
+        iter_times=None,
     ):
         h, w = depth_map.shape
 
@@ -1981,6 +1999,7 @@ class DepthOptimization:
 
         depth_prev_for_conv = depth_map.copy()
         for i in range(self.config.PATCHMATCH_ITERATIONS):
+            iter_start_time = time.time()
             logging.info(f"PatchMatch GPU Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}")
 
             # Propagation
@@ -2109,6 +2128,9 @@ class DepthOptimization:
                 save_path = os.path.join(save_dir, f"depth_iter_{i+1:02d}.png")
                 logging.info(f"Saving depth map at iteration {i+1} to {save_path}")
                 save_depth_map_as_image(depth_tmp, save_path)
+            # Record iteration duration
+            if iter_times is not None:
+                iter_times.append(time.time() - iter_start_time)
                 if gt_depth is not None:
                     err_path = os.path.join(save_dir, f"error_iter_{i+1:02d}.png")
                     save_error_map_as_image(depth_tmp, gt_depth, err_path)

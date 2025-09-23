@@ -15,7 +15,8 @@ from utils import (
     clear_folder,
     save_error_map_as_image,
 )
-import time  # timeモジュールをインポート
+import time
+import matplotlib.pyplot as plt
 
 
 @njit(fastmath=True)
@@ -894,8 +895,10 @@ class DepthOptimization:
                 initialize_csv(path, ["time", metric])
                 
         start_refinement_time = time.time()
+        iter_times = []
         # --- PatchMatch反復ループ ---
         for i in range(self.config.PATCHMATCH_ITERATIONS):
+            iter_start_time = time.time()
             iteration_start_time = time.time()
             np.copyto(depth_map_prev, depth_map)
             logging.info(
@@ -1051,10 +1054,27 @@ class DepthOptimization:
 
             iteration_end_time = time.time()
             elapsed_time = iteration_end_time - iteration_start_time
+            iter_times.append(time.time() - iter_start_time)
             logging.info(f"Iteration {i+1} took {elapsed_time:.2f} seconds.")
 
         logging.info("PatchMatch MVS refinement finished.")
         final_depth_map = depth_map.copy()
+        # Save per-iteration timing plot
+        try:
+            save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}")
+            os.makedirs(save_each_depth_dir, exist_ok=True)
+            fig_path = os.path.join(save_each_depth_dir, f"iter_times_cpu.png")
+            plt.figure(figsize=(6, 4))
+            plt.plot(np.arange(1, len(iter_times)+1), iter_times, marker='o')
+            plt.xlabel('Iteration')
+            plt.ylabel('Time (s)')
+            plt.title('CPU PatchMatch Iteration Times')
+            plt.grid(True)
+            plt.tight_layout()
+            plt.savefig(fig_path)
+            plt.close()
+        except Exception as e:
+            logging.warning(f"Could not save CPU iteration time plot: {e}")
         final_depth_map[~propagation_mask] = np.nan
         return final_depth_map
 
