@@ -1,4 +1,4 @@
-# tests/main.py
+# mvs/main.py
 
 import os
 import config
@@ -304,7 +304,7 @@ if __name__ == "__main__":
             all_optimized_depths[idx] = photometrically_filtered_depth
             logging.info(f"Stored photometrically filtered depth map for index {idx}.")
 
-            # --- 幾何学的一貫性フィルタリングを即時適用（利用可能な近傍で） ---
+            # --- 幾何学的一貫性フィルタリングを即時適用 ---
             try:
                 geometrically_filtered_depth = depth_optimization.filter_depth_map_by_geometric_consistency(
                     ref_depth_map=photometrically_filtered_depth,
@@ -312,6 +312,29 @@ if __name__ == "__main__":
                     neighbor_views_data=neighbor_views_data,
                     all_optimized_depths=all_optimized_depths,
                 )
+                if gt_depth is not None:
+                    metrics = compute_depth_metrics(
+                        geometrically_filtered_depth, gt_depth
+                    )
+                    logging.info(
+                        f"  [Geometric Filtered] MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                        f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
+                    )
+                    save_error_map_as_image(
+                        geometrically_filtered_depth,
+                        gt_depth,
+                        os.path.join(save_each_depth_dir, "error_map_geometric.png"),
+                    )
+                if config.DEBUG_SAVE_DEPTH_MAPS:
+                    save_geometrically_filtered_depth_path = os.path.join(
+                        save_each_depth_dir, f"geometrically_filtered_depth.png"
+                    )
+                    logging.info(
+                        f"Saving geometrically filtered depth map to {save_geometrically_filtered_depth_path}"
+                    )
+                    save_depth_map_as_image(
+                        geometrically_filtered_depth, save_geometrically_filtered_depth_path
+                    )
             except Exception as e:
                 logging.warning(f"Geometric consistency filtering skipped for {idx}: {e}")
                 geometrically_filtered_depth = photometrically_filtered_depth

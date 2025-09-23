@@ -16,12 +16,12 @@ def _detect_cuda_available():
 
 
 def _import_local_module(mod_name: str):
-    """Import module from either package context (tests.mod) or local (mod).
+    """Import module from either package context (mvs.mod) or local (mod).
 
-    This allows running both `python -m tests.main` and `python tests/main.py`.
+    This allows running both `python -m mvs.main` and `python mvs/main.py`.
     """
     try:
-        return importlib.import_module(f"tests.{mod_name}")
+        return importlib.import_module(f"mvs.{mod_name}")
     except Exception:
         return importlib.import_module(mod_name)
 
