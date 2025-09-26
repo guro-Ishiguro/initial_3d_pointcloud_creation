@@ -94,3 +94,11 @@
 4.  **フィルタリング**: 最適化された深度マップに対し、光度一貫性と幾何学的一貫性のチェックを行い、信頼性の低い推定結果を除去する。
 5.  **点群への変換と統合 (`depth_estimation.py`, `point_cloud_integrator.py`)**: フィルタリング後の深度マップを3D点群に変換し、ワールド座標系で統合する。複数のフレームからの点群を重ね合わせることで、より密でノイズの少ない点群を生成する。
 6.  **出力**: 最終的な点群データをPLYファイルとして保存する。
+
+## 連絡
+
+プロジェクトに関する質問や連絡は、以下の連絡先までお願いします。
+
+- **GitHub:** [guro-Ishiguro](https://github.com/guro-Ishiguro)
+- **Email1:** guro120411@gmail.com
+- **Email2:** ishiguro.ryunosuke.62w@st.kyoto-u.ac.jp
