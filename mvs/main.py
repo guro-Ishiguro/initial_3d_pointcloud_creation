@@ -2,6 +2,7 @@
 
 import os
 import config
+from logging_setup import setup_logging
 import logging
 import time
 import cv2
@@ -34,6 +35,18 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # --- 初期化 ---
+    # ログ初期化
+    try:
+        setup_logging(
+            getattr(config, "LOG_DIR", os.path.join(os.getcwd(), "logs")),
+            getattr(config, "LOG_LEVEL", "INFO"),
+            getattr(config, "LOG_TO_FILE", True),
+        )
+    except Exception:
+        pass
+    logging.info("init")
+    logging.info(f"HOME_DIR={getattr(config, 'HOME_DIR', None)} DATA_DIR={getattr(config, 'DATA_DIR', None)} DATA_TYPE={getattr(config, 'DATA_TYPE', None)}")
+
     data_loader = DataLoader(config.STEREO_IMAGE_DIR, config.DRONE_IMAGE_LOG)
     image_processor = ImageProcessor(config)
     depth_estimator = DepthEstimator(config)
