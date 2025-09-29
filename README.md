@@ -32,6 +32,9 @@
 2.  **Python仮想環境の構築（推奨）**
     ```bash
     python3 -m venv .venv
+    ```
+
+    ```bash
     source .venv/bin/activate（Mac用）
     Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force（Win用）
     .venv\Scripts\Activate.ps1（Win用）
