@@ -17,6 +17,7 @@ from utils import (
 )
 import time
 import matplotlib.pyplot as plt
+from logging_setup import time_block, log_ndarray_stats
 
 
 @njit(fastmath=True)
@@ -931,81 +932,84 @@ class DepthOptimization:
                 logging.info("Starting checkerboard propagation ...")
                 neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
                 neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
-                for j in [0, 1]:
-                    _propagate_spatial_one_color_jit(
-                        depth_map,
-                        normal_map,
-                        cost_map,
-                        propagation_mask,
-                        neighbors_dr,
-                        neighbors_dc,
-                        j,
-                        0,
-                        h,
-                        0,
-                        w,
-                        self.config.PATCHMATCH_PATCH_SIZE,
-                        self.config.TOP_K_COSTS,
-                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                        ref_image_gray,
-                        ref_pose_K,
-                        ref_pose_R,
-                        ref_pose_T,
-                        src_images_gray,
-                        src_K,
-                        src_R,
-                        src_T,
-                    )
+                with time_block("CPU propagate checkerboard"):
+                    for j in [0, 1]:
+                        _propagate_spatial_one_color_jit(
+                            depth_map,
+                            normal_map,
+                            cost_map,
+                            propagation_mask,
+                            neighbors_dr,
+                            neighbors_dc,
+                            j,
+                            0,
+                            h,
+                            0,
+                            w,
+                            self.config.PATCHMATCH_PATCH_SIZE,
+                            self.config.TOP_K_COSTS,
+                            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                            ref_image_gray,
+                            ref_pose_K,
+                            ref_pose_R,
+                            ref_pose_T,
+                            src_images_gray,
+                            src_K,
+                            src_R,
+                            src_T,
+                        )
 
             elif self.config.CHOICED_PROPAGATION_METHOD == "priority":
                 if i > 0:
                     logging.info("Starting priority propagation ...")
-                    _propagate_bucket_jit(
-                        depth_map,
-                        normal_map,
-                        cost_map,
-                        initial_depth_error,
-                        propagation_mask,
-                        self.config.BUCKET_PROPAGATION_BINS,
-                        self.config.PATCHMATCH_PATCH_SIZE,
-                        self.config.TOP_K_COSTS,
-                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                        ref_image_gray,
-                        ref_pose_K,
-                        ref_pose_R,
-                        ref_pose_T,
-                        src_images_gray,
-                        src_K,
-                        src_R,
-                        src_T,
-                    )
+                    with time_block("CPU propagate priority"):
+                        _propagate_bucket_jit(
+                            depth_map,
+                            normal_map,
+                            cost_map,
+                            initial_depth_error,
+                            propagation_mask,
+                            self.config.BUCKET_PROPAGATION_BINS,
+                            self.config.PATCHMATCH_PATCH_SIZE,
+                            self.config.TOP_K_COSTS,
+                            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                            ref_image_gray,
+                            ref_pose_K,
+                            ref_pose_R,
+                            ref_pose_T,
+                            src_images_gray,
+                            src_K,
+                            src_R,
+                            src_T,
+                        )
 
             # --- 2. ランダム探索 ---
             depth_range_map = (
                 initial_depth_error * (self.config.PATCHMATCH_DECAY_RATE**i)
             ).astype(np.float32)
             logging.info("Starting random search ...")
-            _random_search_jit(
-                depth_map,
-                normal_map,
-                cost_map,
-                propagation_mask,
-                i,
-                self.config.PATCHMATCH_PATCH_SIZE,
-                self.config.TOP_K_COSTS,
-                self.config.PATCHMATCH_DECAY_RATE,
-                self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE,
-                ref_image_gray,
-                ref_pose_K,
-                ref_pose_R,
-                ref_pose_T,
-                src_images_gray,
-                src_K,
-                src_R,
-                src_T,
-                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                depth_range_map,
-            )
+            with time_block("CPU random_search"):
+                _random_search_jit(
+                    depth_map,
+                    normal_map,
+                    cost_map,
+                    propagation_mask,
+                    i,
+                    self.config.PATCHMATCH_PATCH_SIZE,
+                    self.config.TOP_K_COSTS,
+                    self.config.PATCHMATCH_DECAY_RATE,
+                    self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE,
+                    ref_image_gray,
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_images_gray,
+                    src_K,
+                    src_R,
+                    src_T,
+                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                    depth_range_map,
+                )
 
             if self.config.DEBUG_PATCH_MATCH_VISUALIZATION:
                 y_debug, x_debug = self.config.DEBUG_PIXEL_COORDS

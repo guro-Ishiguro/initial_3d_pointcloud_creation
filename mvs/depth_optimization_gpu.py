@@ -19,6 +19,7 @@ import time
 from numba.cuda.random import create_xoroshiro128p_states, xoroshiro128p_uniform_float32
 import math
 import matplotlib.pyplot as plt
+from logging_setup import time_block, log_ndarray_stats
 
 # Constants for CUDA kernels
 PATCHMATCH_PATCH_SIZE_CONST = config.PATCHMATCH_PATCH_SIZE
@@ -1994,122 +1995,119 @@ class DepthOptimization:
 
             # Propagation
             if self.config.CHOICED_PROPAGATION_METHOD == "checkerboard":
-                neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
-                neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
-                d_neighbors_dr = cuda.to_device(neighbors_dr)
-                d_neighbors_dc = cuda.to_device(neighbors_dc)
-                for j in [0, 1]:
-                    _propagate_spatial_one_color_cuda[blockspergrid, threadsperblock](
-                        d_depth_map,
-                        d_normal_map,
-                        d_cost_map,
-                        d_propagation_mask,
-                        d_neighbors_dr,
-                        d_neighbors_dc,
-                        j,
-                        self.config.PATCHMATCH_PATCH_SIZE,
-                        self.config.TOP_K_COSTS,
-                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                        d_ref_image_gray,
-                        d_ref_pose_K,
-                        d_ref_pose_R,
-                        d_ref_pose_T,
-                        d_src_images_gray,
-                        d_src_K,
-                        d_src_R,
-                        d_src_T,
-                    )
+                with time_block("GPU propagate checkerboard"):
+                    neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+                    neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
+                    d_neighbors_dr = cuda.to_device(neighbors_dr)
+                    d_neighbors_dc = cuda.to_device(neighbors_dc)
+                    for j in [0, 1]:
+                        _propagate_spatial_one_color_cuda[blockspergrid, threadsperblock](
+                            d_depth_map,
+                            d_normal_map,
+                            d_cost_map,
+                            d_propagation_mask,
+                            d_neighbors_dr,
+                            d_neighbors_dc,
+                            j,
+                            self.config.PATCHMATCH_PATCH_SIZE,
+                            self.config.TOP_K_COSTS,
+                            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                            d_ref_image_gray,
+                            d_ref_pose_K,
+                            d_ref_pose_R,
+                            d_ref_pose_T,
+                            d_src_images_gray,
+                            d_src_K,
+                            d_src_R,
+                            d_src_T,
+                        )
             else:
                 # Priority/bucket propagation path (GPU native)
-                # CPUと同じく、i>0から開始
                 if i > 0:
-                    # 1) Gather valid pixels and their initial error on host (use original initial_depth_error finite-only like CPU)
-                    mask = propagation_mask & np.isfinite(initial_depth_error)
-                    rs, cs = np.nonzero(mask)
-                    if rs.size > 0:
-                        costs = initial_depth_error[rs, cs].astype(np.float32)
-                        # Compute bins
-                        num_bins = getattr(self.config, "BUCKET_PROPAGATION_BINS", 4)
-                        cmin = float(np.min(costs))
-                        cmax = float(np.max(costs))
-                        if cmax - cmin < 1e-6:
-                            bin_indices = np.zeros_like(costs, dtype=np.int32)
-                            num_bins_effective = 1
-                        else:
-                            bin_width = (cmax - cmin) / num_bins
-                            bin_indices = np.floor((costs - cmin) / bin_width).astype(np.int32)
-                            bin_indices[bin_indices >= num_bins] = num_bins - 1
-                            num_bins_effective = num_bins
-
-                        # 2) Launch per-bin kernel in low-cost to high-cost order
-                        for b in range(num_bins_effective):
-                            sel = bin_indices == b
-                            if not np.any(sel):
-                                continue
-                            bin_rs = rs[sel].astype(np.int32)
-                            bin_cs = cs[sel].astype(np.int32)
-                            d_bin_rs = cuda.to_device(bin_rs)
-                            d_bin_cs = cuda.to_device(bin_cs)
-                            threads_1d = 256
-                            blocks_1d = (bin_rs.size + threads_1d - 1) // threads_1d
-                            # Push per-direction (up, down, left, right) with synchronization to avoid write conflicts
-                            # In-bin iterative propagation until no more updates or small cap
-                            max_inner_sweeps = 4
-                            for _ in range(max_inner_sweeps):
-                                d_update_counter = cuda.to_device(np.array([0], dtype=np.int32))
-                                for dir_code in range(4):
-                                    _propagate_bucket_push_dir_cuda[blocks_1d, threads_1d](
-                                        d_depth_map,
-                                        d_normal_map,
-                                        d_cost_map,
-                                        d_propagation_mask,
-                                        d_bin_rs,
-                                        d_bin_cs,
-                                        dir_code,
-                                        self.config.PATCHMATCH_PATCH_SIZE,
-                                        self.config.TOP_K_COSTS,
-                                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                                        d_ref_image_gray,
-                                        d_ref_pose_K,
-                                        d_ref_pose_R,
-                                        d_ref_pose_T,
-                                        d_src_images_gray,
-                                        d_src_K,
-                                        d_src_R,
-                                        d_src_T,
-                                        d_update_counter,
-                                    )
-                                    cuda.synchronize()
-                                updates = d_update_counter.copy_to_host()[0]
-                                if updates == 0:
-                                    break
+                    with time_block("GPU propagate priority"):
+                        mask = propagation_mask & np.isfinite(initial_depth_error)
+                        rs, cs = np.nonzero(mask)
+                        if rs.size > 0:
+                            costs = initial_depth_error[rs, cs].astype(np.float32)
+                            log_ndarray_stats("priority/bin_costs", costs)
+                            num_bins = getattr(self.config, "BUCKET_PROPAGATION_BINS", 4)
+                            cmin = float(np.min(costs))
+                            cmax = float(np.max(costs))
+                            if cmax - cmin < 1e-6:
+                                bin_indices = np.zeros_like(costs, dtype=np.int32)
+                                num_bins_effective = 1
+                            else:
+                                bin_width = (cmax - cmin) / num_bins
+                                bin_indices = np.floor((costs - cmin) / bin_width).astype(np.int32)
+                                bin_indices[bin_indices >= num_bins] = num_bins - 1
+                                num_bins_effective = num_bins
+                            for b in range(num_bins_effective):
+                                sel = bin_indices == b
+                                if not np.any(sel):
+                                    continue
+                                bin_rs = rs[sel].astype(np.int32)
+                                bin_cs = cs[sel].astype(np.int32)
+                                d_bin_rs = cuda.to_device(bin_rs)
+                                d_bin_cs = cuda.to_device(bin_cs)
+                                threads_1d = 256
+                                blocks_1d = (bin_rs.size + threads_1d - 1) // threads_1d
+                                max_inner_sweeps = 4
+                                for _ in range(max_inner_sweeps):
+                                    d_update_counter = cuda.to_device(np.array([0], dtype=np.int32))
+                                    for dir_code in range(4):
+                                        _propagate_bucket_push_dir_cuda[blocks_1d, threads_1d](
+                                            d_depth_map,
+                                            d_normal_map,
+                                            d_cost_map,
+                                            d_propagation_mask,
+                                            d_bin_rs,
+                                            d_bin_cs,
+                                            dir_code,
+                                            self.config.PATCHMATCH_PATCH_SIZE,
+                                            self.config.TOP_K_COSTS,
+                                            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                                            d_ref_image_gray,
+                                            d_ref_pose_K,
+                                            d_ref_pose_R,
+                                            d_ref_pose_T,
+                                            d_src_images_gray,
+                                            d_src_K,
+                                            d_src_R,
+                                            d_src_T,
+                                            d_update_counter,
+                                        )
+                                        cuda.synchronize()
+                                    updates = d_update_counter.copy_to_host()[0]
+                                    if updates == 0:
+                                        break
             
             # Random Search
             depth_range_map = (initial_depth_error.astype(np.float32) * (self.config.PATCHMATCH_DECAY_RATE**i)).astype(np.float32)
             cuda.to_device(depth_range_map, to=d_depth_range_map)
             
-            _random_search_cuda[blockspergrid, threadsperblock](
-                d_depth_map,
-                d_normal_map,
-                d_cost_map,
-                d_propagation_mask,
-                i,
-                self.config.PATCHMATCH_PATCH_SIZE,
-                self.config.TOP_K_COSTS,
-                self.config.PATCHMATCH_DECAY_RATE,
-                self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE,
-                d_ref_image_gray,
-                d_ref_pose_K,
-                d_ref_pose_R,
-                d_ref_pose_T,
-                d_src_images_gray,
-                d_src_K,
-                d_src_R,
-                d_src_T,
-                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                d_depth_range_map,
-                rng_states,
-            )
+            with time_block("GPU random_search"):
+                _random_search_cuda[blockspergrid, threadsperblock](
+                    d_depth_map,
+                    d_normal_map,
+                    d_cost_map,
+                    d_propagation_mask,
+                    i,
+                    self.config.PATCHMATCH_PATCH_SIZE,
+                    self.config.TOP_K_COSTS,
+                    self.config.PATCHMATCH_DECAY_RATE,
+                    self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE,
+                    d_ref_image_gray,
+                    d_ref_pose_K,
+                    d_ref_pose_R,
+                    d_ref_pose_T,
+                    d_src_images_gray,
+                    d_src_K,
+                    d_src_R,
+                    d_src_T,
+                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                    d_depth_range_map,
+                    rng_states,
+                )
             cuda.synchronize()
 
             # Save depth per-iteration if requested
