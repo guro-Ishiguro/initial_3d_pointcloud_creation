@@ -425,6 +425,8 @@ def _evaluate_cost_jit(
 
     costs = np.sort(costs)
     top_k = min(top_k_costs, len(costs))
+    if getattr(config, "USE_MEDIAN_TOP_K", 0):
+        return np.median(costs[:top_k])
     return np.mean(costs[:top_k])
 
 
@@ -655,16 +657,24 @@ def _propagate_bucket_push4_cuda(
         return
     src_normal = normal_map[r, c]
 
-    # Four directions: up, down, left, right (CPU order)
-    for d in range(4):
+    # Four or eight directions based on config
+    for d in range(8 if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8 else 4):
         if d == 0:
             nr = r - 1; nc = c
         elif d == 1:
             nr = r + 1; nc = c
         elif d == 2:
             nr = r; nc = c - 1
-        else:
+        elif d == 3:
             nr = r; nc = c + 1
+        elif d == 4:
+            nr = r - 1; nc = c - 1
+        elif d == 5:
+            nr = r - 1; nc = c + 1
+        elif d == 6:
+            nr = r + 1; nc = c - 1
+        else:
+            nr = r + 1; nc = c + 1
 
         if not (0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc]):
             continue
@@ -1555,6 +1565,10 @@ class DepthOptimization:
         ).astype(np.bool_)
 
         ref_image_gray = cv2.cvtColor(ref_image, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        if getattr(config, "PM_USE_BLUR", 0):
+            k = max(3, int(getattr(config, "PM_BLUR_KERNEL", 5)) | 1)
+            sigma = float(getattr(config, "PM_BLUR_SIGMA", 1.0))
+            ref_image_gray = cv2.GaussianBlur(ref_image_gray, (k, k), sigmaX=sigma, sigmaY=sigma)
         ref_pose_K, ref_pose_R, ref_pose_T = (
             ref_pose["K"].astype(np.float32),
             ref_pose["R"].astype(np.float32),
@@ -1562,7 +1576,10 @@ class DepthOptimization:
         )
         src_images_gray = np.stack(
             [
-                cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY).astype(np.float32)
+                (cv2.GaussianBlur(cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY), (max(3, int(getattr(config, "PM_BLUR_KERNEL", 5)) | 1), max(3, int(getattr(config, "PM_BLUR_KERNEL", 5)) | 1)), sigmaX=float(getattr(config, "PM_BLUR_SIGMA", 1.0)), sigmaY=float(getattr(config, "PM_BLUR_SIGMA", 1.0)))
+                 if getattr(config, "PM_USE_BLUR", 0)
+                 else cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY))
+                .astype(np.float32)
                 for view in neighbor_views_data
             ],
             axis=0,
@@ -1996,8 +2013,12 @@ class DepthOptimization:
             # Propagation
             if self.config.CHOICED_PROPAGATION_METHOD == "checkerboard":
                 with time_block("GPU propagate checkerboard"):
-                    neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
-                    neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
+                    if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8:
+                        neighbors_dr = np.array([-1, 1, 0, 0, -1, -1, 1, 1], dtype=np.int8)
+                        neighbors_dc = np.array([0, 0, -1, 1, -1, 1, -1, 1], dtype=np.int8)
+                    else:
+                        neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+                        neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
                     d_neighbors_dr = cuda.to_device(neighbors_dr)
                     d_neighbors_dc = cuda.to_device(neighbors_dc)
                     for j in [0, 1]:

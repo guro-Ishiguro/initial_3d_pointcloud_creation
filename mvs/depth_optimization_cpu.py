@@ -167,6 +167,8 @@ def _evaluate_cost_jit(
 
     costs = np.sort(costs)
     top_k = min(top_k_costs, len(costs))
+    if getattr(config, "USE_MEDIAN_TOP_K", 0):
+        return np.median(costs[:top_k])
     return np.mean(costs[:top_k])
 
 
@@ -280,8 +282,12 @@ def _propagate_bucket_jit(
     コストをビンに分割し、低コストのビンから優先的に並列伝播を実行する。
     """
     h, w = depth_map.shape
-    neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
-    neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
+    if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8:
+        neighbors_dr = np.array([-1, 1, 0, 0, -1, -1, 1, 1], dtype=np.int8)
+        neighbors_dc = np.array([0, 0, -1, 1, -1, 1, -1, 1], dtype=np.int8)
+    else:
+        neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+        neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
 
     # --- 1. 有効なピクセルを抽出し、コストに基づいてビンに分類 ---
     valid_pixels_coords = np.empty((h * w, 2), dtype=np.int32)
@@ -832,6 +838,10 @@ class DepthOptimization:
         ).astype(np.bool_)
 
         ref_image_gray = cv2.cvtColor(ref_image, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        if getattr(config, "PM_USE_BLUR", 0):
+            k = max(3, int(getattr(config, "PM_BLUR_KERNEL", 5)) | 1)
+            sigma = float(getattr(config, "PM_BLUR_SIGMA", 1.0))
+            ref_image_gray = cv2.GaussianBlur(ref_image_gray, (k, k), sigmaX=sigma, sigmaY=sigma)
         ref_pose_K, ref_pose_R, ref_pose_T = (
             ref_pose["K"].astype(np.float32),
             ref_pose["R"].astype(np.float32),
@@ -839,7 +849,10 @@ class DepthOptimization:
         )
         src_images_gray = np.stack(
             [
-                cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY).astype(np.float32)
+                (cv2.GaussianBlur(cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY), (max(3, int(getattr(config, "PM_BLUR_KERNEL", 5)) | 1), max(3, int(getattr(config, "PM_BLUR_KERNEL", 5)) | 1)), sigmaX=float(getattr(config, "PM_BLUR_SIGMA", 1.0)), sigmaY=float(getattr(config, "PM_BLUR_SIGMA", 1.0)))
+                 if getattr(config, "PM_USE_BLUR", 0)
+                 else cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY))
+                .astype(np.float32)
                 for view in neighbor_views_data
             ],
             axis=0,
@@ -930,8 +943,12 @@ class DepthOptimization:
             # --- 1. 空間伝播 ---
             if self.config.CHOICED_PROPAGATION_METHOD == "checkerboard":
                 logging.info("Starting checkerboard propagation ...")
-                neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
-                neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
+                if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8:
+                    neighbors_dr = np.array([-1, 1, 0, 0, -1, -1, 1, 1], dtype=np.int8)
+                    neighbors_dc = np.array([0, 0, -1, 1, -1, 1, -1, 1], dtype=np.int8)
+                else:
+                    neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+                    neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
                 with time_block("CPU propagate checkerboard"):
                     for j in [0, 1]:
                         _propagate_spatial_one_color_jit(
@@ -1176,11 +1193,19 @@ class DepthOptimization:
 
             # --- 空間伝播 ---
             if i % 2 == 0:
-                neighbors_dr = np.array([-1, 0], dtype=np.int8)
-                neighbors_dc = np.array([0, -1], dtype=np.int8)
+                if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8:
+                    neighbors_dr = np.array([-1, -1, -1, 0], dtype=np.int8)
+                    neighbors_dc = np.array([-1, 0, 1, -1], dtype=np.int8)
+                else:
+                    neighbors_dr = np.array([-1, 0], dtype=np.int8)
+                    neighbors_dc = np.array([0, -1], dtype=np.int8)
             else:
-                neighbors_dr = np.array([1, 0], dtype=np.int8)
-                neighbors_dc = np.array([0, 1], dtype=np.int8)
+                if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8:
+                    neighbors_dr = np.array([1, 1, 1, 0], dtype=np.int8)
+                    neighbors_dc = np.array([-1, 0, 1, 1], dtype=np.int8)
+                else:
+                    neighbors_dr = np.array([1, 0], dtype=np.int8)
+                    neighbors_dc = np.array([0, 1], dtype=np.int8)
 
             for color_idx in [0, 1]:
                 _propagate_spatial_one_color_jit(
