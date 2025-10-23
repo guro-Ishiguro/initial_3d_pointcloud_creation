@@ -1,0 +1,5 @@
+[flake8]
+max-line-length = 200
+extend-ignore = E203, W503, F541
+per-file-ignores =
+    mvs/main.py:F841

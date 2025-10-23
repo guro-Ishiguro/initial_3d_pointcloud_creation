@@ -1,36 +1,37 @@
 # mvs/main.py
 
-import os
-import config
-from logging_setup import setup_logging
 import logging
+import os
 import time
-import cv2
-import open3d as o3d
-import numpy as np
 
-from utils import (
-    parse_arguments,
-    save_depth_map_as_image,
-    read_exr_depth,
-    compute_depth_metrics,
-    save_error_map_as_image,
-    save_disparity_map_with_colorbar,
-    clear_folder,
-)
-from data_loader import DataLoader
-from disparity_estimation import ImageProcessor
+import config
+import cv2
+import numpy as np
+import open3d as o3d
 from depth_estimation import DepthEstimator
-from point_cloud_integrator import PointCloudIntegrator
 from depth_fusion import (
     CameraPlaneMedianFuser,
     OrthoDepthMedianFuser,
     WorldOrthoMedianFuser,
 )
 from depth_optimization import DepthOptimization, is_gpu_enabled
+from disparity_estimation import ImageProcessor
+from logging_setup import setup_logging
+from point_cloud_integrator import PointCloudIntegrator
+from utils import (
+    clear_folder,
+    compute_depth_metrics,
+    parse_arguments,
+    read_exr_depth,
+    save_depth_map_as_image,
+    save_disparity_map_with_colorbar,
+    save_error_map_as_image,
+)
+
+from app.data_loader import DataLoader
 
 
-if __name__ == "__main__":
+def run():
     args = parse_arguments()
     start_time = time.time()
 
@@ -45,7 +46,9 @@ if __name__ == "__main__":
     except Exception:
         pass
     logging.info("init")
-    logging.info(f"HOME_DIR={getattr(config, 'HOME_DIR', None)} DATA_DIR={getattr(config, 'DATA_DIR', None)} DATA_TYPE={getattr(config, 'DATA_TYPE', None)}")
+    logging.info(
+        f"HOME_DIR={getattr(config, 'HOME_DIR', None)} DATA_DIR={getattr(config, 'DATA_DIR', None)} DATA_TYPE={getattr(config, 'DATA_TYPE', None)}"
+    )
 
     data_loader = DataLoader(config.STEREO_IMAGE_DIR, config.DRONE_IMAGE_LOG)
     image_processor = ImageProcessor(config)
@@ -525,3 +528,8 @@ if __name__ == "__main__":
 
     end_time = time.time()
     logging.info(f"Total point cloud generation time: {end_time - start_time:.2f}s")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(run())

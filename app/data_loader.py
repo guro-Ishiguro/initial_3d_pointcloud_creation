@@ -1,12 +1,11 @@
-# mvs/data_loader.py
-
-import os
-import numpy as np
 import logging
+import os
 import sys
-import config
 
+import numpy as np
 from scipy.spatial.transform import Rotation
+
+import mvs.config as config
 
 
 class DataLoader:
@@ -16,7 +15,6 @@ class DataLoader:
         self.camera_data = self._load_camera_data()
 
     def _load_camera_data(self):
-        """ドローン画像ログからカメラの姿勢データを読み込む"""
         camera_data = []
         try:
             with open(self.drone_image_log) as f:
@@ -36,7 +34,6 @@ class DataLoader:
         return camera_data
 
     def _add_noise_to_pose(self, pos, quat, pos_scale, rot_scale):
-        """位置と姿勢のデータにノイズを追加する"""
         pos_error = np.random.randn(3) * pos_scale
         pos_with_error = (
             pos[0] + pos_error[0],
@@ -51,7 +48,6 @@ class DataLoader:
         return pos_with_error, quat_with_error
 
     def get_image_paths(self, idx):
-        """指定されたインデックスの左右画像のパスを返す"""
         if 0 <= idx < len(self.camera_data):
             base_fn, _, _ = self.camera_data[idx]
             right_fn = base_fn.replace("left_", "right_")
@@ -61,7 +57,6 @@ class DataLoader:
         return None, None
 
     def get_camera_pose(self, idx):
-        """指定されたインデックスのカメラの姿勢データを返す"""
         if 0 <= idx < len(self.camera_data):
             return self.camera_data[idx]
         else:
@@ -69,9 +64,6 @@ class DataLoader:
             return None, None, None
 
     def get_all_camera_pairs(self, K):
-        """
-        すべてのカメラペアとその関連データを準備する。
-        """
         pairs = []
         position_error_scale = config.POSITION_ERROR_SCALE
         rotation_error_scale = config.ROTATION_ERROR_SCALE
@@ -82,33 +74,20 @@ class DataLoader:
             pos_unity, quat_unity = self._add_noise_to_pose(
                 pos_unity, quat_unity, position_error_scale, rotation_error_scale
             )
-            # --- Unity(左手系) -> OpenCV(右手系) 座標変換 ---
-
-            # 1. 位置(Position)の変換
-            # 世界座標系での平行移動ベクトル
             pos_cv = np.array(
                 [pos_unity[0], -pos_unity[1], pos_unity[2]], dtype=np.float32
             )
-
-            # 2. 回転(Rotation)の変換
             quat_cv = np.array(
                 [-quat_unity[0], quat_unity[1], -quat_unity[2], quat_unity[3]],
                 dtype=np.float32,
             )
-
-            # 3. 変換後のクォータニオンから回転行列を計算
-            # カメラ→世界座標系の回転行列
             r = Rotation.from_quat(quat_cv)
             R_cv = r.as_matrix().astype(np.float32)
-
-            # 4. 世界座標系→カメラ座標系への回転行列とカメラ座標系での平行移動ベクトル
             R_cv = R_cv.T
             T_cv = -R_cv @ pos_cv
-
             left_path, right_path = self.get_image_paths(idx)
             if not os.path.exists(left_path) or not os.path.exists(right_path):
                 logging.warning(f"Image files for index {idx} not found. Skipping.")
                 continue
-
             pairs.append((idx, T_cv, left_path, right_path, R_cv))
         return pairs
