@@ -143,7 +143,6 @@ PROPAGATION_METHOD = ["checkerboard", "priority"]
 CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[1]
 
 # --- 空間伝播の近傍方向数 ---
-# 4 または 8 を指定
 PROPAGATION_NEIGHBOR_DIRECTIONS = int(os.getenv("PM_PROP_DIRS", "4"))  # 4 or 8
 
 
