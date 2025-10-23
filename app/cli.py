@@ -4,25 +4,14 @@ import sys
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run 3D point cloud pipeline")
+    parser = argparse.ArgumentParser(
+        description="Run 3D point cloud pipeline (YAML-driven)"
+    )
     parser.add_argument(
-        "--data_type",
+        "--config",
         type=str,
         default=None,
-        help="DATA_TYPE name under data/ (overrides env)",
-    )
-    parser.add_argument(
-        "--data_type_index",
-        type=int,
-        default=None,
-        help="DATA_TYPE_INDEX 1-based (overrides env)",
-    )
-    parser.add_argument("--log_level", type=str, default=None, help="PM_LOG_LEVEL")
-    parser.add_argument(
-        "--prop_dirs", type=int, default=None, help="PM_PROP_DIRS (4 or 8)"
-    )
-    parser.add_argument(
-        "--priority_sweeps", type=int, default=None, help="PM_PRIORITY_SWEEPS"
+        help="Path to YAML config (default: app/config.yaml)",
     )
     args = parser.parse_args()
 
@@ -34,17 +23,6 @@ def main():
     if mvs_dir not in sys.path:
         sys.path.insert(0, mvs_dir)
 
-    if args.data_type:
-        os.environ["DATA_TYPE"] = args.data_type
-    if args.data_type_index is not None:
-        os.environ["DATA_TYPE_INDEX"] = str(args.data_type_index)
-    if args.log_level:
-        os.environ["PM_LOG_LEVEL"] = args.log_level
-    if args.prop_dirs is not None:
-        os.environ["PM_PROP_DIRS"] = str(args.prop_dirs)
-    if args.priority_sweeps is not None:
-        os.environ["PM_PRIORITY_SWEEPS"] = str(args.priority_sweeps)
-
     # Remove custom args so downstream parser (mvs.utils.parse_arguments) doesn't see them
     sys.argv = [sys.argv[0]]
 
@@ -52,7 +30,7 @@ def main():
     try:
         from app.settings import apply_env_overrides
 
-        apply_env_overrides()
+        apply_env_overrides(args.config)
     except Exception:
         pass
 
