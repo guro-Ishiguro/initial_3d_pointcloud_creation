@@ -153,6 +153,7 @@ ADAPTIVE_WEIGHT_SIGMA_COLOR = 10
 
 # --- 優先度付き伝播のパラメータ ---
 BUCKET_PROPAGATION_BINS = 4
+PRIORITY_MAX_SWEEPS = int(os.getenv("PM_PRIORITY_SWEEPS", "8"))  # 1 bin内の内部スイープ回数
 
 # --- 光度一貫性チェックの設定 ---
 FILTERING_COLOR_DIFFERENCE_THRESHOLD = 20  # 色の差のしきい値 (0-255)

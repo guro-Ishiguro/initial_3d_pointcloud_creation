@@ -2202,11 +2202,15 @@ class DepthOptimization:
                                     continue
                                 bin_rs = rs[sel].astype(np.int32)
                                 bin_cs = cs[sel].astype(np.int32)
-                                d_bin_rs = cuda.to_device(bin_rs)
-                                d_bin_cs = cuda.to_device(bin_cs)
+                                # 固定順（行優先→列）で並べ替え、決定的な処理順を担保
+                                order = np.lexsort((bin_cs, bin_rs))
+                                bin_rs_sorted = bin_rs[order]
+                                bin_cs_sorted = bin_cs[order]
+                                d_bin_rs = cuda.to_device(bin_rs_sorted)
+                                d_bin_cs = cuda.to_device(bin_cs_sorted)
                                 threads_1d = 256
-                                blocks_1d = (bin_rs.size + threads_1d - 1) // threads_1d
-                                max_inner_sweeps = 4
+                                blocks_1d = (bin_rs_sorted.size + threads_1d - 1) // threads_1d
+                                max_inner_sweeps = int(getattr(self.config, "PRIORITY_MAX_SWEEPS", 8))
                                 for _ in range(max_inner_sweeps):
                                     d_update_counter = cuda.to_device(np.array([0], dtype=np.int32))
                                     for dir_code in range(4):
