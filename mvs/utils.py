@@ -1,18 +1,16 @@
-import os
-import config
-import shutil
-import numpy as np
-import logging
 import argparse
-import cv2
-import OpenEXR
-import Imath
 import csv
+import logging
+import os
+import shutil
 
-# ログ設定はここで一元的に行う
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+import config
+import cv2
+import Imath
+import numpy as np
+import OpenEXR
+
+# ここでの basicConfig は削除（共通初期化は mvs.logging_setup.setup_logging 側に統一）
 
 
 def parse_arguments():

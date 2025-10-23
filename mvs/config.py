@@ -1,5 +1,4 @@
 import os
-from typing import Any, Dict
 
 import numpy as np
 from dotenv import load_dotenv
@@ -188,91 +187,19 @@ LOG_DIR = os.path.join(OUTPUT_TYPE_DIR, "logs")
 # Top-K集約を平均ではなく中央値に切替（0: mean, 1: median）
 USE_MEDIAN_TOP_K = int(os.getenv("PM_USE_MEDIAN_TOP_K", "1"))
 
-
-# --- YAML 設定による上書き（任意） ---
-def _load_yaml_config(config_path: str) -> Dict[str, Any]:
-    if not yaml or not os.path.exists(config_path):
-        return {}
-    try:
-        with open(config_path, "r") as f:
-            data = yaml.safe_load(f) or {}
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _override_from_yaml():
-    # 1) Prefer dedicated MVS config file
-    mvs_cfg_path = os.getenv(
-        "APP_MVS_CONFIG",
-        os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "app", "mvs.yaml")
-        ),
+# YAML(app/mvs.yaml もしくは APP_MVS_CONFIG) による MVS パラメータの上書き
+try:
+    mvs_yaml_path = os.getenv(
+        "APP_MVS_CONFIG", os.path.join(DEFAULT_HOME, "app", "mvs.yaml")
     )
-    mvs_cfg = _load_yaml_config(mvs_cfg_path)
-    # 2) Fallback to app/config.yaml's `mvs:` section
-    if not mvs_cfg:
-        app_cfg_path = os.getenv(
-            "APP_CONFIG",
-            os.path.abspath(
-                os.path.join(os.path.dirname(__file__), "..", "app", "config.yaml")
-            ),
-        )
-        app_cfg = _load_yaml_config(app_cfg_path)
-        mvs_cfg = app_cfg.get("mvs", {}) if isinstance(app_cfg.get("mvs"), dict) else {}
-
-    def set_num(name: str):
-        global_vars = globals()
-        if name in mvs_cfg and mvs_cfg[name] is not None:
-            try:
-                global_vars[name] = type(global_vars[name])(mvs_cfg[name])
-            except Exception:
-                pass
-
-    def set_any(name: str):
-        global_vars = globals()
-        if name in mvs_cfg and mvs_cfg[name] is not None:
-            global_vars[name] = mvs_cfg[name]
-
-    # 数値/ブールの代表的パラメータ
-    for key in [
-        "PATCHMATCH_ITERATIONS",
-        "PATCHMATCH_PATCH_SIZE",
-        "ZNCC_EPSILON",
-        "TOP_K_COSTS",
-        "PATCHMATCH_VANILLA_MIN_DEPTH",
-        "PATCHMATCH_VANILLA_MAX_DEPTH",
-        "PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE",
-        "DEBUG_VISUALIZATION",
-        "DEBUG_SAVE_DEPTH_MAPS",
-        "DEBUG_SAVE_NORMAL_MAPS",
-        "MAX_NEIGHBORS",
-        "STREAMING_VIEWER",
-        "VIEWER_TOPDOWN_ZOOM",
-        "VIEWER_ROLL_DEG",
-        "DEPTH_FUSION_ENABLE",
-        "PATCHMATCH_DECAY_RATE",
-        "PATCHMATCH_NORMAL_SEARCH_ANGLE",
-        "ADAPTIVE_WEIGHT_SIGMA_COLOR",
-        "BUCKET_PROPAGATION_BINS",
-        "FILTERING_COLOR_DIFFERENCE_THRESHOLD",
-        "FILTERING_MIN_CONSISTENT_VIEWS",
-        "GEOMETRIC_FILTER_ENABLED",
-        "GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD",
-        "GEOMETRIC_MIN_CONSISTENT_VIEWS",
-        "POSITION_ERROR_SCALE",
-        "ROTATION_ERROR_SCALE",
-        "PROPAGATION_NEIGHBOR_DIRECTIONS",
-        "USE_MEDIAN_TOP_K",
-    ]:
-        set_num(key)
-
-    # 文字列/配列
-    set_any("CHOICED_PROPAGATION_METHOD")
-    set_any("PROPAGATION_METHOD")
-    set_any("TARGET_INDICES")
-    set_any("VIEWER_TOPDOWN_FRONT")
-    set_any("VIEWER_TOPDOWN_UP")
-
-
-_override_from_yaml()
+    if yaml and os.path.exists(mvs_yaml_path):
+        with open(mvs_yaml_path, "r") as f:
+            _cfg = yaml.safe_load(f) or {}
+        if isinstance(_cfg, dict):
+            g = globals()
+            for k, v in _cfg.items():
+                if k in g and v is not None:
+                    g[k] = v
+except Exception:
+    # YAML が読めない場合は静かに既定値を使用
+    pass
