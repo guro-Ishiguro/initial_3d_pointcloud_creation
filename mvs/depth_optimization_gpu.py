@@ -3,6 +3,7 @@
 import numpy as np
 import cv2
 from numba import njit, prange, cuda
+import threading
 import logging
 import config
 import os
@@ -1355,6 +1356,7 @@ def _initialize_normals_from_depth_cuda(normals, depth_map, K):
 class DepthOptimization:
     def __init__(self, config):
         self.config = config
+        self._gpu_cum_start_nojit = None  # set after first GPU kernel finishes
         if not hasattr(self.config, "ADAPTIVE_WEIGHT_SIGMA_COLOR"):
             logging.warning(
                 "ADAPTIVE_WEIGHT_SIGMA_COLOR not found in config. Using default value 10.0."
@@ -1364,6 +1366,145 @@ class DepthOptimization:
             logging.warning(
                 "BUCKET_PROPAGATION_BINS not found in config. Using default value 16."
             )
+
+        # Asynchronous CUDA JIT warm-up to hide initial compile latency during I/O
+        try:
+            import os
+            if os.getenv("PM_GPU_WARMUP", "1") == "1":
+                t = threading.Thread(target=self._async_warmup, daemon=True)
+                t.start()
+        except Exception as e:
+            logging.debug(f"GPU warm-up thread not started: {e}")
+
+    def _async_warmup(self):
+        try:
+            self._warmup_kernels()
+        except Exception as e:
+            logging.debug(f"GPU warm-up failed: {e}")
+
+    def _warmup_kernels(self):
+        """
+        Launch tiny dummy kernels once to trigger CUDA JIT compilation ahead of time.
+        This runs in a background thread to overlap with image pre-loading.
+        """
+        h, w = 32, 32
+        depth_map = np.ones((h, w), dtype=np.float32)
+        normal_map = np.zeros((h, w, 3), dtype=np.float32)
+        cost_map = np.full((h, w), np.inf, dtype=np.float32)
+        propagation_mask = np.ones((h, w), dtype=np.bool_)
+        initial_depth_error = np.ones((h, w), dtype=np.float32)
+        ref_image_gray = np.ones((h, w), dtype=np.float32)
+        ref_pose_K = np.array([[500.0, 0.0, w/2],[0.0, 500.0, h/2],[0.0,0.0,1.0]], dtype=np.float32)
+        ref_pose_R = np.eye(3, dtype=np.float32)
+        ref_pose_T = np.zeros(3, dtype=np.float32)
+        src_images_gray = np.stack([ref_image_gray, ref_image_gray], axis=0)
+        src_K = np.stack([ref_pose_K, ref_pose_K], axis=0)
+        src_R = np.stack([ref_pose_R, ref_pose_R], axis=0)
+        src_T = np.stack([ref_pose_T, ref_pose_T], axis=0)
+
+        # Device copies
+        d_depth_map = cuda.to_device(depth_map)
+        d_normal_map = cuda.to_device(normal_map)
+        d_cost_map = cuda.to_device(cost_map)
+        d_propagation_mask = cuda.to_device(propagation_mask)
+        d_ref_image_gray = cuda.to_device(ref_image_gray)
+        d_ref_pose_K = cuda.to_device(ref_pose_K)
+        d_ref_pose_R = cuda.to_device(ref_pose_R)
+        d_ref_pose_T = cuda.to_device(ref_pose_T)
+        d_src_images_gray = cuda.to_device(src_images_gray)
+        d_src_K = cuda.to_device(src_K)
+        d_src_R = cuda.to_device(src_R)
+        d_src_T = cuda.to_device(src_T)
+        d_depth_range_map = cuda.to_device(np.full((h, w), 1.0, dtype=np.float32))
+        rng_states = create_xoroshiro128p_states(16 * 16, seed=1)
+
+        threadsperblock = (16, 16)
+        blockspergrid = ((w + 15)//16, (h + 15)//16)
+
+        # Initialize normals kernel
+        _initialize_normals_from_depth_cuda[blockspergrid, threadsperblock](
+            d_normal_map, d_depth_map, d_ref_pose_K
+        )
+
+        # Propagation kernels based on method
+        if getattr(self.config, "CHOICED_PROPAGATION_METHOD", "checkerboard") == "checkerboard":
+            neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+            neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
+            d_neighbors_dr = cuda.to_device(neighbors_dr)
+            d_neighbors_dc = cuda.to_device(neighbors_dc)
+            for j in [0, 1]:
+                _propagate_spatial_one_color_cuda[blockspergrid, threadsperblock](
+                    d_depth_map,
+                    d_normal_map,
+                    d_cost_map,
+                    d_propagation_mask,
+                    d_neighbors_dr,
+                    d_neighbors_dc,
+                    j,
+                    7,
+                    3,
+                    10,
+                    d_ref_image_gray,
+                    d_ref_pose_K,
+                    d_ref_pose_R,
+                    d_ref_pose_T,
+                    d_src_images_gray,
+                    d_src_K,
+                    d_src_R,
+                    d_src_T,
+                )
+        else:
+            # Bucket push directions kernel (use small bin arrays)
+            bin_rs = cuda.to_device(np.array([8, 16], dtype=np.int32))
+            bin_cs = cuda.to_device(np.array([8, 16], dtype=np.int32))
+            update_counter = cuda.to_device(np.array([0], dtype=np.int32))
+            for dir_code in range(4):
+                _propagate_bucket_push_dir_cuda[(1,), (32,)](
+                    d_depth_map,
+                    d_normal_map,
+                    d_cost_map,
+                    d_propagation_mask,
+                    bin_rs,
+                    bin_cs,
+                    dir_code,
+                    7,
+                    3,
+                    10,
+                    d_ref_image_gray,
+                    d_ref_pose_K,
+                    d_ref_pose_R,
+                    d_ref_pose_T,
+                    d_src_images_gray,
+                    d_src_K,
+                    d_src_R,
+                    d_src_T,
+                    update_counter,
+                )
+
+        # Random search kernel
+        _random_search_cuda[blockspergrid, threadsperblock](
+            d_depth_map,
+            d_normal_map,
+            d_cost_map,
+            d_propagation_mask,
+            0,
+            7,
+            3,
+            0.9,
+            20.0,
+            d_ref_image_gray,
+            d_ref_pose_K,
+            d_ref_pose_R,
+            d_ref_pose_T,
+            d_src_images_gray,
+            d_src_K,
+            d_src_R,
+            d_src_T,
+            10.0,
+            d_depth_range_map,
+            rng_states,
+        )
+        cuda.synchronize()
 
     def _initialize_normals_gpu(self, depth_map, K):
         h, w = depth_map.shape
@@ -1565,10 +1706,6 @@ class DepthOptimization:
         ).astype(np.bool_)
 
         ref_image_gray = cv2.cvtColor(ref_image, cv2.COLOR_RGB2GRAY).astype(np.float32)
-        if getattr(config, "PM_USE_BLUR", 0):
-            k = max(3, int(getattr(config, "PM_BLUR_KERNEL", 5)) | 1)
-            sigma = float(getattr(config, "PM_BLUR_SIGMA", 1.0))
-            ref_image_gray = cv2.GaussianBlur(ref_image_gray, (k, k), sigmaX=sigma, sigmaY=sigma)
         ref_pose_K, ref_pose_R, ref_pose_T = (
             ref_pose["K"].astype(np.float32),
             ref_pose["R"].astype(np.float32),
@@ -1576,13 +1713,10 @@ class DepthOptimization:
         )
         src_images_gray = np.stack(
             [
-                (cv2.GaussianBlur(cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY), (max(3, int(getattr(config, "PM_BLUR_KERNEL", 5)) | 1), max(3, int(getattr(config, "PM_BLUR_KERNEL", 5)) | 1)), sigmaX=float(getattr(config, "PM_BLUR_SIGMA", 1.0)), sigmaY=float(getattr(config, "PM_BLUR_SIGMA", 1.0)))
-                 if getattr(config, "PM_USE_BLUR", 0)
-                 else cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY))
-                .astype(np.float32)
-                for view in neighbor_views_data
-            ],
-            axis=0,
+                cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY).astype(np.float32)
+            for view in neighbor_views_data
+        ],
+        axis=0,
         )
         src_K = np.stack(
             [view["K"].astype(np.float32) for view in neighbor_views_data], axis=0
@@ -2131,18 +2265,44 @@ class DepthOptimization:
                 )
             cuda.synchronize()
 
+            # Mark cumulative timer start after first successful kernel run (exclude initial JIT)
+            if self._gpu_cum_start_nojit is None:
+                self._gpu_cum_start_nojit = time.time()
+
             # Save depth per-iteration if requested
             if save_per_iter and save_dir is not None:
                 depth_tmp = d_depth_map.copy_to_host()
                 save_path = os.path.join(save_dir, f"depth_iter_{i+1:02d}.png")
                 logging.info(f"Saving depth map at iteration {i+1} to {save_path}")
                 save_depth_map_as_image(depth_tmp, save_path)
+            else:
+                depth_tmp = None
             # Record iteration duration
             if iter_times is not None:
                 iter_times.append(time.time() - iter_start_time)
                 if gt_depth is not None:
                     err_path = os.path.join(save_dir, f"error_iter_{i+1:02d}.png")
                     save_error_map_as_image(depth_tmp, gt_depth, err_path)
+            # Log per-iteration metrics and elapsed time (and cumulative since after JIT)
+            iter_duration = time.time() - iter_start_time
+            cum_txt = ""
+            if self._gpu_cum_start_nojit is not None:
+                cum_txt = f" | cum={time.time() - self._gpu_cum_start_nojit:.2f}s"
+            if gt_depth is not None:
+                if depth_tmp is None:
+                    depth_host = d_depth_map.copy_to_host()
+                else:
+                    depth_host = depth_tmp
+                try:
+                    metrics = compute_depth_metrics(depth_host, gt_depth)
+                    logging.info(
+                        f"[GPU] Iter {i+1}: {iter_duration:.2f}s{cum_txt} | MAE={metrics['mae']:.4f}, AbsRel={metrics['abs_rel']:.4f}, "
+                        f"RMSE={metrics['rmse']:.4f}, RMSElog={metrics['rmse_log']:.4f}, d1={metrics['delta1']:.4f}, d2={metrics['delta2']:.4f}, d3={metrics['delta3']:.4f}"
+                    )
+                except Exception as e:
+                    logging.warning(f"[GPU] Could not compute metrics at iter {i+1}: {e}")
+            else:
+                logging.info(f"[GPU] Iter {i+1}: {iter_duration:.2f}s{cum_txt}")
 
             # Early convergence check to mirror CPU behavior
             depth_curr = d_depth_map.copy_to_host()

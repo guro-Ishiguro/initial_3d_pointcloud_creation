@@ -113,10 +113,10 @@ DEBUG_PIXEL_COORDS = (230, 1000)  # デバッグ用のピクセル座標 (x, y)
 
 # --- PatchMatch MVS のパラメーター ---
 PATCHMATCH_ITERATIONS = 10  # PatchMatchの反復回数
-PATCHMATCH_PATCH_SIZE = 10  # パッチサイズ (奇数)
-NORMAL_ESTIMATION_NEIGHBORHOOD = 10  # 法線推定に使う近傍のサイズ
+PATCHMATCH_PATCH_SIZE = 7  # パッチサイズ (奇数)
+NORMAL_ESTIMATION_NEIGHBORHOOD = 7  # 法線推定に使う近傍のサイズ
 ZNCC_EPSILON = 1e-6  # ZNCCコスト計算時の小さな値
-TOP_K_COSTS = 5  # 複数視点コストを集計する際の上位何個を考慮するか
+TOP_K_COSTS = 3  # 複数視点コストを集計する際の上位何個を考慮するか
 PATCHMATCH_VANILLA_MIN_DEPTH = 7.5
 PATCHMATCH_VANILLA_MAX_DEPTH = 35.0
 PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE = 50.0  # ランダム探索の初期探索幅
@@ -144,11 +144,11 @@ CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[1]
 
 # --- 空間伝播の近傍方向数 ---
 # 4 または 8 を指定
-PROPAGATION_NEIGHBOR_DIRECTIONS = int(os.getenv("PM_PROP_DIRS", "8"))  # 4 or 8
+PROPAGATION_NEIGHBOR_DIRECTIONS = int(os.getenv("PM_PROP_DIRS", "4"))  # 4 or 8
 
 
 # --- 適応的ランダム探索のパラメータ ---
-PATCHMATCH_DECAY_RATE = 0.9
+PATCHMATCH_DECAY_RATE = 0.90
 PATCHMATCH_NORMAL_SEARCH_ANGLE = 20.0
 ADAPTIVE_WEIGHT_SIGMA_COLOR = 10
 
@@ -178,7 +178,3 @@ LOG_DIR = os.path.join(OUTPUT_TYPE_DIR, "logs")
 # --- ロバスト化オプション ---
 # Top-K集約を平均ではなく中央値に切替（0: mean, 1: median）
 USE_MEDIAN_TOP_K = int(os.getenv("PM_USE_MEDIAN_TOP_K", "1"))
-# ZNCC入力を事前にぼかして微小ミスアラインに寛容化（0/1）
-PM_USE_BLUR = int(os.getenv("PM_USE_BLUR", "1"))
-PM_BLUR_KERNEL = int(os.getenv("PM_BLUR_KERNEL", "5"))  # 奇数
-PM_BLUR_SIGMA = float(os.getenv("PM_BLUR_SIGMA", "1.0"))

@@ -838,10 +838,6 @@ class DepthOptimization:
         ).astype(np.bool_)
 
         ref_image_gray = cv2.cvtColor(ref_image, cv2.COLOR_RGB2GRAY).astype(np.float32)
-        if getattr(config, "PM_USE_BLUR", 0):
-            k = max(3, int(getattr(config, "PM_BLUR_KERNEL", 5)) | 1)
-            sigma = float(getattr(config, "PM_BLUR_SIGMA", 1.0))
-            ref_image_gray = cv2.GaussianBlur(ref_image_gray, (k, k), sigmaX=sigma, sigmaY=sigma)
         ref_pose_K, ref_pose_R, ref_pose_T = (
             ref_pose["K"].astype(np.float32),
             ref_pose["R"].astype(np.float32),
@@ -849,13 +845,10 @@ class DepthOptimization:
         )
         src_images_gray = np.stack(
             [
-                (cv2.GaussianBlur(cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY), (max(3, int(getattr(config, "PM_BLUR_KERNEL", 5)) | 1), max(3, int(getattr(config, "PM_BLUR_KERNEL", 5)) | 1)), sigmaX=float(getattr(config, "PM_BLUR_SIGMA", 1.0)), sigmaY=float(getattr(config, "PM_BLUR_SIGMA", 1.0)))
-                 if getattr(config, "PM_USE_BLUR", 0)
-                 else cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY))
-                .astype(np.float32)
-                for view in neighbor_views_data
-            ],
-            axis=0,
+                cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY).astype(np.float32)
+            for view in neighbor_views_data
+        ],
+        axis=0,
         )
         src_K = np.stack(
             [view["K"].astype(np.float32) for view in neighbor_views_data], axis=0
@@ -1093,6 +1086,17 @@ class DepthOptimization:
                     gt_depth,
                     os.path.join(save_each_depth_dir, f"error_iter_{i+1:02d}.png"),
                 )
+
+            # per-iteration summary log
+            iteration_end_time = time.time()
+            iter_elapsed = iteration_end_time - iter_start_time
+            if gt_depth is not None:
+                logging.info(
+                    f"[CPU] Iter {i+1}: {iter_elapsed:.2f}s | MAE={metrics['mae']:.4f}, AbsRel={metrics['abs_rel']:.4f}, "
+                    f"RMSE={metrics['rmse']:.4f}, RMSElog={metrics['rmse_log']:.4f}, d1={metrics['delta1']:.4f}, d2={metrics['delta2']:.4f}, d3={metrics['delta3']:.4f}"
+                )
+            else:
+                logging.info(f"[CPU] Iter {i+1}: {iter_elapsed:.2f}s")
 
             iteration_end_time = time.time()
             elapsed_time = iteration_end_time - iteration_start_time
