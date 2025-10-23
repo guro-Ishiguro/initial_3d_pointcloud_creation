@@ -89,6 +89,32 @@
 
     処理が完了すると、最終的な点群データが `output/<dataset_name>/point_cloud/output.ply` として保存される。また、各フレームの深度マップや法線マップなどの中間生成物も `output` ディレクトリ以下に保存される。
 
+### GPU/最適化オプション
+
+- 伝播方向の切替（4/8方向）
+  - `mvs/config.py` の `PROPAGATION_NEIGHBOR_DIRECTIONS` に 4 または 8 を設定（既定: 4）。
+  - 8方向は精度安定、4方向は高速化に有利。
+
+- priority 伝播の固定順・スイープ回数
+  - GPUのpriority伝播は、bin内画素を「行→列」固定順に処理。
+  - bin内での内部スイープ回数は `PRIORITY_MAX_SWEEPS`（既定: 8、環境変数 `PM_PRIORITY_SWEEPS` で上書き可）。
+  - 例: `PM_PRIORITY_SWEEPS=10 python3 mvs/main.py`
+
+- 伝播方式の選択
+  - `CHOICED_PROPAGATION_METHOD` に `"checkerboard"` か `"priority"` を指定。
+  - 速度重視: `checkerboard`、収束深さ重視: `priority`（スイープ回数を増やす）。
+
+- Top-K集約のロバスト化
+  - `USE_MEDIAN_TOP_K=1` で Top-K を中央値集約。
+  - 速度重視なら `USE_MEDIAN_TOP_K=0`。
+
+- イテレーションログの累積時間
+  - GPUログに `cum=...s` を追加。これは「最初のGPUカーネル実行完了以降」の累積時間で、初回JITコンパイル時間を含まない。
+
+- GPUウォームアップ
+  - 起動直後にバックグラウンドで主要カーネルを小規模入力で一度起動。
+  - 環境変数で無効化: `PM_GPU_WARMUP=0`。
+
 ## 処理フローの概要
 
 本パイプラインは `mvs/main.py` によって制御され、以下のステップで処理が進められる。
