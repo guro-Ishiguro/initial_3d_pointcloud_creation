@@ -25,6 +25,7 @@ from utils import (
 # Constants for CUDA kernels
 PATCHMATCH_PATCH_SIZE_CONST = config.PATCHMATCH_PATCH_SIZE
 MAX_NEIGHBORS_CONST = config.MAX_NEIGHBORS
+MAX_ACMH_HYPOTHESES_CONST = max(2, int(getattr(config, "ACMH_NUM_HYPOTHESES", 2)))
 
 
 @cuda.jit(device=True)
@@ -359,6 +360,8 @@ def _evaluate_cost_cuda(
     adaptive_weight_sigma_color,
     zncc_epsilon,
     use_median_top_k,
+    cov_required,
+    min_valid,
 ):
     h, w = ref_image_gray.shape
     half = patch_size // 2
@@ -411,6 +414,10 @@ def _evaluate_cost_cuda(
             patch_ref[pr, pc] = ref_image_gray[r - half + pr, c - half + pc]
     num_neighbors = src_images_gray.shape[0]
     costs = cuda.local.array(MAX_NEIGHBORS_CONST, dtype=np.float32)
+    valid = cuda.local.array(MAX_NEIGHBORS_CONST, dtype=np.int32)
+    for ii in range(MAX_NEIGHBORS_CONST):
+        costs[ii] = 1.0
+        valid[ii] = 0
     H = cuda.local.array((3, 3), dtype=np.float32)
     for i in range(num_neighbors):
         _compute_homography_cuda(
@@ -428,7 +435,6 @@ def _evaluate_cost_cuda(
             normal_world_1,
             normal_world_2,
         )
-        # Guard invalid H like CPU path
         invalid_H = False
         for ii in range(3):
             for jj in range(3):
@@ -441,6 +447,7 @@ def _evaluate_cost_cuda(
         warped_patch = cuda.local.array(
             (PATCHMATCH_PATCH_SIZE_CONST, PATCHMATCH_PATCH_SIZE_CONST), dtype=np.float32
         )
+        inside = 0
         for pr in range(patch_size):
             for pc in range(patch_size):
                 u_ref, v_ref = c - half + pc, r - half + pr
@@ -460,37 +467,43 @@ def _evaluate_cost_cuda(
                     warped_patch[pr, pc] = 0.0
                     continue
                 u_src, v_src = p_src_h_0 / p_src_h_2, p_src_h_1 / p_src_h_2
-                warped_patch[pr, pc] = _bilinear_interpolate_cuda(
-                    src_images_gray[i], v_src, u_src
-                )
-        costs[i] = _compute_weighted_zncc_cost_cuda(
-            patch_ref, warped_patch, adaptive_weight_sigma_color, zncc_epsilon
-        )
+                src_h = src_images_gray[i].shape[0]
+                src_w = src_images_gray[i].shape[1]
+                if 0 <= v_src < src_h and 0 <= u_src < src_w:
+                    warped_patch[pr, pc] = _bilinear_interpolate_cuda(
+                        src_images_gray[i], v_src, u_src
+                    )
+                    inside += 1
+                else:
+                    warped_patch[pr, pc] = 0.0
+        coverage = inside / float(patch_size * patch_size)
+        if coverage >= cov_required:
+            valid[i] = 1
+            costs[i] = _compute_weighted_zncc_cost_cuda(
+                patch_ref, warped_patch, adaptive_weight_sigma_color, zncc_epsilon
+            )
+        else:
+            costs[i] = 1.0
+    valid_count = 0
+    for i in range(num_neighbors):
+        if valid[i] == 1:
+            valid_count += 1
+    if valid_count < min_valid:
+        return 1.0
     for i in range(num_neighbors):
         for j in range(i + 1, num_neighbors):
             if costs[i] > costs[j]:
-                costs[i], costs[j] = costs[j], costs[i]
+                tmp = costs[i]
+                costs[i] = costs[j]
+                costs[j] = tmp
     top_k = min(top_k_costs, num_neighbors)
-    # USE_MEDIAN_TOP_K による中央値/平均の切替（CPUと同等の動作）
     if use_median_top_k != 0:
-        # costs は昇順ソート済み（下で2重ループの後に並べ替えがあるため、こちらでも整列を担保）
-        # ただし上の2重ループは隣接要素の交換なのでコストが単調とは限らない。念のため再整列。
-        # 軽量なローカル選択のため単純な挿入ソートでもよいが、件数が少ないので再使用。
-        # 手動の簡易ソート（バブル）
-        for ii in range(num_neighbors):
-            for jj in range(ii + 1, num_neighbors):
-                if costs[ii] > costs[jj]:
-                    tmp = costs[ii]
-                    costs[ii] = costs[jj]
-                    costs[jj] = tmp
-        # 中央値（偶数なら下側の中間値）
         mid = top_k // 2
         return costs[mid]
-    else:
-        total_cost = 0.0
-        for i in range(top_k):
-            total_cost += costs[i]
-        return total_cost / top_k
+    total_cost = 0.0
+    for i in range(top_k):
+        total_cost += costs[i]
+    return total_cost / top_k
 
 
 @njit(fastmath=True)
@@ -589,6 +602,9 @@ def _propagate_spatial_one_color_cuda(
     src_K,
     src_R,
     src_T,
+    use_median_top_k,
+    cov_required,
+    min_valid,
 ):
     c, r = cuda.grid(2)
     h, w = depth_map.shape
@@ -635,7 +651,9 @@ def _propagate_spatial_one_color_cuda(
             top_k_costs,
             adaptive_weight_sigma_color,
             zncc_epsilon,
-            np.int32(config.USE_MEDIAN_TOP_K),
+            use_median_top_k,
+            cov_required,
+            min_valid,
         )
 
         if new_cost < cost_map[r, c]:
@@ -644,42 +662,6 @@ def _propagate_spatial_one_color_cuda(
             normal_map[r, c, 1] = neighbor_normal[1]
             normal_map[r, c, 2] = neighbor_normal[2]
             cost_map[r, c] = new_cost
-
-
-@cuda.jit
-def _propagate_bucket_one_bin_cuda(
-    depth_map,
-    normal_map,
-    cost_map,
-    propagation_mask,
-    bin_rs,
-    bin_cs,
-    patch_size,
-    top_k_costs,
-    adaptive_weight_sigma_color,
-    ref_image_gray,
-    ref_pose_K,
-    ref_pose_R,
-    ref_pose_T,
-    src_images_gray,
-    src_K,
-    src_R,
-    src_T,
-):
-    start = cuda.grid(1)
-    stride = cuda.gridsize(1)
-    n = bin_rs.shape[0]
-    for idx in range(start, n, stride):
-        r = int(bin_rs[idx])
-        c = int(bin_cs[idx])
-        h, w = depth_map.shape
-        if not (0 <= r < h and 0 <= c < w):
-            continue
-        if not propagation_mask[r, c]:
-            continue
-
-    # This kernel is now unused (kept for reference). See push-directional kernel below.
-    return
 
 
 @cuda.jit
@@ -704,6 +686,9 @@ def _propagate_bucket_push_dir_cuda(
     src_R,
     src_T,
     update_counter,
+    use_median_top_k,
+    cov_required,
+    min_valid,
 ):
     start = cuda.grid(1)
     stride = cuda.gridsize(1)
@@ -758,7 +743,9 @@ def _propagate_bucket_push_dir_cuda(
             top_k_costs,
             adaptive_weight_sigma_color,
             zncc_epsilon,
-            np.int32(config.USE_MEDIAN_TOP_K),
+            use_median_top_k,
+            cov_required,
+            min_valid,
         )
 
         if new_cost < cost_map[nr, nc]:
@@ -790,6 +777,9 @@ def _propagate_bucket_push4_cuda(
     src_K,
     src_R,
     src_T,
+    use_median_top_k,
+    cov_required,
+    min_valid,
 ):
     start = cuda.grid(1)
     stride = cuda.gridsize(1)
@@ -857,7 +847,9 @@ def _propagate_bucket_push4_cuda(
                 top_k_costs,
                 adaptive_weight_sigma_color,
                 zncc_epsilon,
-                np.int32(config.USE_MEDIAN_TOP_K),
+                use_median_top_k,
+                cov_required,
+                min_valid,
             )
 
             if new_cost < cost_map[nr, nc]:
@@ -1105,6 +1097,9 @@ def _random_search_cuda(
     adaptive_weight_sigma_color,
     depth_range_map,
     random_states,
+    use_median_top_k,
+    cov_required,
+    min_valid,
 ):
     c, r = cuda.grid(2)
     h, w = depth_map.shape
@@ -1221,7 +1216,9 @@ def _random_search_cuda(
         top_k_costs,
         adaptive_weight_sigma_color,
         zncc_epsilon,
-        np.int32(config.USE_MEDIAN_TOP_K),
+        use_median_top_k,
+        cov_required,
+        min_valid,
     )
     if new_cost < cost_map[r, c]:
         depth_map[r, c] = d_new
@@ -1549,6 +1546,306 @@ def _initialize_normals_from_depth_cuda(normals, depth_map, K):
             normals[r, c, 2] = 1.0
 
 
+@cuda.jit
+def _propagate_spatial_one_color_acmhH_cuda(
+    depth_H,
+    normal_H,
+    cost_H,
+    H_count,
+    propagation_mask,
+    neighbors_dr,
+    neighbors_dc,
+    color,
+    patch_size,
+    top_k_costs,
+    adaptive_weight_sigma_color,
+    zncc_epsilon,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
+    joint_view_selection,
+    joint_top_k,
+    use_median_top_k,
+    cov_required,
+    min_valid,
+):
+    c, r = cuda.grid(2)
+    Hmax, h, w = depth_H.shape
+    if r >= h or c >= w:
+        return
+    if not propagation_mask[r, c]:
+        return
+    if (r + c) % 2 != color:
+        return
+
+    # 少なくとも1つの有効仮説が必要
+    has_valid = False
+    for s in range(H_count):
+        if not (
+            math.isnan(depth_H[s, r, c])
+            or math.isinf(depth_H[s, r, c])
+            or depth_H[s, r, c] <= 0
+        ):
+            has_valid = True
+            break
+    if not has_valid:
+        return
+
+    # Evaluate current H slots
+    for s in range(H_count):
+        d = depth_H[s, r, c]
+        if math.isnan(d) or math.isinf(d) or d <= 0:
+            continue
+        n0 = normal_H[s, r, c, 0]
+        n1 = normal_H[s, r, c, 1]
+        n2 = normal_H[s, r, c, 2]
+        if joint_view_selection == 1:
+            cost = _evaluate_cost_cuda(
+                r,
+                c,
+                d,
+                n0,
+                n1,
+                n2,
+                patch_size,
+                ref_image_gray,
+                ref_pose_K,
+                ref_pose_R,
+                ref_pose_T,
+                src_images_gray,
+                src_K,
+                src_R,
+                src_T,
+                joint_top_k,
+                adaptive_weight_sigma_color,
+                zncc_epsilon,
+                use_median_top_k,
+                cov_required,
+                min_valid,
+            )
+        else:
+            cost = _evaluate_cost_cuda(
+                r,
+                c,
+                d,
+                n0,
+                n1,
+                n2,
+                patch_size,
+                ref_image_gray,
+                ref_pose_K,
+                ref_pose_R,
+                ref_pose_T,
+                src_images_gray,
+                src_K,
+                src_R,
+                src_T,
+                top_k_costs,
+                adaptive_weight_sigma_color,
+                zncc_epsilon,
+                use_median_top_k,
+                cov_required,
+                min_valid,
+            )
+        cost_H[s, r, c] = cost
+
+    # Neighbor proposals
+    max_neighbors = neighbors_dr.shape[0]
+    for i in range(max_neighbors):
+        nr = r + neighbors_dr[i]
+        nc = c + neighbors_dc[i]
+        if not (0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc]):
+            continue
+        for s in range(H_count):
+            d = depth_H[s, nr, nc]
+            if math.isnan(d) or math.isinf(d) or d <= 0:
+                continue
+            n0 = normal_H[s, nr, nc, 0]
+            n1 = normal_H[s, nr, nc, 1]
+            n2 = normal_H[s, nr, nc, 2]
+            if joint_view_selection == 1:
+                cost = _evaluate_cost_cuda(
+                    r,
+                    c,
+                    d,
+                    n0,
+                    n1,
+                    n2,
+                    patch_size,
+                    ref_image_gray,
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_images_gray,
+                    src_K,
+                    src_R,
+                    src_T,
+                    joint_top_k,
+                    adaptive_weight_sigma_color,
+                    zncc_epsilon,
+                    use_median_top_k,
+                    cov_required,
+                    min_valid,
+                )
+            else:
+                cost = _evaluate_cost_cuda(
+                    r,
+                    c,
+                    d,
+                    n0,
+                    n1,
+                    n2,
+                    patch_size,
+                    ref_image_gray,
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_images_gray,
+                    src_K,
+                    src_R,
+                    src_T,
+                    top_k_costs,
+                    adaptive_weight_sigma_color,
+                    zncc_epsilon,
+                    use_median_top_k,
+                    cov_required,
+                    min_valid,
+                )
+            # replace worst among current H if better
+            worst_slot = 0
+            worst_cost = cost_H[0, r, c]
+            for ss in range(1, H_count):
+                cval = cost_H[ss, r, c]
+                if cval > worst_cost:
+                    worst_cost = cval
+                    worst_slot = ss
+            if cost < worst_cost:
+                depth_H[worst_slot, r, c] = d
+                normal_H[worst_slot, r, c, 0] = n0
+                normal_H[worst_slot, r, c, 1] = n1
+                normal_H[worst_slot, r, c, 2] = n2
+                cost_H[worst_slot, r, c] = cost
+
+
+@cuda.jit
+def _invalidate_by_validview_cuda(
+    depth_map,
+    normal_map,
+    cost_map,
+    propagation_mask,
+    patch_size,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
+    cov_required,
+    min_valid,
+):
+    c, r = cuda.grid(2)
+    h, w = depth_map.shape
+    if r >= h or c >= w:
+        return
+    if not propagation_mask[r, c]:
+        return
+    d = depth_map[r, c]
+    if math.isnan(d) or math.isinf(d) or d <= 0:
+        return
+    half = patch_size // 2
+    if r - half < 0 or r + half + 1 > h or c - half < 0 or c + half + 1 > w:
+        return
+    # backproject
+    x_cam = (c - ref_pose_K[0, 2]) * d / ref_pose_K[0, 0]
+    y_cam = (r - ref_pose_K[1, 2]) * d / ref_pose_K[1, 1]
+    point_3d_cam_0 = x_cam
+    point_3d_cam_1 = y_cam
+    point_3d_cam_2 = d
+    R_ref_inv = cuda.local.array((3, 3), dtype=np.float32)
+    for i in range(3):
+        for j in range(3):
+            R_ref_inv[i, j] = ref_pose_R[j, i]
+    point_3d_world_0 = (
+        R_ref_inv[0, 0] * (point_3d_cam_0 - ref_pose_T[0])
+        + R_ref_inv[0, 1] * (point_3d_cam_1 - ref_pose_T[1])
+        + R_ref_inv[0, 2] * (point_3d_cam_2 - ref_pose_T[2])
+    )
+    point_3d_world_1 = (
+        R_ref_inv[1, 0] * (point_3d_cam_0 - ref_pose_T[0])
+        + R_ref_inv[1, 1] * (point_3d_cam_1 - ref_pose_T[1])
+        + R_ref_inv[1, 2] * (point_3d_cam_2 - ref_pose_T[2])
+    )
+    point_3d_world_2 = (
+        R_ref_inv[2, 0] * (point_3d_cam_0 - ref_pose_T[0])
+        + R_ref_inv[2, 1] * (point_3d_cam_1 - ref_pose_T[1])
+        + R_ref_inv[2, 2] * (point_3d_cam_2 - ref_pose_T[2])
+    )
+    n = normal_map[r, c]
+    normal_world_0 = (
+        R_ref_inv[0, 0] * n[0] + R_ref_inv[0, 1] * n[1] + R_ref_inv[0, 2] * n[2]
+    )
+    normal_world_1 = (
+        R_ref_inv[1, 0] * n[0] + R_ref_inv[1, 1] * n[1] + R_ref_inv[1, 2] * n[2]
+    )
+    normal_world_2 = (
+        R_ref_inv[2, 0] * n[0] + R_ref_inv[2, 1] * n[1] + R_ref_inv[2, 2] * n[2]
+    )
+    valid_views = 0
+    H = cuda.local.array((3, 3), dtype=np.float32)
+    for i in range(src_K.shape[0]):
+        _compute_homography_cuda(
+            H,
+            ref_pose_K,
+            ref_pose_R,
+            ref_pose_T,
+            src_K[i],
+            src_R[i],
+            src_T[i],
+            point_3d_world_0,
+            point_3d_world_1,
+            point_3d_world_2,
+            normal_world_0,
+            normal_world_1,
+            normal_world_2,
+        )
+        invalid_H = False
+        for ii in range(3):
+            for jj in range(3):
+                valH = H[ii, jj]
+                if math.isnan(valH) or math.isinf(valH):
+                    invalid_H = True
+        if invalid_H:
+            continue
+        inside = 0
+        for pr in range(patch_size):
+            for pc in range(patch_size):
+                u_ref = c - half + pc
+                v_ref = r - half + pr
+                p0 = H[0, 0] * u_ref + H[0, 1] * v_ref + H[0, 2]
+                p1 = H[1, 0] * u_ref + H[1, 1] * v_ref + H[1, 2]
+                p2 = H[2, 0] * u_ref + H[2, 1] * v_ref + H[2, 2]
+                if abs(p2) < 1e-8:
+                    continue
+                u_src = p0 / p2
+                v_src = p1 / p2
+                src_h = src_images_gray[i].shape[0]
+                src_w = src_images_gray[i].shape[1]
+                if 0 <= v_src < src_h and 0 <= u_src < src_w:
+                    inside += 1
+        coverage = inside / float(patch_size * patch_size)
+        if coverage >= cov_required:
+            valid_views += 1
+    if valid_views < min_valid:
+        depth_map[r, c] = np.float32(np.nan)
+        cost_map[r, c] = np.float32(1.0)
+
+
 class DepthOptimization:
     def __init__(self, config):
         self.config = config
@@ -1655,6 +1952,9 @@ class DepthOptimization:
                     d_src_K,
                     d_src_R,
                     d_src_T,
+                    np.int32(config.USE_MEDIAN_TOP_K),
+                    np.float32(getattr(config, "MIN_WARP_COVERAGE_RATIO", 0.0)),
+                    np.int32(getattr(config, "MIN_VALID_VIEWS", 0)),
                 )
         else:
             # Bucket push directions kernel (use small bin arrays)
@@ -1687,6 +1987,9 @@ class DepthOptimization:
                     d_src_R,
                     d_src_T,
                     update_counter,
+                    np.int32(config.USE_MEDIAN_TOP_K),
+                    np.float32(getattr(self.config, "MIN_WARP_COVERAGE_RATIO", 0.0)),
+                    np.int32(getattr(self.config, "MIN_VALID_VIEWS", 0)),
                 )
 
         # Random search kernel
@@ -1712,6 +2015,9 @@ class DepthOptimization:
             10.0,
             d_depth_range_map,
             rng_states,
+            np.int32(config.USE_MEDIAN_TOP_K),
+            np.float32(getattr(self.config, "MIN_WARP_COVERAGE_RATIO", 0.0)),
+            np.int32(getattr(self.config, "MIN_VALID_VIEWS", 0)),
         )
         cuda.synchronize()
 
@@ -2401,6 +2707,7 @@ class DepthOptimization:
             # Propagation
             if self.config.CHOICED_PROPAGATION_METHOD == "checkerboard":
                 with time_block("GPU propagate checkerboard"):
+                    use_acmh = int(getattr(self.config, "ACMH_ENABLE", 0))
                     if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8:
                         neighbors_dr = np.array(
                             [-1, 1, 0, 0, -1, -1, 1, 1], dtype=np.int8
@@ -2413,30 +2720,111 @@ class DepthOptimization:
                         neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
                     d_neighbors_dr = cuda.to_device(neighbors_dr)
                     d_neighbors_dc = cuda.to_device(neighbors_dc)
-                    for j in [0, 1]:
-                        _propagate_spatial_one_color_cuda[
-                            blockspergrid, threadsperblock
-                        ](
-                            d_depth_map,
-                            d_normal_map,
-                            d_cost_map,
-                            d_propagation_mask,
-                            d_neighbors_dr,
-                            d_neighbors_dc,
-                            j,
-                            7,
-                            3,
-                            10,
-                            np.float32(self.config.ZNCC_EPSILON),
-                            d_ref_image_gray,
-                            d_ref_pose_K,
-                            d_ref_pose_R,
-                            d_ref_pose_T,
-                            d_src_images_gray,
-                            d_src_K,
-                            d_src_R,
-                            d_src_T,
+                    if use_acmh:
+                        # ACMH-H path
+                        H_count = int(getattr(self.config, "ACMH_NUM_HYPOTHESES", 2))
+                        joint_view_sel = int(
+                            getattr(self.config, "ACMH_JOINT_VIEW_SELECTION", 1)
                         )
+                        joint_top_k = int(
+                            getattr(
+                                self.config,
+                                "ACMH_JOINT_TOP_K",
+                                max(1, self.config.TOP_K_COSTS),
+                            )
+                        )
+                        use_median_top_k = np.int32(
+                            getattr(self.config, "USE_MEDIAN_TOP_K", 0)
+                        )
+                        cov_required = np.float32(
+                            getattr(self.config, "MIN_WARP_COVERAGE_RATIO", 0.0)
+                        )
+                        min_valid = np.int32(getattr(self.config, "MIN_VALID_VIEWS", 0))
+                        # H tensors on device
+                        d_depth_H = cuda.device_array((H_count, h, w), dtype=np.float32)
+                        d_normal_H = cuda.device_array(
+                            (H_count, h, w, 3), dtype=np.float32
+                        )
+                        d_cost_H = cuda.device_array((H_count, h, w), dtype=np.float32)
+                        # init slot0 from current maps
+                        cuda.to_device(d_depth_map.copy_to_host(), to=d_depth_H[0])
+                        cuda.to_device(d_normal_map.copy_to_host(), to=d_normal_H[0])
+                        cuda.to_device(d_cost_map.copy_to_host(), to=d_cost_H[0])
+                        for s in range(1, H_count):
+                            cuda.to_device(d_depth_map.copy_to_host(), to=d_depth_H[s])
+                            cuda.to_device(
+                                d_normal_map.copy_to_host(), to=d_normal_H[s]
+                            )
+                            cuda.to_device(d_cost_map.copy_to_host(), to=d_cost_H[s])
+                        for j in [0, 1]:
+                            _propagate_spatial_one_color_acmhH_cuda[
+                                blockspergrid, threadsperblock
+                            ](
+                                d_depth_H,
+                                d_normal_H,
+                                d_cost_H,
+                                np.int32(H_count),
+                                d_propagation_mask,
+                                d_neighbors_dr,
+                                d_neighbors_dc,
+                                j,
+                                np.int32(self.config.PATCHMATCH_PATCH_SIZE),
+                                np.int32(self.config.TOP_K_COSTS),
+                                np.int32(self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR),
+                                np.float32(self.config.ZNCC_EPSILON),
+                                d_ref_image_gray,
+                                d_ref_pose_K,
+                                d_ref_pose_R,
+                                d_ref_pose_T,
+                                d_src_images_gray,
+                                d_src_K,
+                                d_src_R,
+                                d_src_T,
+                                np.int32(joint_view_sel),
+                                np.int32(joint_top_k),
+                                use_median_top_k,
+                                cov_required,
+                                min_valid,
+                            )
+                        # reflect best slot (0) back
+                        cuda.to_device(d_depth_H[0].copy_to_host(), to=d_depth_map)
+                        cuda.to_device(d_normal_H[0].copy_to_host(), to=d_normal_map)
+                        cuda.to_device(d_cost_H[0].copy_to_host(), to=d_cost_map)
+                    else:
+                        use_median_top_k = np.int32(
+                            getattr(self.config, "USE_MEDIAN_TOP_K", 0)
+                        )
+                        cov_required = np.float32(
+                            getattr(self.config, "MIN_WARP_COVERAGE_RATIO", 0.0)
+                        )
+                        min_valid = np.int32(getattr(self.config, "MIN_VALID_VIEWS", 0))
+                        for j in [0, 1]:
+                            _propagate_spatial_one_color_cuda[
+                                blockspergrid, threadsperblock
+                            ](
+                                d_depth_map,
+                                d_normal_map,
+                                d_cost_map,
+                                d_propagation_mask,
+                                d_neighbors_dr,
+                                d_neighbors_dc,
+                                j,
+                                np.int32(self.config.PATCHMATCH_PATCH_SIZE),
+                                np.int32(self.config.TOP_K_COSTS),
+                                np.int32(self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR),
+                                np.float32(self.config.ZNCC_EPSILON),
+                                d_ref_image_gray,
+                                d_ref_pose_K,
+                                d_ref_pose_R,
+                                d_ref_pose_T,
+                                d_src_images_gray,
+                                d_src_K,
+                                d_src_R,
+                                d_src_T,
+                                use_median_top_k,
+                                cov_required,
+                                min_valid,
+                            )
             else:
                 # Priority/bucket propagation path (GPU native)
                 if i > 0:
@@ -2508,6 +2896,23 @@ class DepthOptimization:
                                             d_src_R,
                                             d_src_T,
                                             d_update_counter,
+                                            np.int32(
+                                                getattr(
+                                                    self.config, "USE_MEDIAN_TOP_K", 0
+                                                )
+                                            ),
+                                            np.float32(
+                                                getattr(
+                                                    self.config,
+                                                    "MIN_WARP_COVERAGE_RATIO",
+                                                    0.0,
+                                                )
+                                            ),
+                                            np.int32(
+                                                getattr(
+                                                    self.config, "MIN_VALID_VIEWS", 0
+                                                )
+                                            ),
                                         )
                                         cuda.synchronize()
                                     updates = d_update_counter.copy_to_host()[0]
@@ -2544,8 +2949,35 @@ class DepthOptimization:
                     self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
                     d_depth_range_map,
                     rng_states,
+                    np.int32(getattr(self.config, "USE_MEDIAN_TOP_K", 0)),
+                    np.float32(getattr(self.config, "MIN_WARP_COVERAGE_RATIO", 0.0)),
+                    np.int32(getattr(self.config, "MIN_VALID_VIEWS", 0)),
                 )
             cuda.synchronize()
+
+            # Invalidate by valid views gating (turn to NaN -> black in visualization)
+            cov_required = np.float32(
+                getattr(self.config, "MIN_WARP_COVERAGE_RATIO", 0.0)
+            )
+            min_valid = np.int32(getattr(self.config, "MIN_VALID_VIEWS", 0))
+            if cov_required > 0 and min_valid > 0:
+                _invalidate_by_validview_cuda[blockspergrid, threadsperblock](
+                    d_depth_map,
+                    d_normal_map,
+                    d_cost_map,
+                    d_propagation_mask,
+                    np.int32(self.config.PATCHMATCH_PATCH_SIZE),
+                    d_ref_pose_K,
+                    d_ref_pose_R,
+                    d_ref_pose_T,
+                    d_src_images_gray,
+                    d_src_K,
+                    d_src_R,
+                    d_src_T,
+                    cov_required,
+                    min_valid,
+                )
+                cuda.synchronize()
 
             # Mark cumulative timer start after first successful kernel run (exclude initial JIT)
             if self._gpu_cum_start_nojit is None:

@@ -137,7 +137,9 @@ def _evaluate_cost_jit(
     normal_world = R_ref_inv @ normal
     patch_ref = ref_image_gray[r - half : r + half + 1, c - half : c + half + 1]
     num_neighbors = src_images_gray.shape[0]
-    costs = np.zeros(num_neighbors, dtype=np.float32)
+    costs = np.ones(num_neighbors, dtype=np.float32)
+    valid = np.zeros(num_neighbors, dtype=np.uint8)
+    cov_required = getattr(config, "MIN_WARP_COVERAGE_RATIO", 0.0)
     for i in range(num_neighbors):
         H = _compute_homography_jit(
             ref_pose_K,
@@ -153,6 +155,7 @@ def _evaluate_cost_jit(
             costs[i] = 1.0
             continue
         warped_patch = np.zeros_like(patch_ref, dtype=np.float32)
+        inside = 0
         for pr in range(patch_size):
             for pc in range(patch_size):
                 u_ref, v_ref = c - half + pc, r - half + pr
@@ -162,13 +165,28 @@ def _evaluate_cost_jit(
                     warped_patch[pr, pc] = 0.0
                     continue
                 u_src, v_src = p_src_h[0] / p_src_h[2], p_src_h[1] / p_src_h[2]
-                warped_patch[pr, pc] = _bilinear_interpolate_jit(
-                    src_images_gray[i], v_src, u_src
-                )
-        costs[i] = _compute_weighted_zncc_cost_jit(
-            patch_ref, warped_patch, adaptive_weight_sigma_color, zncc_epsilon
-        )
+                if (
+                    0 <= v_src < src_images_gray[i].shape[0]
+                    and 0 <= u_src < src_images_gray[i].shape[1]
+                ):
+                    warped_patch[pr, pc] = _bilinear_interpolate_jit(
+                        src_images_gray[i], v_src, u_src
+                    )
+                    inside += 1
+                else:
+                    warped_patch[pr, pc] = 0.0
+        coverage = inside / float(patch_size * patch_size)
+        if coverage >= cov_required:
+            valid[i] = 1
+            costs[i] = _compute_weighted_zncc_cost_jit(
+                patch_ref, warped_patch, adaptive_weight_sigma_color, zncc_epsilon
+            )
+        else:
+            costs[i] = 1.0
 
+    min_valid = int(getattr(config, "MIN_VALID_VIEWS", 0))
+    if np.sum(valid) < min_valid:
+        return 1.0
     costs = np.sort(costs)
     top_k = min(top_k_costs, len(costs))
     if getattr(config, "USE_MEDIAN_TOP_K", 0):
@@ -652,6 +670,620 @@ def _initialize_normals_from_depth_jit(depth_map, K):
     return normals
 
 
+@njit(parallel=True, fastmath=True)
+def _compute_valid_view_counts_jit(
+    depth_map,
+    normal_map,
+    patch_size,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_K,
+    src_R,
+    src_T,
+    cov_required,
+):
+    h, w = depth_map.shape
+    half = patch_size // 2
+    counts = np.zeros((h, w), dtype=np.int32)
+    for r in prange(half, h - half):
+        for c in range(half, w - half):
+            d = depth_map[r, c]
+            if not np.isfinite(d) or d <= 0:
+                continue
+            n = normal_map[r, c]
+            x_cam = (c - ref_pose_K[0, 2]) * d / ref_pose_K[0, 0]
+            y_cam = (r - ref_pose_K[1, 2]) * d / ref_pose_K[1, 1]
+            point_3d_cam = np.array([x_cam, y_cam, d], dtype=np.float32)
+            R_ref_inv = ref_pose_R.T
+            point_3d_world = R_ref_inv @ (point_3d_cam - ref_pose_T)
+            normal_world = R_ref_inv @ n
+            valid_views = 0
+            for i in range(src_K.shape[0]):
+                H = _compute_homography_jit(
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_K[i],
+                    src_R[i],
+                    src_T[i],
+                    point_3d_world,
+                    normal_world,
+                )
+                if np.isnan(H).any() or np.isinf(H).any():
+                    continue
+                inside = 0
+                for pr in range(patch_size):
+                    for pc in range(patch_size):
+                        u_ref, v_ref = c - half + pc, r - half + pr
+                        p_ref_h = np.array([u_ref, v_ref, 1.0], dtype=np.float32)
+                        p_src_h = H @ p_ref_h
+                        if abs(p_src_h[2]) < 1e-8:
+                            continue
+                        u_src, v_src = p_src_h[0] / p_src_h[2], p_src_h[1] / p_src_h[2]
+                        if (
+                            0 <= v_src < depth_map.shape[0]
+                            and 0 <= u_src < depth_map.shape[1]
+                        ):
+                            inside += 1
+                coverage = inside / float(patch_size * patch_size)
+                if coverage >= cov_required:
+                    valid_views += 1
+            counts[r, c] = valid_views
+    return counts
+
+
+@njit(parallel=True, fastmath=True)
+def _propagate_spatial_one_color_acmh_jit(
+    depth_map_best,
+    normal_map_best,
+    cost_map_best,
+    depth_map_second,
+    normal_map_second,
+    cost_map_second,
+    propagation_mask,
+    neighbors_dr,
+    neighbors_dc,
+    color,
+    r_min,
+    r_max,
+    c_min,
+    c_max,
+    patch_size,
+    top_k_costs,
+    adaptive_weight_sigma_color,
+    zncc_epsilon,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
+):
+    """
+    ACMH-lite: 各画素で2仮説（best/second）を保持し、近傍best/secondと現仮説から最良2つを選択。
+    """
+    h, w = depth_map_best.shape
+    max_candidates = 10  # current best/second (2) + 4 neighbors * 2 = 10
+    for r in prange(max(1, r_min), min(h - 1, r_max)):
+        for c in range(max(1, c_min), min(w - 1, c_max)):
+            if not propagation_mask[r, c]:
+                continue
+            if (r + c) % 2 != color:
+                continue
+            # 無効ピクセルは処理しない
+            d0c = depth_map_best[r, c]
+            d1c = depth_map_second[r, c]
+            if not (np.isfinite(d0c) or np.isfinite(d1c)):
+                continue
+            # 候補バッファ
+            cand_costs = np.full(max_candidates, np.inf, dtype=np.float32)
+            cand_depths = np.full(max_candidates, np.nan, dtype=np.float32)
+            cand_normals = np.zeros((max_candidates, 3), dtype=np.float32)
+            idx = 0
+
+            # 現在のbest/secondを候補に追加
+            d0 = depth_map_best[r, c]
+            n0 = normal_map_best[r, c]
+            if np.isfinite(d0) and d0 > 0:
+                cand_depths[idx] = d0
+                cand_normals[idx, 0] = n0[0]
+                cand_normals[idx, 1] = n0[1]
+                cand_normals[idx, 2] = n0[2]
+                cand_costs[idx] = cost_map_best[r, c]
+                idx += 1
+            d1 = depth_map_second[r, c]
+            n1 = normal_map_second[r, c]
+            if np.isfinite(d1) and d1 > 0 and idx < max_candidates:
+                cand_depths[idx] = d1
+                cand_normals[idx, 0] = n1[0]
+                cand_normals[idx, 1] = n1[1]
+                cand_normals[idx, 2] = n1[2]
+                cand_costs[idx] = cost_map_second[r, c]
+                idx += 1
+
+            # 近傍のbest/second仮説をターゲット(r,c)で評価して候補に追加
+            for k in range(len(neighbors_dr)):
+                nr = r + neighbors_dr[k]
+                nc = c + neighbors_dc[k]
+                if not (0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc]):
+                    continue
+                # neighbor best
+                nd = depth_map_best[nr, nc]
+                if np.isfinite(nd) and nd > 0 and idx < max_candidates:
+                    nn = normal_map_best[nr, nc]
+                    cst = _evaluate_cost_jit(
+                        r,
+                        c,
+                        nd,
+                        nn,
+                        patch_size,
+                        ref_image_gray,
+                        ref_pose_K,
+                        ref_pose_R,
+                        ref_pose_T,
+                        src_images_gray,
+                        src_K,
+                        src_R,
+                        src_T,
+                        top_k_costs,
+                        adaptive_weight_sigma_color,
+                        np.float32(zncc_epsilon),
+                    )
+                    cand_depths[idx] = nd
+                    cand_normals[idx, 0] = nn[0]
+                    cand_normals[idx, 1] = nn[1]
+                    cand_normals[idx, 2] = nn[2]
+                    cand_costs[idx] = cst
+                    idx += 1
+                # neighbor second
+                nd2 = depth_map_second[nr, nc]
+                if np.isfinite(nd2) and nd2 > 0 and idx < max_candidates:
+                    nn2 = normal_map_second[nr, nc]
+                    cst2 = _evaluate_cost_jit(
+                        r,
+                        c,
+                        nd2,
+                        nn2,
+                        patch_size,
+                        ref_image_gray,
+                        ref_pose_K,
+                        ref_pose_R,
+                        ref_pose_T,
+                        src_images_gray,
+                        src_K,
+                        src_R,
+                        src_T,
+                        top_k_costs,
+                        adaptive_weight_sigma_color,
+                        np.float32(zncc_epsilon),
+                    )
+                    cand_depths[idx] = nd2
+                    cand_normals[idx, 0] = nn2[0]
+                    cand_normals[idx, 1] = nn2[1]
+                    cand_normals[idx, 2] = nn2[2]
+                    cand_costs[idx] = cst2
+                    idx += 1
+
+            # cand_costsから最良2つを選択
+            best_i = -1
+            second_i = -1
+            best_c = np.float32(np.inf)
+            second_c = np.float32(np.inf)
+            for t in range(idx):
+                cst = cand_costs[t]
+                if cst < best_c:
+                    second_c = best_c
+                    second_i = best_i
+                    best_c = cst
+                    best_i = t
+                elif cst < second_c:
+                    second_c = cst
+                    second_i = t
+
+            # 更新（候補が存在する場合のみ）
+            if best_i >= 0:
+                depth_map_best[r, c] = cand_depths[best_i]
+                normal_map_best[r, c, 0] = cand_normals[best_i, 0]
+                normal_map_best[r, c, 1] = cand_normals[best_i, 1]
+                normal_map_best[r, c, 2] = cand_normals[best_i, 2]
+                cost_map_best[r, c] = best_c
+            if second_i >= 0:
+                depth_map_second[r, c] = cand_depths[second_i]
+                normal_map_second[r, c, 0] = cand_normals[second_i, 0]
+                normal_map_second[r, c, 1] = cand_normals[second_i, 1]
+                normal_map_second[r, c, 2] = cand_normals[second_i, 2]
+                cost_map_second[r, c] = second_c
+
+
+@njit(parallel=True, fastmath=True)
+def _propagate_spatial_one_color_acmhH_jit(
+    depth_H,
+    normal_H,
+    cost_H,
+    H_count,
+    propagation_mask,
+    neighbors_dr,
+    neighbors_dc,
+    color,
+    r_min,
+    r_max,
+    c_min,
+    c_max,
+    patch_size,
+    top_k_costs,
+    adaptive_weight_sigma_color,
+    zncc_epsilon,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
+    joint_view_selection,
+    joint_top_k,
+    use_median_top_k,
+):
+    h, w = depth_H.shape[1], depth_H.shape[2]
+    max_neighbors = len(neighbors_dr)
+    max_candidates = H_count + H_count * max_neighbors
+    for r in prange(max(1, r_min), min(h - 1, r_max)):
+        for c in range(max(1, c_min), min(w - 1, c_max)):
+            if not propagation_mask[r, c]:
+                continue
+            if (r + c) % 2 != color:
+                continue
+            # 無効ピクセル（全Hが非有限または<=0）の場合は処理しない
+            has_valid = False
+            for s in range(H_count):
+                if np.isfinite(depth_H[s, r, c]) and depth_H[s, r, c] > 0:
+                    has_valid = True
+                    break
+            if not has_valid:
+                continue
+            # アンカー仮説（最良のスロット）
+            best_slot = 0
+            best_cost = cost_H[0, r, c]
+            for s in range(1, H_count):
+                cs = cost_H[s, r, c]
+                if cs < best_cost:
+                    best_cost = cs
+                    best_slot = s
+
+            # joint view selection
+            selected = np.empty(joint_top_k, dtype=np.int32)
+            selected_count = 0
+            if joint_view_selection:
+                pv_costs = _evaluate_per_view_costs_jit(
+                    r,
+                    c,
+                    depth_H[best_slot, r, c],
+                    normal_H[best_slot, r, c],
+                    patch_size,
+                    ref_image_gray,
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_images_gray,
+                    src_K,
+                    src_R,
+                    src_T,
+                    adaptive_weight_sigma_color,
+                    zncc_epsilon,
+                )
+                sel = _select_top_k_indices_jit(pv_costs, joint_top_k)
+                selected_count = joint_top_k
+                for t in range(joint_top_k):
+                    selected[t] = sel[t]
+
+            cand_costs = np.full(max_candidates, np.inf, dtype=np.float32)
+            cand_depths = np.full(max_candidates, np.nan, dtype=np.float32)
+            cand_normals = np.zeros((max_candidates, 3), dtype=np.float32)
+            idx = 0
+            # 現在のH仮説
+            for s in range(H_count):
+                dcur = depth_H[s, r, c]
+                if not (np.isfinite(dcur) and dcur > 0):
+                    continue
+                cand_depths[idx] = dcur
+                nn = normal_H[s, r, c]
+                cand_normals[idx, 0] = nn[0]
+                cand_normals[idx, 1] = nn[1]
+                cand_normals[idx, 2] = nn[2]
+                if joint_view_selection:
+                    cand_costs[idx] = _evaluate_cost_on_selected_views_jit(
+                        r,
+                        c,
+                        cand_depths[idx],
+                        nn,
+                        patch_size,
+                        ref_image_gray,
+                        ref_pose_K,
+                        ref_pose_R,
+                        ref_pose_T,
+                        src_images_gray,
+                        src_K,
+                        src_R,
+                        src_T,
+                        selected,
+                        selected_count,
+                        adaptive_weight_sigma_color,
+                        zncc_epsilon,
+                        use_median_top_k,
+                    )
+                else:
+                    cand_costs[idx] = _evaluate_cost_jit(
+                        r,
+                        c,
+                        cand_depths[idx],
+                        nn,
+                        patch_size,
+                        ref_image_gray,
+                        ref_pose_K,
+                        ref_pose_R,
+                        ref_pose_T,
+                        src_images_gray,
+                        src_K,
+                        src_R,
+                        src_T,
+                        top_k_costs,
+                        adaptive_weight_sigma_color,
+                        zncc_epsilon,
+                    )
+                idx += 1
+
+            # 近傍のH仮説
+            for k in range(max_neighbors):
+                nr = r + neighbors_dr[k]
+                nc = c + neighbors_dc[k]
+                if not (0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc]):
+                    continue
+                for s in range(H_count):
+                    if idx >= max_candidates:
+                        break
+                    nd = depth_H[s, nr, nc]
+                    if not (np.isfinite(nd) and nd > 0):
+                        continue
+                    nn = normal_H[s, nr, nc]
+                    cand_depths[idx] = nd
+                    cand_normals[idx, 0] = nn[0]
+                    cand_normals[idx, 1] = nn[1]
+                    cand_normals[idx, 2] = nn[2]
+                    if joint_view_selection:
+                        cand_costs[idx] = _evaluate_cost_on_selected_views_jit(
+                            r,
+                            c,
+                            nd,
+                            nn,
+                            patch_size,
+                            ref_image_gray,
+                            ref_pose_K,
+                            ref_pose_R,
+                            ref_pose_T,
+                            src_images_gray,
+                            src_K,
+                            src_R,
+                            src_T,
+                            selected,
+                            selected_count,
+                            adaptive_weight_sigma_color,
+                            zncc_epsilon,
+                            use_median_top_k,
+                        )
+                    else:
+                        cand_costs[idx] = _evaluate_cost_jit(
+                            r,
+                            c,
+                            nd,
+                            nn,
+                            patch_size,
+                            ref_image_gray,
+                            ref_pose_K,
+                            ref_pose_R,
+                            ref_pose_T,
+                            src_images_gray,
+                            src_K,
+                            src_R,
+                            src_T,
+                            top_k_costs,
+                            adaptive_weight_sigma_color,
+                            zncc_epsilon,
+                        )
+                    idx += 1
+
+            # candから最良Hを選択
+            for s in range(H_count):
+                best_i = -1
+                best_c = np.float32(np.inf)
+                for t in range(idx):
+                    cst = cand_costs[t]
+                    if cst < best_c:
+                        best_c = cst
+                        best_i = t
+                if best_i >= 0:
+                    depth_H[s, r, c] = cand_depths[best_i]
+                    normal_H[s, r, c, 0] = cand_normals[best_i, 0]
+                    normal_H[s, r, c, 1] = cand_normals[best_i, 1]
+                    normal_H[s, r, c, 2] = cand_normals[best_i, 2]
+                    cost_H[s, r, c] = best_c
+                    cand_costs[best_i] = np.float32(np.inf)
+
+
+@njit(fastmath=True)
+def _evaluate_per_view_costs_jit(
+    r,
+    c,
+    depth,
+    normal,
+    patch_size,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
+    adaptive_weight_sigma_color,
+    zncc_epsilon,
+):
+    h, w = ref_image_gray.shape
+    half = patch_size // 2
+    costs = np.ones(src_images_gray.shape[0], dtype=np.float32)
+    if r - half < 0 or r + half + 1 > h or c - half < 0 or c + half + 1 > w:
+        return costs
+    x_cam = (c - ref_pose_K[0, 2]) * depth / ref_pose_K[0, 0]
+    y_cam = (r - ref_pose_K[1, 2]) * depth / ref_pose_K[1, 1]
+    point_3d_cam = np.array([x_cam, y_cam, depth], dtype=np.float32)
+    R_ref_inv = ref_pose_R.T
+    point_3d_world = R_ref_inv @ (point_3d_cam - ref_pose_T)
+    normal_world = R_ref_inv @ normal
+    patch_ref = ref_image_gray[r - half : r + half + 1, c - half : c + half + 1]
+    for i in range(src_images_gray.shape[0]):
+        H = _compute_homography_jit(
+            ref_pose_K,
+            ref_pose_R,
+            ref_pose_T,
+            src_K[i],
+            src_R[i],
+            src_T[i],
+            point_3d_world,
+            normal_world,
+        )
+        if np.isnan(H).any() or np.isinf(H).any():
+            costs[i] = 1.0
+            continue
+        warped_patch = np.zeros_like(patch_ref, dtype=np.float32)
+        for pr in range(patch_size):
+            for pc in range(patch_size):
+                u_ref, v_ref = c - half + pc, r - half + pr
+                p_ref_h = np.array([u_ref, v_ref, 1.0], dtype=np.float32)
+                p_src_h = H @ p_ref_h
+                if abs(p_src_h[2]) < 1e-8:
+                    warped_patch[pr, pc] = 0.0
+                    continue
+                u_src, v_src = p_src_h[0] / p_src_h[2], p_src_h[1] / p_src_h[2]
+                warped_patch[pr, pc] = _bilinear_interpolate_jit(
+                    src_images_gray[i], v_src, u_src
+                )
+        costs[i] = _compute_weighted_zncc_cost_jit(
+            patch_ref, warped_patch, adaptive_weight_sigma_color, zncc_epsilon
+        )
+    return costs
+
+
+@njit(fastmath=True)
+def _select_top_k_indices_jit(costs, top_k):
+    n = costs.shape[0]
+    k = top_k if top_k < n else n
+    selected = np.full(k, -1, dtype=np.int32)
+    used = np.zeros(n, dtype=np.uint8)
+    for t in range(k):
+        best_i = -1
+        best_c = np.float32(np.inf)
+        for i in range(n):
+            if used[i] == 1:
+                continue
+            cst = costs[i]
+            if cst < best_c:
+                best_c = cst
+                best_i = i
+        if best_i >= 0:
+            selected[t] = best_i
+            used[best_i] = 1
+    return selected
+
+
+@njit(fastmath=True)
+def _evaluate_cost_on_selected_views_jit(
+    r,
+    c,
+    depth,
+    normal,
+    patch_size,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
+    selected_indices,
+    selected_count,
+    adaptive_weight_sigma_color,
+    zncc_epsilon,
+    use_median_top_k,
+):
+    h, w = ref_image_gray.shape
+    half = patch_size // 2
+    if r - half < 0 or r + half + 1 > h or c - half < 0 or c + half + 1 > w:
+        return 1.0
+    x_cam = (c - ref_pose_K[0, 2]) * depth / ref_pose_K[0, 0]
+    y_cam = (r - ref_pose_K[1, 2]) * depth / ref_pose_K[1, 1]
+    point_3d_cam = np.array([x_cam, y_cam, depth], dtype=np.float32)
+    R_ref_inv = ref_pose_R.T
+    point_3d_world = R_ref_inv @ (point_3d_cam - ref_pose_T)
+    normal_world = R_ref_inv @ normal
+    patch_ref = ref_image_gray[r - half : r + half + 1, c - half : c + half + 1]
+    vals = np.empty(selected_count, dtype=np.float32)
+    count = 0
+    for t in range(selected_count):
+        i = selected_indices[t]
+        if i < 0:
+            continue
+        H = _compute_homography_jit(
+            ref_pose_K,
+            ref_pose_R,
+            ref_pose_T,
+            src_K[i],
+            src_R[i],
+            src_T[i],
+            point_3d_world,
+            normal_world,
+        )
+        if np.isnan(H).any() or np.isinf(H).any():
+            vals[count] = 1.0
+            count += 1
+            continue
+        warped_patch = np.zeros_like(patch_ref, dtype=np.float32)
+        for pr in range(patch_size):
+            for pc in range(patch_size):
+                u_ref, v_ref = c - half + pc, r - half + pr
+                p_ref_h = np.array([u_ref, v_ref, 1.0], dtype=np.float32)
+                p_src_h = H @ p_ref_h
+                if abs(p_src_h[2]) < 1e-8:
+                    warped_patch[pr, pc] = 0.0
+                    continue
+                u_src, v_src = p_src_h[0] / p_src_h[2], p_src_h[1] / p_src_h[2]
+                warped_patch[pr, pc] = _bilinear_interpolate_jit(
+                    src_images_gray[i], v_src, u_src
+                )
+        vals[count] = _compute_weighted_zncc_cost_jit(
+            patch_ref, warped_patch, adaptive_weight_sigma_color, zncc_epsilon
+        )
+        count += 1
+    if count == 0:
+        return 1.0
+    if use_median_top_k:
+        # 簡易ソートで中央値
+        for i in range(count - 1):
+            for j in range(i + 1, count):
+                if vals[j] < vals[i]:
+                    tmp = vals[i]
+                    vals[i] = vals[j]
+                    vals[j] = tmp
+        mid = count // 2
+        if count % 2 == 1:
+            return vals[mid]
+        return 0.5 * (vals[mid - 1] + vals[mid])
+    return np.mean(vals[:count])
+
+
 class DepthOptimization:
     def __init__(self, config):
         self.config = config
@@ -691,13 +1323,13 @@ class DepthOptimization:
         x_cam = (c - K_ref[0, 2]) * depth / K_ref[0, 0]
         y_cam = (r - K_ref[1, 2]) * depth / K_ref[1, 1]
         point_3d_cam = np.array([x_cam, y_cam, depth])
-        print(
-            f"The coordinates of the pixel of interest in the camera coordinate system are {point_3d_cam}"
-        )
+        if not np.isfinite(point_3d_cam).all():
+            logging.warning("Skip debug visualization due to invalid point_3d_cam")
+            return
         point_3d_world = R_ref.T @ (point_3d_cam - T_ref)
-        print(
-            f"The coordinates of the pixel of interest in the world coordinate system are {point_3d_world}"
-        )
+        if not np.isfinite(point_3d_world).all():
+            logging.warning("Skip debug visualization due to invalid point_3d_world")
+            return
         normal_world = R_ref.T @ normal
 
         ref_image_with_point = ref_image.copy()
@@ -709,6 +1341,15 @@ class DepthOptimization:
             2,
         )
         cv2.circle(ref_image_with_point, (c, r), 5, (0, 255, 0), -1)
+        if (
+            ref_image_with_point.size == 0
+            or full_image_display_size[0] <= 0
+            or full_image_display_size[1] <= 0
+        ):
+            logging.warning(
+                "Skip debug visualization due to empty ref image or invalid size"
+            )
+            return
         ref_image_with_point_display = cv2.resize(
             ref_image_with_point,
             full_image_display_size,
@@ -724,7 +1365,13 @@ class DepthOptimization:
             2,
         )
 
+        if r - half < 0 or r + half + 1 > h or c - half < 0 or c + half + 1 > w:
+            logging.warning("Skip debug visualization due to out-of-bounds patch")
+            return
         ref_patch = ref_image[r - half : r + half + 1, c - half : c + half + 1]
+        if ref_patch.size == 0:
+            logging.warning("Skip debug visualization due to empty ref patch")
+            return
         ref_patch_display = cv2.resize(
             ref_patch, patch_display_size, interpolation=cv2.INTER_NEAREST
         )
@@ -755,6 +1402,9 @@ class DepthOptimization:
             warped_patch = warped_image[
                 r - half : r + half + 1, c - half : c + half + 1
             ]
+            if warped_patch.size == 0:
+                logging.warning("Skip one neighbor warped patch due to empty slice")
+                continue
             warped_patch_display = cv2.resize(
                 warped_patch, patch_display_size, interpolation=cv2.INTER_NEAREST
             )
@@ -946,40 +1596,112 @@ class DepthOptimization:
 
             # --- 1. 空間伝播 ---
             if self.config.CHOICED_PROPAGATION_METHOD == "checkerboard":
-                logging.info("Starting checkerboard propagation ...")
-                if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8:
-                    neighbors_dr = np.array([-1, 1, 0, 0, -1, -1, 1, 1], dtype=np.int8)
-                    neighbors_dc = np.array([0, 0, -1, 1, -1, 1, -1, 1], dtype=np.int8)
-                else:
+                use_acmh = getattr(self.config, "ACMH_ENABLE", False)
+                if use_acmh:
+                    logging.info("Starting checkerboard propagation (ACMH-lite) ...")
+                    # 4近傍固定（ACMHは4近傍運用）
                     neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
                     neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
-                with time_block("CPU propagate checkerboard"):
-                    for j in [0, 1]:
-                        _propagate_spatial_one_color_jit(
-                            depth_map,
-                            normal_map,
-                            cost_map,
-                            propagation_mask,
-                            neighbors_dr,
-                            neighbors_dc,
-                            j,
-                            0,
-                            h,
-                            0,
-                            w,
-                            self.config.PATCHMATCH_PATCH_SIZE,
-                            self.config.TOP_K_COSTS,
-                            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                            np.float32(self.config.ZNCC_EPSILON),
-                            ref_image_gray,
-                            ref_pose_K,
-                            ref_pose_R,
-                            ref_pose_T,
-                            src_images_gray,
-                            src_K,
-                            src_R,
-                            src_T,
+                    H_count = int(getattr(self.config, "ACMH_NUM_HYPOTHESES", 2))
+                    joint_view_sel = int(
+                        getattr(self.config, "ACMH_JOINT_VIEW_SELECTION", 1)
+                    )
+                    joint_top_k = int(
+                        getattr(
+                            self.config,
+                            "ACMH_JOINT_TOP_K",
+                            max(1, self.config.TOP_K_COSTS),
                         )
+                    )
+                    use_median_top_k = int(getattr(self.config, "USE_MEDIAN_TOP_K", 0))
+
+                    # H仮説テンソル [H, H, W], [H, H, W, 3], [H, H, W]
+                    depth_H = np.zeros((H_count, h, w), dtype=np.float32)
+                    normal_H = np.zeros((H_count, h, w, 3), dtype=np.float32)
+                    cost_H = np.full((H_count, h, w), np.inf, dtype=np.float32)
+                    # 初期化: スロット0に既存best、他は同値
+                    depth_H[0] = depth_map
+                    normal_H[0] = normal_map
+                    cost_H[0] = cost_map
+                    for s in range(1, H_count):
+                        depth_H[s] = depth_map
+                        normal_H[s] = normal_map
+                        cost_H[s] = cost_map
+
+                    with time_block("CPU propagate checkerboard (ACMH-H)"):
+                        for j in [0, 1]:
+                            _propagate_spatial_one_color_acmhH_jit(
+                                depth_H,
+                                normal_H,
+                                cost_H,
+                                H_count,
+                                propagation_mask,
+                                neighbors_dr,
+                                neighbors_dc,
+                                j,
+                                0,
+                                h,
+                                0,
+                                w,
+                                self.config.PATCHMATCH_PATCH_SIZE,
+                                self.config.TOP_K_COSTS,
+                                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                                np.float32(self.config.ZNCC_EPSILON),
+                                ref_image_gray,
+                                ref_pose_K,
+                                ref_pose_R,
+                                ref_pose_T,
+                                src_images_gray,
+                                src_K,
+                                src_R,
+                                src_T,
+                                joint_view_sel,
+                                joint_top_k,
+                                use_median_top_k,
+                            )
+                    # bestスロットをdepth_map等に反映
+                    depth_map[:] = depth_H[0]
+                    normal_map[:] = normal_H[0]
+                    cost_map[:] = cost_H[0]
+                else:
+                    logging.info("Starting checkerboard propagation ...")
+                    if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8:
+                        neighbors_dr = np.array(
+                            [-1, 1, 0, 0, -1, -1, 1, 1], dtype=np.int8
+                        )
+                        neighbors_dc = np.array(
+                            [0, 0, -1, 1, -1, 1, -1, 1], dtype=np.int8
+                        )
+                    else:
+                        neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+                        neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
+                    with time_block("CPU propagate checkerboard"):
+                        for j in [0, 1]:
+                            _propagate_spatial_one_color_jit(
+                                depth_map,
+                                normal_map,
+                                cost_map,
+                                propagation_mask,
+                                neighbors_dr,
+                                neighbors_dc,
+                                j,
+                                0,
+                                h,
+                                0,
+                                w,
+                                self.config.PATCHMATCH_PATCH_SIZE,
+                                self.config.TOP_K_COSTS,
+                                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                                np.float32(self.config.ZNCC_EPSILON),
+                                ref_image_gray,
+                                ref_pose_K,
+                                ref_pose_R,
+                                ref_pose_T,
+                                src_images_gray,
+                                src_K,
+                                src_R,
+                                src_T,
+                            )
 
             elif self.config.CHOICED_PROPAGATION_METHOD == "priority":
                 if i > 0:
@@ -1034,8 +1756,38 @@ class DepthOptimization:
                     depth_range_map,
                 )
 
-            if self.config.DEBUG_PATCH_MATCH_VISUALIZATION:
-                y_debug, x_debug = self.config.DEBUG_PIXEL_COORDS
+            # --- 2.5. 被覆率・有効ビュー数に基づく無効化（黒表示用にNaNへ） ---
+            try:
+                cov_required = float(
+                    getattr(self.config, "MIN_WARP_COVERAGE_RATIO", 0.0)
+                )
+                min_valid = int(getattr(self.config, "MIN_VALID_VIEWS", 0))
+                if cov_required > 0.0 and min_valid > 0:
+                    counts = _compute_valid_view_counts_jit(
+                        depth_map,
+                        normal_map,
+                        self.config.PATCHMATCH_PATCH_SIZE,
+                        ref_pose_K,
+                        ref_pose_R,
+                        ref_pose_T,
+                        src_K,
+                        src_R,
+                        src_T,
+                        np.float32(cov_required),
+                    )
+                    invalid_mask_iter = counts < min_valid
+                    depth_map[invalid_mask_iter] = np.float32(np.nan)
+                    cost_map[invalid_mask_iter] = np.float32(1.0)
+            except Exception:
+                pass
+
+            if getattr(
+                self.config,
+                "DEBUG_PATCH_MATCH_VISUALIZATION",
+                getattr(self.config, "DEBUG_VISUALIZATION", False),
+            ):
+                yx = getattr(self.config, "DEBUG_PIXEL_COORDS", (0, 0))
+                y_debug, x_debug = int(yx[0]), int(yx[1])
                 self._debug_patch_visualization(
                     y_debug,
                     x_debug,
@@ -1046,7 +1798,12 @@ class DepthOptimization:
                     neighbor_views_data,
                     title_prefix=f"Iteration {i+1}",
                 )
-                cv2.waitKey(0)
+                try:
+                    cv2.waitKey(0)
+                except Exception:
+                    logging.warning(
+                        "cv2.waitKey is not available in this environment; skipping pause."
+                    )
 
             if self.config.DEBUG_SAVE_DEPTH_MAPS:
                 save_each_depth_dir = os.path.join(
