@@ -1,0 +1,669 @@
+2025-10-25 08:46:08 - INFO - init
+2025-10-25 08:46:08 - INFO - HOME_DIR=/home/geolab/Projects/initial_3d_pointcloud_creation DATA_DIR=/home/geolab/Projects/initial_3d_pointcloud_creation/data DATA_TYPE=1280_720_35_74.73365_92_0.25
+2025-10-25 08:46:08 - INFO - Loaded 22 camera poses.
+2025-10-25 08:46:08 - INFO - DepthOptimization backend: GPU
+2025-10-25 08:46:08 - INFO - Targeting specific image indices for processing: [7]
+2025-10-25 08:46:08 - INFO - Pre-loading images...
+2025-10-25 08:46:08 - INFO -
+--- Step 1: Optimizing depth maps and applying photometric filter ---
+2025-10-25 08:46:08 - INFO - Optimizing depth map for image pair 7...
+2025-10-25 08:46:08 - INFO - Info: Detected 'Y' channel in the file. Reading it as depth data.
+2025-10-25 08:46:09 - INFO - Initial depth calculation time for image 7: 0.5391 seconds
+2025-10-25 08:46:09 - INFO - Saved disparity map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/disparity/disp_0007.png
+2025-10-25 08:46:09 - INFO - Saving initial depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_00.png
+2025-10-25 08:46:10 - INFO - [Initial Depth] MAE: 4.2489, AbsRel: 0.1995, RMSE: 4.4163, RMSElog: 0.1850, d1: 0.8931, d2: 0.9991, d3: 0.9998
+2025-10-25 08:46:10 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_initial.png
+2025-10-25 08:46:10 - INFO - Starting PatchMatch MVS depth refinement using 'checkerboard' method...
+2025-10-25 08:47:34 - INFO - Saving initial depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_00.png
+2025-10-25 08:47:35 - INFO - PatchMatch GPU Iteration 1/50
+2025-10-25 08:47:37 - INFO - [TIME] GPU propagate checkerboard: 2.1832s
+2025-10-25 08:47:39 - INFO - [TIME] GPU random_search: 1.8899s
+2025-10-25 08:47:40 - INFO - Saving depth map at iteration 1 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_01.png
+2025-10-25 08:47:40 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_01.png
+2025-10-25 08:47:40 - INFO - [GPU] Iter 1: 4.97s | cum=0.07s | MAE=4.2428, AbsRel=0.1981, RMSE=4.9383, RMSElog=0.1974, d1=0.8244, d2=0.9848, d3=0.9997
+2025-10-25 08:47:40 - INFO - PatchMatch GPU Iteration 2/50
+2025-10-25 08:47:40 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:47:40 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:40 - INFO - Saving depth map at iteration 2 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_02.png
+2025-10-25 08:47:41 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_02.png
+2025-10-25 08:47:41 - INFO - [GPU] Iter 2: 0.89s | cum=0.97s | MAE=2.8720, AbsRel=0.1348, RMSE=4.5097, RMSElog=0.1751, d1=0.8214, d2=0.9751, d3=0.9992
+2025-10-25 08:47:41 - INFO - PatchMatch GPU Iteration 3/50
+2025-10-25 08:47:41 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:47:41 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:41 - INFO - Saving depth map at iteration 3 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_03.png
+2025-10-25 08:47:41 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_03.png
+2025-10-25 08:47:41 - INFO - [GPU] Iter 3: 0.87s | cum=1.85s | MAE=1.0593, AbsRel=0.0508, RMSE=2.6418, RMSElog=0.1052, d1=0.9347, d2=0.9897, d3=0.9995
+2025-10-25 08:47:41 - INFO - PatchMatch GPU Iteration 4/50
+2025-10-25 08:47:41 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:47:42 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:42 - INFO - Saving depth map at iteration 4 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_04.png
+2025-10-25 08:47:42 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_04.png
+2025-10-25 08:47:42 - INFO - [GPU] Iter 4: 0.86s | cum=2.72s | MAE=0.4829, AbsRel=0.0232, RMSE=1.6896, RMSElog=0.0684, d1=0.9754, d2=0.9953, d3=0.9996
+2025-10-25 08:47:42 - INFO - PatchMatch GPU Iteration 5/50
+2025-10-25 08:47:42 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:47:43 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:43 - INFO - Saving depth map at iteration 5 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_05.png
+2025-10-25 08:47:43 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_05.png
+2025-10-25 08:47:43 - INFO - [GPU] Iter 5: 0.85s | cum=3.59s | MAE=0.3571, AbsRel=0.0172, RMSE=1.4408, RMSElog=0.0594, d1=0.9823, d2=0.9965, d3=0.9997
+2025-10-25 08:47:43 - INFO - PatchMatch GPU Iteration 6/50
+2025-10-25 08:47:43 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:47:44 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:44 - INFO - Saving depth map at iteration 6 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_06.png
+2025-10-25 08:47:44 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_06.png
+2025-10-25 08:47:44 - INFO - [GPU] Iter 6: 0.85s | cum=4.45s | MAE=0.3173, AbsRel=0.0153, RMSE=1.3656, RMSElog=0.0569, d1=0.9839, d2=0.9967, d3=0.9997
+2025-10-25 08:47:44 - INFO - PatchMatch GPU Iteration 7/50
+2025-10-25 08:47:44 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:47:45 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:45 - INFO - Saving depth map at iteration 7 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_07.png
+2025-10-25 08:47:45 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_07.png
+2025-10-25 08:47:45 - INFO - [GPU] Iter 7: 0.85s | cum=5.32s | MAE=0.3010, AbsRel=0.0145, RMSE=1.3373, RMSElog=0.0560, d1=0.9844, d2=0.9968, d3=0.9997
+2025-10-25 08:47:45 - INFO - PatchMatch GPU Iteration 8/50
+2025-10-25 08:47:45 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:47:46 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:46 - INFO - Saving depth map at iteration 8 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_08.png
+2025-10-25 08:47:46 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_08.png
+2025-10-25 08:47:46 - INFO - [GPU] Iter 8: 0.85s | cum=6.19s | MAE=0.2912, AbsRel=0.0140, RMSE=1.3177, RMSElog=0.0553, d1=0.9846, d2=0.9969, d3=0.9997
+2025-10-25 08:47:46 - INFO - PatchMatch GPU Iteration 9/50
+2025-10-25 08:47:46 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:47:46 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:47 - INFO - Saving depth map at iteration 9 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_09.png
+2025-10-25 08:47:47 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_09.png
+2025-10-25 08:47:47 - INFO - [GPU] Iter 9: 0.85s | cum=7.05s | MAE=0.2844, AbsRel=0.0137, RMSE=1.3039, RMSElog=0.0550, d1=0.9849, d2=0.9969, d3=0.9996
+2025-10-25 08:47:47 - INFO - PatchMatch GPU Iteration 10/50
+2025-10-25 08:47:47 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:47:47 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:47 - INFO - Saving depth map at iteration 10 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_10.png
+2025-10-25 08:47:48 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_10.png
+2025-10-25 08:47:48 - INFO - [GPU] Iter 10: 0.86s | cum=7.92s | MAE=0.2786, AbsRel=0.0134, RMSE=1.2902, RMSElog=0.0544, d1=0.9851, d2=0.9970, d3=0.9996
+2025-10-25 08:47:48 - INFO - PatchMatch GPU Iteration 11/50
+2025-10-25 08:47:48 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:47:48 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:48 - INFO - Saving depth map at iteration 11 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_11.png
+2025-10-25 08:47:48 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_11.png
+2025-10-25 08:47:48 - INFO - [GPU] Iter 11: 0.86s | cum=8.79s | MAE=0.2741, AbsRel=0.0131, RMSE=1.2802, RMSElog=0.0540, d1=0.9853, d2=0.9970, d3=0.9996
+2025-10-25 08:47:48 - INFO - PatchMatch GPU Iteration 12/50
+2025-10-25 08:47:48 - INFO - [TIME] GPU propagate checkerboard: 0.0013s
+2025-10-25 08:47:49 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:49 - INFO - Saving depth map at iteration 12 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_12.png
+2025-10-25 08:47:49 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_12.png
+2025-10-25 08:47:49 - INFO - [GPU] Iter 12: 0.86s | cum=9.66s | MAE=0.2706, AbsRel=0.0129, RMSE=1.2739, RMSElog=0.0536, d1=0.9854, d2=0.9970, d3=0.9996
+2025-10-25 08:47:49 - INFO - PatchMatch GPU Iteration 13/50
+2025-10-25 08:47:49 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:47:50 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:50 - INFO - Saving depth map at iteration 13 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_13.png
+2025-10-25 08:47:50 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_13.png
+2025-10-25 08:47:50 - INFO - [GPU] Iter 13: 0.86s | cum=10.53s | MAE=0.2676, AbsRel=0.0128, RMSE=1.2693, RMSElog=0.0534, d1=0.9856, d2=0.9970, d3=0.9996
+2025-10-25 08:47:50 - INFO - PatchMatch GPU Iteration 14/50
+2025-10-25 08:47:50 - INFO - [TIME] GPU propagate checkerboard: 0.0013s
+2025-10-25 08:47:51 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:51 - INFO - Saving depth map at iteration 14 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_14.png
+2025-10-25 08:47:51 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_14.png
+2025-10-25 08:47:51 - INFO - [GPU] Iter 14: 0.86s | cum=11.40s | MAE=0.2647, AbsRel=0.0126, RMSE=1.2627, RMSElog=0.0529, d1=0.9857, d2=0.9971, d3=0.9996
+2025-10-25 08:47:51 - INFO - PatchMatch GPU Iteration 15/50
+2025-10-25 08:47:51 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:47:52 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:52 - INFO - Saving depth map at iteration 15 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_15.png
+2025-10-25 08:47:52 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_15.png
+2025-10-25 08:47:52 - INFO - [GPU] Iter 15: 0.86s | cum=12.27s | MAE=0.2620, AbsRel=0.0124, RMSE=1.2550, RMSElog=0.0526, d1=0.9858, d2=0.9972, d3=0.9996
+2025-10-25 08:47:52 - INFO - PatchMatch GPU Iteration 16/50
+2025-10-25 08:47:52 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:47:53 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:53 - INFO - Saving depth map at iteration 16 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_16.png
+2025-10-25 08:47:53 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_16.png
+2025-10-25 08:47:53 - INFO - [GPU] Iter 16: 0.86s | cum=13.14s | MAE=0.2597, AbsRel=0.0123, RMSE=1.2489, RMSElog=0.0522, d1=0.9859, d2=0.9972, d3=0.9996
+2025-10-25 08:47:53 - INFO - PatchMatch GPU Iteration 17/50
+2025-10-25 08:47:53 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:47:53 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:54 - INFO - Saving depth map at iteration 17 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_17.png
+2025-10-25 08:47:54 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_17.png
+2025-10-25 08:47:54 - INFO - [GPU] Iter 17: 0.86s | cum=14.01s | MAE=0.2579, AbsRel=0.0122, RMSE=1.2435, RMSElog=0.0520, d1=0.9860, d2=0.9972, d3=0.9996
+2025-10-25 08:47:54 - INFO - PatchMatch GPU Iteration 18/50
+2025-10-25 08:47:54 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:47:54 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:54 - INFO - Saving depth map at iteration 18 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_18.png
+2025-10-25 08:47:54 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_18.png
+2025-10-25 08:47:54 - INFO - [GPU] Iter 18: 0.86s | cum=14.89s | MAE=0.2567, AbsRel=0.0121, RMSE=1.2408, RMSElog=0.0518, d1=0.9860, d2=0.9973, d3=0.9996
+2025-10-25 08:47:54 - INFO - PatchMatch GPU Iteration 19/50
+2025-10-25 08:47:54 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:47:55 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:55 - INFO - Saving depth map at iteration 19 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_19.png
+2025-10-25 08:47:55 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_19.png
+2025-10-25 08:47:55 - INFO - [GPU] Iter 19: 0.86s | cum=15.76s | MAE=0.2560, AbsRel=0.0121, RMSE=1.2399, RMSElog=0.0518, d1=0.9860, d2=0.9973, d3=0.9996
+2025-10-25 08:47:55 - INFO - PatchMatch GPU Iteration 20/50
+2025-10-25 08:47:55 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:47:56 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:56 - INFO - Saving depth map at iteration 20 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_20.png
+2025-10-25 08:47:56 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_20.png
+2025-10-25 08:47:56 - INFO - [GPU] Iter 20: 0.86s | cum=16.63s | MAE=0.2550, AbsRel=0.0120, RMSE=1.2371, RMSElog=0.0517, d1=0.9860, d2=0.9973, d3=0.9996
+2025-10-25 08:47:56 - INFO - PatchMatch GPU Iteration 21/50
+2025-10-25 08:47:56 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:47:57 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:57 - INFO - Saving depth map at iteration 21 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_21.png
+2025-10-25 08:47:57 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_21.png
+2025-10-25 08:47:57 - INFO - [GPU] Iter 21: 0.86s | cum=17.50s | MAE=0.2540, AbsRel=0.0120, RMSE=1.2337, RMSElog=0.0516, d1=0.9861, d2=0.9973, d3=0.9996
+2025-10-25 08:47:57 - INFO - PatchMatch GPU Iteration 22/50
+2025-10-25 08:47:57 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:47:58 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:58 - INFO - Saving depth map at iteration 22 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_22.png
+2025-10-25 08:47:58 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_22.png
+2025-10-25 08:47:58 - INFO - [GPU] Iter 22: 0.86s | cum=18.37s | MAE=0.2530, AbsRel=0.0119, RMSE=1.2304, RMSElog=0.0514, d1=0.9861, d2=0.9973, d3=0.9996
+2025-10-25 08:47:58 - INFO - PatchMatch GPU Iteration 23/50
+2025-10-25 08:47:58 - INFO - [TIME] GPU propagate checkerboard: 0.0013s
+2025-10-25 08:47:59 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:47:59 - INFO - Saving depth map at iteration 23 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_23.png
+2025-10-25 08:47:59 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_23.png
+2025-10-25 08:47:59 - INFO - [GPU] Iter 23: 0.86s | cum=19.24s | MAE=0.2522, AbsRel=0.0119, RMSE=1.2278, RMSElog=0.0513, d1=0.9862, d2=0.9973, d3=0.9996
+2025-10-25 08:47:59 - INFO - PatchMatch GPU Iteration 24/50
+2025-10-25 08:47:59 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:48:00 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:00 - INFO - Saving depth map at iteration 24 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_24.png
+2025-10-25 08:48:00 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_24.png
+2025-10-25 08:48:00 - INFO - [GPU] Iter 24: 0.86s | cum=20.11s | MAE=0.2515, AbsRel=0.0119, RMSE=1.2258, RMSElog=0.0512, d1=0.9862, d2=0.9973, d3=0.9996
+2025-10-25 08:48:00 - INFO - PatchMatch GPU Iteration 25/50
+2025-10-25 08:48:00 - INFO - [TIME] GPU propagate checkerboard: 0.0013s
+2025-10-25 08:48:00 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:00 - INFO - Saving depth map at iteration 25 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_25.png
+2025-10-25 08:48:01 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_25.png
+2025-10-25 08:48:01 - INFO - [GPU] Iter 25: 0.86s | cum=20.98s | MAE=0.2511, AbsRel=0.0118, RMSE=1.2241, RMSElog=0.0512, d1=0.9862, d2=0.9974, d3=0.9996
+2025-10-25 08:48:01 - INFO - PatchMatch GPU Iteration 26/50
+2025-10-25 08:48:01 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:48:01 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:01 - INFO - Saving depth map at iteration 26 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_26.png
+2025-10-25 08:48:01 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_26.png
+2025-10-25 08:48:01 - INFO - [GPU] Iter 26: 0.86s | cum=21.85s | MAE=0.2507, AbsRel=0.0118, RMSE=1.2227, RMSElog=0.0511, d1=0.9862, d2=0.9974, d3=0.9996
+2025-10-25 08:48:01 - INFO - PatchMatch GPU Iteration 27/50
+2025-10-25 08:48:01 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:48:02 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:02 - INFO - Saving depth map at iteration 27 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_27.png
+2025-10-25 08:48:02 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_27.png
+2025-10-25 08:48:02 - INFO - [GPU] Iter 27: 0.86s | cum=22.72s | MAE=0.2503, AbsRel=0.0118, RMSE=1.2210, RMSElog=0.0511, d1=0.9863, d2=0.9974, d3=0.9996
+2025-10-25 08:48:02 - INFO - PatchMatch GPU Iteration 28/50
+2025-10-25 08:48:02 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:48:03 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:03 - INFO - Saving depth map at iteration 28 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_28.png
+2025-10-25 08:48:03 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_28.png
+2025-10-25 08:48:03 - INFO - [GPU] Iter 28: 0.86s | cum=23.59s | MAE=0.2499, AbsRel=0.0118, RMSE=1.2198, RMSElog=0.0510, d1=0.9863, d2=0.9974, d3=0.9996
+2025-10-25 08:48:03 - INFO - PatchMatch GPU Iteration 29/50
+2025-10-25 08:48:03 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:48:04 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:04 - INFO - Saving depth map at iteration 29 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_29.png
+2025-10-25 08:48:04 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_29.png
+2025-10-25 08:48:04 - INFO - [GPU] Iter 29: 0.86s | cum=24.47s | MAE=0.2494, AbsRel=0.0117, RMSE=1.2169, RMSElog=0.0510, d1=0.9863, d2=0.9974, d3=0.9996
+2025-10-25 08:48:04 - INFO - PatchMatch GPU Iteration 30/50
+2025-10-25 08:48:04 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:48:05 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:05 - INFO - Saving depth map at iteration 30 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_30.png
+2025-10-25 08:48:05 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_30.png
+2025-10-25 08:48:05 - INFO - [GPU] Iter 30: 0.86s | cum=25.34s | MAE=0.2490, AbsRel=0.0117, RMSE=1.2156, RMSElog=0.0509, d1=0.9863, d2=0.9974, d3=0.9996
+2025-10-25 08:48:05 - INFO - PatchMatch GPU Iteration 31/50
+2025-10-25 08:48:05 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:48:06 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:06 - INFO - Saving depth map at iteration 31 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_31.png
+2025-10-25 08:48:06 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_31.png
+2025-10-25 08:48:06 - INFO - [GPU] Iter 31: 0.86s | cum=26.21s | MAE=0.2487, AbsRel=0.0117, RMSE=1.2146, RMSElog=0.0509, d1=0.9863, d2=0.9974, d3=0.9996
+2025-10-25 08:48:06 - INFO - PatchMatch GPU Iteration 32/50
+2025-10-25 08:48:06 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:48:07 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:07 - INFO - Saving depth map at iteration 32 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_32.png
+2025-10-25 08:48:07 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_32.png
+2025-10-25 08:48:07 - INFO - [GPU] Iter 32: 0.86s | cum=27.08s | MAE=0.2483, AbsRel=0.0117, RMSE=1.2130, RMSElog=0.0508, d1=0.9863, d2=0.9974, d3=0.9996
+2025-10-25 08:48:07 - INFO - PatchMatch GPU Iteration 33/50
+2025-10-25 08:48:07 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:48:07 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:07 - INFO - Saving depth map at iteration 33 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_33.png
+2025-10-25 08:48:08 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_33.png
+2025-10-25 08:48:08 - INFO - [GPU] Iter 33: 0.86s | cum=27.95s | MAE=0.2479, AbsRel=0.0117, RMSE=1.2112, RMSElog=0.0508, d1=0.9864, d2=0.9974, d3=0.9996
+2025-10-25 08:48:08 - INFO - PatchMatch GPU Iteration 34/50
+2025-10-25 08:48:08 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:48:08 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:08 - INFO - Saving depth map at iteration 34 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_34.png
+2025-10-25 08:48:08 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_34.png
+2025-10-25 08:48:08 - INFO - [GPU] Iter 34: 0.86s | cum=28.82s | MAE=0.2476, AbsRel=0.0117, RMSE=1.2103, RMSElog=0.0507, d1=0.9863, d2=0.9974, d3=0.9996
+2025-10-25 08:48:08 - INFO - PatchMatch GPU Iteration 35/50
+2025-10-25 08:48:08 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:48:09 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:09 - INFO - Saving depth map at iteration 35 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_35.png
+2025-10-25 08:48:09 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_35.png
+2025-10-25 08:48:09 - INFO - [GPU] Iter 35: 0.86s | cum=29.70s | MAE=0.2475, AbsRel=0.0117, RMSE=1.2101, RMSElog=0.0508, d1=0.9863, d2=0.9974, d3=0.9996
+2025-10-25 08:48:09 - INFO - PatchMatch GPU Iteration 36/50
+2025-10-25 08:48:09 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:48:10 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:10 - INFO - Saving depth map at iteration 36 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_36.png
+2025-10-25 08:48:10 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_36.png
+2025-10-25 08:48:10 - INFO - [GPU] Iter 36: 0.86s | cum=30.57s | MAE=0.2473, AbsRel=0.0116, RMSE=1.2087, RMSElog=0.0508, d1=0.9863, d2=0.9974, d3=0.9996
+2025-10-25 08:48:10 - INFO - PatchMatch GPU Iteration 37/50
+2025-10-25 08:48:10 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:48:11 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:11 - INFO - Saving depth map at iteration 37 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_37.png
+2025-10-25 08:48:11 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_37.png
+2025-10-25 08:48:11 - INFO - [GPU] Iter 37: 0.86s | cum=31.44s | MAE=0.2471, AbsRel=0.0116, RMSE=1.2088, RMSElog=0.0509, d1=0.9863, d2=0.9974, d3=0.9996
+2025-10-25 08:48:11 - INFO - PatchMatch GPU Iteration 38/50
+2025-10-25 08:48:11 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:48:12 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:12 - INFO - Saving depth map at iteration 38 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_38.png
+2025-10-25 08:48:12 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_38.png
+2025-10-25 08:48:12 - INFO - [GPU] Iter 38: 0.86s | cum=32.32s | MAE=0.2470, AbsRel=0.0116, RMSE=1.2078, RMSElog=0.0508, d1=0.9863, d2=0.9974, d3=0.9996
+2025-10-25 08:48:12 - INFO - PatchMatch GPU Iteration 39/50
+2025-10-25 08:48:12 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:48:13 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:13 - INFO - Saving depth map at iteration 39 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_39.png
+2025-10-25 08:48:13 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_39.png
+2025-10-25 08:48:13 - INFO - [GPU] Iter 39: 0.86s | cum=33.19s | MAE=0.2468, AbsRel=0.0116, RMSE=1.2073, RMSElog=0.0508, d1=0.9863, d2=0.9975, d3=0.9996
+2025-10-25 08:48:13 - INFO - PatchMatch GPU Iteration 40/50
+2025-10-25 08:48:13 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:48:13 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:14 - INFO - Saving depth map at iteration 40 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_40.png
+2025-10-25 08:48:14 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_40.png
+2025-10-25 08:48:14 - INFO - [GPU] Iter 40: 0.86s | cum=34.06s | MAE=0.2468, AbsRel=0.0116, RMSE=1.2074, RMSElog=0.0508, d1=0.9863, d2=0.9975, d3=0.9996
+2025-10-25 08:48:14 - INFO - PatchMatch GPU Iteration 41/50
+2025-10-25 08:48:14 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:48:14 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:14 - INFO - Saving depth map at iteration 41 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_41.png
+2025-10-25 08:48:15 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_41.png
+2025-10-25 08:48:15 - INFO - [GPU] Iter 41: 0.86s | cum=34.93s | MAE=0.2467, AbsRel=0.0116, RMSE=1.2071, RMSElog=0.0508, d1=0.9863, d2=0.9975, d3=0.9996
+2025-10-25 08:48:15 - INFO - PatchMatch GPU Iteration 42/50
+2025-10-25 08:48:15 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:48:15 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:15 - INFO - Saving depth map at iteration 42 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_42.png
+2025-10-25 08:48:15 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_42.png
+2025-10-25 08:48:15 - INFO - [GPU] Iter 42: 0.86s | cum=35.80s | MAE=0.2466, AbsRel=0.0116, RMSE=1.2065, RMSElog=0.0508, d1=0.9863, d2=0.9975, d3=0.9996
+2025-10-25 08:48:15 - INFO - PatchMatch GPU Iteration 43/50
+2025-10-25 08:48:15 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:48:16 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:16 - INFO - Saving depth map at iteration 43 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_43.png
+2025-10-25 08:48:16 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_43.png
+2025-10-25 08:48:16 - INFO - [GPU] Iter 43: 0.86s | cum=36.68s | MAE=0.2465, AbsRel=0.0116, RMSE=1.2059, RMSElog=0.0508, d1=0.9863, d2=0.9975, d3=0.9996
+2025-10-25 08:48:16 - INFO - PatchMatch GPU Iteration 44/50
+2025-10-25 08:48:16 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:48:17 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:17 - INFO - Saving depth map at iteration 44 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_44.png
+2025-10-25 08:48:17 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_44.png
+2025-10-25 08:48:17 - INFO - [GPU] Iter 44: 0.86s | cum=37.55s | MAE=0.2464, AbsRel=0.0116, RMSE=1.2056, RMSElog=0.0508, d1=0.9863, d2=0.9975, d3=0.9996
+2025-10-25 08:48:17 - INFO - PatchMatch GPU Iteration 45/50
+2025-10-25 08:48:17 - INFO - [TIME] GPU propagate checkerboard: 0.0013s
+2025-10-25 08:48:18 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:18 - INFO - Saving depth map at iteration 45 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_45.png
+2025-10-25 08:48:18 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_45.png
+2025-10-25 08:48:18 - INFO - [GPU] Iter 45: 0.86s | cum=38.42s | MAE=0.2464, AbsRel=0.0116, RMSE=1.2055, RMSElog=0.0508, d1=0.9863, d2=0.9975, d3=0.9996
+2025-10-25 08:48:18 - INFO - PatchMatch GPU Iteration 46/50
+2025-10-25 08:48:18 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:48:19 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:19 - INFO - Saving depth map at iteration 46 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_46.png
+2025-10-25 08:48:19 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_46.png
+2025-10-25 08:48:19 - INFO - [GPU] Iter 46: 0.86s | cum=39.29s | MAE=0.2463, AbsRel=0.0116, RMSE=1.2053, RMSElog=0.0508, d1=0.9863, d2=0.9975, d3=0.9996
+2025-10-25 08:48:19 - INFO - PatchMatch GPU Iteration 47/50
+2025-10-25 08:48:19 - INFO - [TIME] GPU propagate checkerboard: 0.0013s
+2025-10-25 08:48:20 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:20 - INFO - Saving depth map at iteration 47 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_47.png
+2025-10-25 08:48:20 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_47.png
+2025-10-25 08:48:20 - INFO - [GPU] Iter 47: 0.86s | cum=40.17s | MAE=0.2463, AbsRel=0.0116, RMSE=1.2053, RMSElog=0.0508, d1=0.9863, d2=0.9975, d3=0.9996
+2025-10-25 08:48:20 - INFO - PatchMatch GPU Iteration 48/50
+2025-10-25 08:48:20 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:48:20 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:21 - INFO - Saving depth map at iteration 48 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_48.png
+2025-10-25 08:48:21 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_48.png
+2025-10-25 08:48:21 - INFO - [GPU] Iter 48: 0.86s | cum=41.04s | MAE=0.2463, AbsRel=0.0116, RMSE=1.2052, RMSElog=0.0508, d1=0.9863, d2=0.9975, d3=0.9996
+2025-10-25 08:48:21 - INFO - PatchMatch GPU Iteration 49/50
+2025-10-25 08:48:21 - INFO - [TIME] GPU propagate checkerboard: 0.0012s
+2025-10-25 08:48:21 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:21 - INFO - Saving depth map at iteration 49 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_49.png
+2025-10-25 08:48:22 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_49.png
+2025-10-25 08:48:22 - INFO - [GPU] Iter 49: 0.86s | cum=41.92s | MAE=0.2463, AbsRel=0.0116, RMSE=1.2052, RMSElog=0.0508, d1=0.9863, d2=0.9975, d3=0.9996
+2025-10-25 08:48:22 - INFO - PatchMatch GPU Iteration 50/50
+2025-10-25 08:48:22 - INFO - [TIME] GPU propagate checkerboard: 0.0011s
+2025-10-25 08:48:22 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 08:48:22 - INFO - Saving depth map at iteration 50 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_50.png
+2025-10-25 08:48:22 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_50.png
+2025-10-25 08:48:22 - INFO - [GPU] Iter 50: 0.86s | cum=42.79s | MAE=0.2462, AbsRel=0.0116, RMSE=1.2050, RMSElog=0.0508, d1=0.9863, d2=0.9975, d3=0.9996
+2025-10-25 08:48:22 - INFO - [GPU Debug] cost_map stats (valid): min=-0.000000, max=1.000000, mean=0.066774
+2025-10-25 08:48:24 - INFO - [GPU Debug] sample (r=360, c=640): gpu_cost=0.181704, cpu_cost=0.190206, diff=0.008502
+2025-10-25 08:48:24 - INFO - [GPU Debug] sample (r=180, c=320): gpu_cost=0.011542, cpu_cost=0.020114, diff=0.008571
+2025-10-25 08:48:24 - INFO - [GPU Debug] sample (r=180, c=960): gpu_cost=0.037100, cpu_cost=0.052770, diff=0.015670
+2025-10-25 08:48:24 - INFO - [GPU Debug] sample (r=540, c=320): gpu_cost=0.170647, cpu_cost=0.251072, diff=0.080425
+2025-10-25 08:48:24 - INFO - [GPU Debug] sample (r=540, c=960): gpu_cost=0.056775, cpu_cost=0.067912, diff=0.011138
+2025-10-25 08:48:24 - INFO - PatchMatch MVS refinement finished.
+2025-10-25 08:48:25 - INFO - [Timing] refine_depth_with_patchmatch total time: 134.80s for index 7
+2025-10-25 08:48:25 - INFO - [Optimized Depth] MAE: 0.2462, AbsRel: 0.0116, RMSE: 1.2050, RMSElog: 0.0508, d1: 0.9863, d2: 0.9975, d3: 0.9996
+2025-10-25 08:48:25 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_optimized.png
+2025-10-25 08:48:25 - INFO - Filtering optimized depth map based on cost and photometric consistency...
+2025-10-25 08:48:30 - INFO - 48061 points invalidated by photometric consistency check.
+2025-10-25 08:48:30 - INFO -   [Photometric Filtered] MAE: 0.0967, AbsRel: 0.0042, RMSE: 0.5954, RMSElog: 0.0253, d1: 0.9973, d2: 0.9993, d3: 0.9998
+2025-10-25 08:48:30 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_photometric.png
+2025-10-25 08:48:30 - INFO - Saving photometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/photometric_filtered_depth.png
+2025-10-25 08:48:30 - INFO - Stored photometrically filtered depth map for index 7.
+2025-10-25 08:48:30 - INFO - Filtering depth map by geometric consistency...
+2025-10-25 08:48:30 - WARNING - No neighbor depth maps available for geometric consistency check.
+2025-10-25 08:48:30 - INFO -   [Geometric Filtered] MAE: 0.0967, AbsRel: 0.0042, RMSE: 0.5954, RMSElog: 0.0253, d1: 0.9973, d2: 0.9993, d3: 0.9998
+2025-10-25 08:48:30 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_geometric.png
+2025-10-25 08:48:30 - INFO - Saving geometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/geometrically_filtered_depth.png
+2025-10-25 08:48:30 - INFO - Saving ortho depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/ortho_depth.png
+2025-10-25 08:48:32 - INFO - Saved fused world-orthographic depth to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/fused_ortho_running.png
+2025-10-25 08:48:36 - INFO - Integrated 103944 points from multiple depth maps.
+2025-10-25 08:48:36 - INFO -
+--- Final: Saving the last integrated point cloud ---
+2025-10-25 08:48:37 - INFO - Initial merged point cloud size: 103944
+2025-10-25 08:48:37 - INFO - Point cloud size after outlier removal: 103220
+2025-10-25 08:48:37 - INFO - Final point cloud saved to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/point_cloud/output.ply
+2025-10-25 08:48:37 - INFO - Showing final integrated point cloud. Close the window to exit.
+2025-10-25 11:03:15 - INFO - Total point cloud generation time: 8227.70s
+2025-10-25 11:05:43 - INFO - init
+2025-10-25 11:05:43 - INFO - HOME_DIR=/home/geolab/Projects/initial_3d_pointcloud_creation DATA_DIR=/home/geolab/Projects/initial_3d_pointcloud_creation/data DATA_TYPE=1280_720_35_74.73365_92_0.25
+2025-10-25 11:05:43 - INFO - Loaded 22 camera poses.
+2025-10-25 11:05:43 - INFO - DepthOptimization backend: GPU
+2025-10-25 11:05:43 - INFO - Targeting specific image indices for processing: [7]
+2025-10-25 11:05:43 - INFO - Pre-loading images...
+2025-10-25 11:05:43 - INFO -
+--- Step 1: Optimizing depth maps and applying photometric filter ---
+2025-10-25 11:05:43 - INFO - Optimizing depth map for image pair 7...
+2025-10-25 11:05:43 - INFO - Info: Detected 'Y' channel in the file. Reading it as depth data.
+2025-10-25 11:05:44 - INFO - Initial depth calculation time for image 7: 0.5497 seconds
+2025-10-25 11:05:44 - INFO - Saved disparity map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/disparity/disp_0007.png
+2025-10-25 11:05:45 - INFO - Saving initial depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_00.png
+2025-10-25 11:05:45 - INFO - [Initial Depth] MAE: 4.2489, AbsRel: 0.1995, RMSE: 4.4163, RMSElog: 0.1850, d1: 0.8931, d2: 0.9991, d3: 0.9998
+2025-10-25 11:05:45 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_initial.png
+2025-10-25 11:05:45 - INFO - Starting PatchMatch MVS depth refinement using 'priority' method...
+2025-10-25 11:07:09 - INFO - Saving initial depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_00.png
+2025-10-25 11:07:09 - INFO - PatchMatch GPU Iteration 1/10
+2025-10-25 11:07:12 - INFO - [TIME] GPU random_search: 2.5145s
+2025-10-25 11:07:12 - INFO - Saving depth map at iteration 1 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_01.png
+2025-10-25 11:07:12 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_01.png
+2025-10-25 11:07:12 - INFO - [GPU] Iter 1: 2.70s | cum=0.08s | MAE=4.6262, AbsRel=0.2143, RMSE=5.6812, RMSElog=0.2192, d1=0.7301, d2=0.9681, d3=0.9997
+2025-10-25 11:07:12 - INFO - PatchMatch GPU Iteration 2/10
+2025-10-25 11:07:17 - INFO - [TIME] GPU propagate priority: 4.5403s
+2025-10-25 11:07:17 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:07:17 - INFO - Saving depth map at iteration 2 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_02.png
+2025-10-25 11:07:17 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_02.png
+2025-10-25 11:07:17 - INFO - [GPU] Iter 2: 4.70s | cum=4.79s | MAE=0.3566, AbsRel=0.0172, RMSE=1.4167, RMSElog=0.0590, d1=0.9809, d2=0.9972, d3=0.9999
+2025-10-25 11:07:17 - INFO - PatchMatch GPU Iteration 3/10
+2025-10-25 11:07:20 - INFO - [TIME] GPU propagate priority: 2.9477s
+2025-10-25 11:07:20 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:07:20 - INFO - Saving depth map at iteration 3 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_03.png
+2025-10-25 11:07:20 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_03.png
+2025-10-25 11:07:20 - INFO - [GPU] Iter 3: 3.11s | cum=7.91s | MAE=0.3280, AbsRel=0.0160, RMSE=1.4204, RMSElog=0.0603, d1=0.9810, d2=0.9959, d3=0.9997
+2025-10-25 11:07:20 - INFO - PatchMatch GPU Iteration 4/10
+2025-10-25 11:07:23 - INFO - [TIME] GPU propagate priority: 2.9503s
+2025-10-25 11:07:23 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:07:23 - INFO - Saving depth map at iteration 4 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_04.png
+2025-10-25 11:07:23 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_04.png
+2025-10-25 11:07:23 - INFO - [GPU] Iter 4: 3.12s | cum=11.04s | MAE=0.3324, AbsRel=0.0163, RMSE=1.4739, RMSElog=0.0633, d1=0.9796, d2=0.9949, d3=0.9996
+2025-10-25 11:07:23 - INFO - PatchMatch GPU Iteration 5/10
+2025-10-25 11:07:26 - INFO - [TIME] GPU propagate priority: 2.9497s
+2025-10-25 11:07:26 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:07:26 - INFO - Saving depth map at iteration 5 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_05.png
+2025-10-25 11:07:26 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_05.png
+2025-10-25 11:07:26 - INFO - [GPU] Iter 5: 3.12s | cum=14.17s | MAE=0.3321, AbsRel=0.0162, RMSE=1.4972, RMSElog=0.0645, d1=0.9793, d2=0.9945, d3=0.9993
+2025-10-25 11:07:26 - INFO - PatchMatch GPU Iteration 6/10
+2025-10-25 11:07:29 - INFO - [TIME] GPU propagate priority: 2.9516s
+2025-10-25 11:07:29 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:07:29 - INFO - Saving depth map at iteration 6 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_06.png
+2025-10-25 11:07:29 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_06.png
+2025-10-25 11:07:29 - INFO - [GPU] Iter 6: 3.12s | cum=17.30s | MAE=0.3323, AbsRel=0.0162, RMSE=1.5151, RMSElog=0.0655, d1=0.9791, d2=0.9943, d3=0.9990
+2025-10-25 11:07:29 - INFO - PatchMatch GPU Iteration 7/10
+2025-10-25 11:07:32 - INFO - [TIME] GPU propagate priority: 2.9506s
+2025-10-25 11:07:32 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:07:32 - INFO - Saving depth map at iteration 7 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_07.png
+2025-10-25 11:07:33 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_07.png
+2025-10-25 11:07:33 - INFO - [GPU] Iter 7: 3.12s | cum=20.43s | MAE=0.3311, AbsRel=0.0162, RMSE=1.5166, RMSElog=0.0657, d1=0.9793, d2=0.9943, d3=0.9990
+2025-10-25 11:07:33 - INFO - PatchMatch GPU Iteration 8/10
+2025-10-25 11:07:35 - INFO - [TIME] GPU propagate priority: 2.9507s
+2025-10-25 11:07:35 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:07:36 - INFO - Saving depth map at iteration 8 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_08.png
+2025-10-25 11:07:36 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_08.png
+2025-10-25 11:07:36 - INFO - [GPU] Iter 8: 3.12s | cum=23.57s | MAE=0.3301, AbsRel=0.0161, RMSE=1.5175, RMSElog=0.0657, d1=0.9794, d2=0.9942, d3=0.9990
+2025-10-25 11:07:36 - INFO - PatchMatch GPU Iteration 9/10
+2025-10-25 11:07:39 - INFO - [TIME] GPU propagate priority: 2.9497s
+2025-10-25 11:07:39 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:07:39 - INFO - Saving depth map at iteration 9 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_09.png
+2025-10-25 11:07:39 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_09.png
+2025-10-25 11:07:39 - INFO - [GPU] Iter 9: 3.12s | cum=26.70s | MAE=0.3300, AbsRel=0.0161, RMSE=1.5219, RMSElog=0.0665, d1=0.9794, d2=0.9942, d3=0.9990
+2025-10-25 11:07:39 - INFO - PatchMatch GPU Iteration 10/10
+2025-10-25 11:07:42 - INFO - [TIME] GPU propagate priority: 2.9491s
+2025-10-25 11:07:42 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:07:42 - INFO - Saving depth map at iteration 10 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_10.png
+2025-10-25 11:07:42 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_10.png
+2025-10-25 11:07:42 - INFO - [GPU] Iter 10: 3.12s | cum=29.83s | MAE=0.3299, AbsRel=0.0161, RMSE=1.5271, RMSElog=0.0676, d1=0.9794, d2=0.9942, d3=0.9989
+2025-10-25 11:07:42 - INFO - [GPU Debug] cost_map stats (valid): min=-0.000000, max=1.000000, mean=0.084976
+2025-10-25 11:07:44 - INFO - [GPU Debug] sample (r=360, c=640): gpu_cost=0.190154, cpu_cost=0.190150, diff=0.000004
+2025-10-25 11:07:44 - INFO - [GPU Debug] sample (r=180, c=320): gpu_cost=0.014316, cpu_cost=0.014317, diff=0.000001
+2025-10-25 11:07:44 - INFO - [GPU Debug] sample (r=180, c=960): gpu_cost=0.049756, cpu_cost=0.049760, diff=0.000004
+2025-10-25 11:07:44 - INFO - [GPU Debug] sample (r=540, c=320): gpu_cost=0.206893, cpu_cost=0.206894, diff=0.000002
+2025-10-25 11:07:44 - INFO - [GPU Debug] sample (r=540, c=960): gpu_cost=0.067912, cpu_cost=0.067912, diff=0.000000
+2025-10-25 11:07:44 - INFO - PatchMatch MVS refinement finished.
+2025-10-25 11:07:44 - INFO - [Timing] refine_depth_with_patchmatch total time: 119.06s for index 7
+2025-10-25 11:07:44 - INFO - [Optimized Depth] MAE: 0.3299, AbsRel: 0.0161, RMSE: 1.5271, RMSElog: 0.0676, d1: 0.9794, d2: 0.9942, d3: 0.9989
+2025-10-25 11:07:44 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_optimized.png
+2025-10-25 11:07:44 - INFO - Filtering optimized depth map based on cost and photometric consistency...
+2025-10-25 11:07:50 - INFO - 50078 points invalidated by photometric consistency check.
+2025-10-25 11:07:50 - INFO -   [Photometric Filtered] MAE: 0.1096, AbsRel: 0.0048, RMSE: 0.6701, RMSElog: 0.0291, d1: 0.9964, d2: 0.9990, d3: 0.9997
+2025-10-25 11:07:50 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_photometric.png
+2025-10-25 11:07:50 - INFO - Saving photometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/photometric_filtered_depth.png
+2025-10-25 11:07:50 - INFO - Stored photometrically filtered depth map for index 7.
+2025-10-25 11:07:50 - INFO - Filtering depth map by geometric consistency...
+2025-10-25 11:07:50 - WARNING - No neighbor depth maps available for geometric consistency check.
+2025-10-25 11:07:50 - INFO -   [Geometric Filtered] MAE: 0.1096, AbsRel: 0.0048, RMSE: 0.6701, RMSElog: 0.0291, d1: 0.9964, d2: 0.9990, d3: 0.9997
+2025-10-25 11:07:50 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_geometric.png
+2025-10-25 11:07:50 - INFO - Saving geometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/geometrically_filtered_depth.png
+2025-10-25 11:07:50 - INFO - Saving ortho depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/ortho_depth.png
+2025-10-25 11:07:52 - INFO - Saved fused world-orthographic depth to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/fused_ortho_running.png
+2025-10-25 11:07:56 - INFO - Integrated 103698 points from multiple depth maps.
+2025-10-25 11:07:56 - INFO -
+--- Final: Saving the last integrated point cloud ---
+2025-10-25 11:07:57 - INFO - Initial merged point cloud size: 103698
+2025-10-25 11:07:57 - INFO - Point cloud size after outlier removal: 102716
+2025-10-25 11:07:57 - INFO - Final point cloud saved to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/point_cloud/output.ply
+2025-10-25 11:07:57 - INFO - Showing final integrated point cloud. Close the window to exit.
+2025-10-25 11:08:09 - INFO - Total point cloud generation time: 145.96s
+2025-10-25 11:08:28 - INFO - init
+2025-10-25 11:08:28 - INFO - HOME_DIR=/home/geolab/Projects/initial_3d_pointcloud_creation DATA_DIR=/home/geolab/Projects/initial_3d_pointcloud_creation/data DATA_TYPE=1280_720_35_74.73365_92_0.25
+2025-10-25 11:08:28 - INFO - Loaded 22 camera poses.
+2025-10-25 11:08:28 - INFO - DepthOptimization backend: GPU
+2025-10-25 11:08:28 - INFO - Targeting specific image indices for processing: [7]
+2025-10-25 11:08:28 - INFO - Pre-loading images...
+2025-10-25 11:08:29 - INFO -
+--- Step 1: Optimizing depth maps and applying photometric filter ---
+2025-10-25 11:08:29 - INFO - Optimizing depth map for image pair 7...
+2025-10-25 11:08:29 - INFO - Info: Detected 'Y' channel in the file. Reading it as depth data.
+2025-10-25 11:08:29 - INFO - Initial depth calculation time for image 7: 0.5379 seconds
+2025-10-25 11:08:29 - INFO - Saved disparity map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/disparity/disp_0007.png
+2025-10-25 11:08:30 - INFO - Saving initial depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_00.png
+2025-10-25 11:08:30 - INFO - [Initial Depth] MAE: 4.2489, AbsRel: 0.1995, RMSE: 4.4163, RMSElog: 0.1850, d1: 0.8931, d2: 0.9991, d3: 0.9998
+2025-10-25 11:08:31 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_initial.png
+2025-10-25 11:08:31 - INFO - Starting PatchMatch MVS depth refinement using 'priority' method...
+2025-10-25 11:09:55 - INFO - Saving initial depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_00.png
+2025-10-25 11:09:56 - INFO - PatchMatch GPU Iteration 1/10
+2025-10-25 11:09:58 - INFO - [TIME] GPU random_search: 2.5110s
+2025-10-25 11:09:58 - INFO - Saving depth map at iteration 1 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_01.png
+2025-10-25 11:09:58 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_01.png
+2025-10-25 11:09:58 - INFO - [GPU] Iter 1: 2.70s | cum=0.08s | MAE=4.6262, AbsRel=0.2143, RMSE=5.6812, RMSElog=0.2192, d1=0.7301, d2=0.9681, d3=0.9997
+2025-10-25 11:09:58 - INFO - PatchMatch GPU Iteration 2/10
+2025-10-25 11:10:03 - INFO - [TIME] GPU propagate priority: 4.5627s
+2025-10-25 11:10:03 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 11:10:03 - INFO - Saving depth map at iteration 2 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_02.png
+2025-10-25 11:10:03 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_02.png
+2025-10-25 11:10:03 - INFO - [GPU] Iter 2: 4.72s | cum=4.81s | MAE=0.3564, AbsRel=0.0172, RMSE=1.4159, RMSElog=0.0590, d1=0.9809, d2=0.9972, d3=0.9999
+2025-10-25 11:10:03 - INFO - PatchMatch GPU Iteration 3/10
+2025-10-25 11:10:06 - INFO - [TIME] GPU propagate priority: 2.9504s
+2025-10-25 11:10:06 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:10:06 - INFO - Saving depth map at iteration 3 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_03.png
+2025-10-25 11:10:06 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_03.png
+2025-10-25 11:10:06 - INFO - [GPU] Iter 3: 3.11s | cum=7.94s | MAE=0.3278, AbsRel=0.0160, RMSE=1.4198, RMSElog=0.0603, d1=0.9811, d2=0.9959, d3=0.9997
+2025-10-25 11:10:06 - INFO - PatchMatch GPU Iteration 4/10
+2025-10-25 11:10:09 - INFO - [TIME] GPU propagate priority: 2.9526s
+2025-10-25 11:10:09 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 11:10:09 - INFO - Saving depth map at iteration 4 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_04.png
+2025-10-25 11:10:09 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_04.png
+2025-10-25 11:10:09 - INFO - [GPU] Iter 4: 3.12s | cum=11.07s | MAE=0.3325, AbsRel=0.0163, RMSE=1.4743, RMSElog=0.0633, d1=0.9797, d2=0.9949, d3=0.9996
+2025-10-25 11:10:09 - INFO - PatchMatch GPU Iteration 5/10
+2025-10-25 11:10:12 - INFO - [TIME] GPU propagate priority: 2.9526s
+2025-10-25 11:10:12 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:10:12 - INFO - Saving depth map at iteration 5 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_05.png
+2025-10-25 11:10:12 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_05.png
+2025-10-25 11:10:12 - INFO - [GPU] Iter 5: 3.12s | cum=14.20s | MAE=0.3323, AbsRel=0.0163, RMSE=1.4984, RMSElog=0.0646, d1=0.9793, d2=0.9945, d3=0.9993
+2025-10-25 11:10:12 - INFO - PatchMatch GPU Iteration 6/10
+2025-10-25 11:10:15 - INFO - [TIME] GPU propagate priority: 2.9548s
+2025-10-25 11:10:15 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:10:15 - INFO - Saving depth map at iteration 6 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_06.png
+2025-10-25 11:10:15 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_06.png
+2025-10-25 11:10:15 - INFO - [GPU] Iter 6: 3.12s | cum=17.34s | MAE=0.3330, AbsRel=0.0163, RMSE=1.5208, RMSElog=0.0657, d1=0.9791, d2=0.9942, d3=0.9990
+2025-10-25 11:10:15 - INFO - PatchMatch GPU Iteration 7/10
+2025-10-25 11:10:18 - INFO - [TIME] GPU propagate priority: 2.9578s
+2025-10-25 11:10:18 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:10:19 - INFO - Saving depth map at iteration 7 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_07.png
+2025-10-25 11:10:19 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_07.png
+2025-10-25 11:10:19 - INFO - [GPU] Iter 7: 3.13s | cum=20.48s | MAE=0.3321, AbsRel=0.0162, RMSE=1.5261, RMSElog=0.0660, d1=0.9792, d2=0.9942, d3=0.9989
+2025-10-25 11:10:19 - INFO - PatchMatch GPU Iteration 8/10
+2025-10-25 11:10:22 - INFO - [TIME] GPU propagate priority: 2.9532s
+2025-10-25 11:10:22 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:10:22 - INFO - Saving depth map at iteration 8 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_08.png
+2025-10-25 11:10:22 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_08.png
+2025-10-25 11:10:22 - INFO - [GPU] Iter 8: 3.12s | cum=23.61s | MAE=0.3316, AbsRel=0.0162, RMSE=1.5298, RMSElog=0.0661, d1=0.9793, d2=0.9942, d3=0.9989
+2025-10-25 11:10:22 - INFO - PatchMatch GPU Iteration 9/10
+2025-10-25 11:10:25 - INFO - [TIME] GPU propagate priority: 2.9479s
+2025-10-25 11:10:25 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:10:25 - INFO - Saving depth map at iteration 9 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_09.png
+2025-10-25 11:10:25 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_09.png
+2025-10-25 11:10:25 - INFO - [GPU] Iter 9: 3.12s | cum=26.74s | MAE=0.3314, AbsRel=0.0162, RMSE=1.5344, RMSElog=0.0669, d1=0.9794, d2=0.9941, d3=0.9988
+2025-10-25 11:10:25 - INFO - PatchMatch GPU Iteration 10/10
+2025-10-25 11:10:28 - INFO - [TIME] GPU propagate priority: 2.9752s
+2025-10-25 11:10:28 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 11:10:28 - INFO - Saving depth map at iteration 10 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_10.png
+2025-10-25 11:10:28 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_10.png
+2025-10-25 11:10:28 - INFO - [GPU] Iter 10: 3.14s | cum=29.90s | MAE=0.3319, AbsRel=0.0162, RMSE=1.5428, RMSElog=0.0681, d1=0.9793, d2=0.9941, d3=0.9987
+2025-10-25 11:10:28 - INFO - [GPU Debug] cost_map stats (valid): min=-0.000000, max=1.000000, mean=0.084976
+2025-10-25 11:10:30 - INFO - [GPU Debug] sample (r=360, c=640): gpu_cost=0.189325, cpu_cost=0.189328, diff=0.000003
+2025-10-25 11:10:30 - INFO - [GPU Debug] sample (r=180, c=320): gpu_cost=0.016931, cpu_cost=0.016931, diff=0.000000
+2025-10-25 11:10:30 - INFO - [GPU Debug] sample (r=180, c=960): gpu_cost=0.049756, cpu_cost=0.049760, diff=0.000004
+2025-10-25 11:10:30 - INFO - [GPU Debug] sample (r=540, c=320): gpu_cost=0.206893, cpu_cost=0.206894, diff=0.000002
+2025-10-25 11:10:30 - INFO - [GPU Debug] sample (r=540, c=960): gpu_cost=0.067912, cpu_cost=0.067912, diff=0.000000
+2025-10-25 11:10:30 - INFO - PatchMatch MVS refinement finished.
+2025-10-25 11:10:30 - INFO - [Timing] refine_depth_with_patchmatch total time: 119.80s for index 7
+2025-10-25 11:10:30 - INFO - [Optimized Depth] MAE: 0.3319, AbsRel: 0.0162, RMSE: 1.5428, RMSElog: 0.0681, d1: 0.9793, d2: 0.9941, d3: 0.9987
+2025-10-25 11:10:31 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_optimized.png
+2025-10-25 11:10:31 - INFO - Filtering optimized depth map based on cost and photometric consistency...
+2025-10-25 11:10:36 - INFO - 50056 points invalidated by photometric consistency check.
+2025-10-25 11:10:36 - INFO -   [Photometric Filtered] MAE: 0.1098, AbsRel: 0.0049, RMSE: 0.6726, RMSElog: 0.0292, d1: 0.9964, d2: 0.9990, d3: 0.9997
+2025-10-25 11:10:36 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_photometric.png
+2025-10-25 11:10:36 - INFO - Saving photometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/photometric_filtered_depth.png
+2025-10-25 11:10:36 - INFO - Stored photometrically filtered depth map for index 7.
+2025-10-25 11:10:36 - INFO - Filtering depth map by geometric consistency...
+2025-10-25 11:10:36 - WARNING - No neighbor depth maps available for geometric consistency check.
+2025-10-25 11:10:36 - INFO -   [Geometric Filtered] MAE: 0.1098, AbsRel: 0.0049, RMSE: 0.6726, RMSElog: 0.0292, d1: 0.9964, d2: 0.9990, d3: 0.9997
+2025-10-25 11:10:36 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_geometric.png
+2025-10-25 11:10:36 - INFO - Saving geometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/geometrically_filtered_depth.png
+2025-10-25 11:10:36 - INFO - Saving ortho depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/ortho_depth.png
+2025-10-25 11:10:38 - INFO - Saved fused world-orthographic depth to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/fused_ortho_running.png
+2025-10-25 11:10:42 - INFO - Integrated 103696 points from multiple depth maps.
+2025-10-25 11:10:42 - INFO -
+--- Final: Saving the last integrated point cloud ---
+2025-10-25 11:10:43 - INFO - Initial merged point cloud size: 103696
+2025-10-25 11:10:43 - INFO - Point cloud size after outlier removal: 102711
+2025-10-25 11:10:43 - INFO - Final point cloud saved to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/point_cloud/output.ply
+2025-10-25 11:10:43 - INFO - Showing final integrated point cloud. Close the window to exit.
+2025-10-25 11:10:55 - INFO - Total point cloud generation time: 146.46s
+2025-10-25 11:11:36 - INFO - init
+2025-10-25 11:11:36 - INFO - HOME_DIR=/home/geolab/Projects/initial_3d_pointcloud_creation DATA_DIR=/home/geolab/Projects/initial_3d_pointcloud_creation/data DATA_TYPE=1280_720_35_74.73365_92_0.25
+2025-10-25 11:11:36 - INFO - Loaded 22 camera poses.
+2025-10-25 11:11:36 - INFO - DepthOptimization backend: GPU
+2025-10-25 11:11:36 - INFO - Targeting specific image indices for processing: [7]
+2025-10-25 11:11:36 - INFO - Pre-loading images...
+2025-10-25 11:11:37 - INFO -
+--- Step 1: Optimizing depth maps and applying photometric filter ---
+2025-10-25 11:11:37 - INFO - Optimizing depth map for image pair 7...
+2025-10-25 11:11:37 - INFO - Info: Detected 'Y' channel in the file. Reading it as depth data.
+2025-10-25 11:11:37 - INFO - Initial depth calculation time for image 7: 0.5399 seconds
+2025-10-25 11:11:37 - INFO - Saved disparity map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/disparity/disp_0007.png
+2025-10-25 11:11:38 - INFO - Saving initial depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_00.png
+2025-10-25 11:11:38 - INFO - [Initial Depth] MAE: 4.2489, AbsRel: 0.1995, RMSE: 4.4163, RMSElog: 0.1850, d1: 0.8931, d2: 0.9991, d3: 0.9998
+2025-10-25 11:11:38 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_initial.png
+2025-10-25 11:11:39 - INFO - Starting PatchMatch MVS depth refinement using 'priority' method...
+2025-10-25 11:13:03 - INFO - Saving initial depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_00.png
+2025-10-25 11:13:03 - INFO - PatchMatch GPU Iteration 1/10
+2025-10-25 11:13:05 - INFO - [TIME] GPU random_search: 2.5272s
+2025-10-25 11:13:06 - INFO - Saving depth map at iteration 1 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_01.png
+2025-10-25 11:13:06 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_01.png
+2025-10-25 11:13:06 - INFO - [GPU] Iter 1: 2.71s | cum=0.08s | MAE=4.6262, AbsRel=0.2143, RMSE=5.6812, RMSElog=0.2192, d1=0.7301, d2=0.9681, d3=0.9997
+2025-10-25 11:13:06 - INFO - PatchMatch GPU Iteration 2/10
+2025-10-25 11:13:10 - INFO - [TIME] GPU propagate priority: 4.5309s
+2025-10-25 11:13:10 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 11:13:10 - INFO - Saving depth map at iteration 2 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_02.png
+2025-10-25 11:13:10 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_02.png
+2025-10-25 11:13:10 - INFO - [GPU] Iter 2: 4.69s | cum=4.78s | MAE=0.3565, AbsRel=0.0172, RMSE=1.4164, RMSElog=0.0590, d1=0.9809, d2=0.9972, d3=0.9999
+2025-10-25 11:13:10 - INFO - PatchMatch GPU Iteration 3/10
+2025-10-25 11:13:13 - INFO - [TIME] GPU propagate priority: 2.9514s
+2025-10-25 11:13:13 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:13:13 - INFO - Saving depth map at iteration 3 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_03.png
+2025-10-25 11:13:13 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_03.png
+2025-10-25 11:13:13 - INFO - [GPU] Iter 3: 3.11s | cum=7.91s | MAE=0.3281, AbsRel=0.0160, RMSE=1.4209, RMSElog=0.0604, d1=0.9810, d2=0.9959, d3=0.9997
+2025-10-25 11:13:13 - INFO - PatchMatch GPU Iteration 4/10
+2025-10-25 11:13:16 - INFO - [TIME] GPU propagate priority: 2.9528s
+2025-10-25 11:13:16 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 11:13:16 - INFO - Saving depth map at iteration 4 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_04.png
+2025-10-25 11:13:17 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_04.png
+2025-10-25 11:13:17 - INFO - [GPU] Iter 4: 3.12s | cum=11.04s | MAE=0.3326, AbsRel=0.0163, RMSE=1.4753, RMSElog=0.0635, d1=0.9796, d2=0.9949, d3=0.9995
+2025-10-25 11:13:17 - INFO - PatchMatch GPU Iteration 5/10
+2025-10-25 11:13:20 - INFO - [TIME] GPU propagate priority: 2.9534s
+2025-10-25 11:13:20 - INFO - [TIME] GPU random_search: 0.0005s
+2025-10-25 11:13:20 - INFO - Saving depth map at iteration 5 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_05.png
+2025-10-25 11:13:20 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_05.png
+2025-10-25 11:13:20 - INFO - [GPU] Iter 5: 3.12s | cum=14.18s | MAE=0.3323, AbsRel=0.0163, RMSE=1.4987, RMSElog=0.0647, d1=0.9793, d2=0.9945, d3=0.9993
+2025-10-25 11:13:20 - INFO - PatchMatch GPU Iteration 6/10
+2025-10-25 11:13:23 - INFO - [TIME] GPU propagate priority: 2.9540s
+2025-10-25 11:13:23 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:13:23 - INFO - Saving depth map at iteration 6 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_06.png
+2025-10-25 11:13:23 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_06.png
+2025-10-25 11:13:23 - INFO - [GPU] Iter 6: 3.12s | cum=17.31s | MAE=0.3325, AbsRel=0.0162, RMSE=1.5168, RMSElog=0.0656, d1=0.9791, d2=0.9942, d3=0.9990
+2025-10-25 11:13:23 - INFO - PatchMatch GPU Iteration 7/10
+2025-10-25 11:13:26 - INFO - [TIME] GPU propagate priority: 2.9513s
+2025-10-25 11:13:26 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:13:26 - INFO - Saving depth map at iteration 7 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_07.png
+2025-10-25 11:13:26 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_07.png
+2025-10-25 11:13:26 - INFO - [GPU] Iter 7: 3.12s | cum=20.44s | MAE=0.3313, AbsRel=0.0162, RMSE=1.5185, RMSElog=0.0659, d1=0.9793, d2=0.9942, d3=0.9990
+2025-10-25 11:13:26 - INFO - PatchMatch GPU Iteration 8/10
+2025-10-25 11:13:29 - INFO - [TIME] GPU propagate priority: 2.9510s
+2025-10-25 11:13:29 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:13:29 - INFO - Saving depth map at iteration 8 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_08.png
+2025-10-25 11:13:29 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_08.png
+2025-10-25 11:13:29 - INFO - [GPU] Iter 8: 3.12s | cum=23.57s | MAE=0.3304, AbsRel=0.0161, RMSE=1.5202, RMSElog=0.0660, d1=0.9794, d2=0.9942, d3=0.9990
+2025-10-25 11:13:29 - INFO - PatchMatch GPU Iteration 9/10
+2025-10-25 11:13:32 - INFO - [TIME] GPU propagate priority: 2.9517s
+2025-10-25 11:13:32 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:13:32 - INFO - Saving depth map at iteration 9 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_09.png
+2025-10-25 11:13:32 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_09.png
+2025-10-25 11:13:32 - INFO - [GPU] Iter 9: 3.12s | cum=26.70s | MAE=0.3302, AbsRel=0.0161, RMSE=1.5242, RMSElog=0.0668, d1=0.9794, d2=0.9941, d3=0.9989
+2025-10-25 11:13:32 - INFO - PatchMatch GPU Iteration 10/10
+2025-10-25 11:13:35 - INFO - [TIME] GPU propagate priority: 2.9731s
+2025-10-25 11:13:35 - INFO - [TIME] GPU random_search: 0.0004s
+2025-10-25 11:13:35 - INFO - Saving depth map at iteration 10 to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/depth_iter_10.png
+2025-10-25 11:13:35 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_iter_10.png
+2025-10-25 11:13:35 - INFO - [GPU] Iter 10: 3.14s | cum=29.86s | MAE=0.3301, AbsRel=0.0161, RMSE=1.5295, RMSElog=0.0679, d1=0.9794, d2=0.9941, d3=0.9989
+2025-10-25 11:13:35 - INFO - [GPU Debug] cost_map stats (valid): min=-0.000000, max=1.000000, mean=0.084976
+2025-10-25 11:13:37 - INFO - [GPU Debug] sample (r=360, c=640): gpu_cost=0.190154, cpu_cost=0.190150, diff=0.000004
+2025-10-25 11:13:37 - INFO - [GPU Debug] sample (r=180, c=320): gpu_cost=0.014316, cpu_cost=0.014317, diff=0.000001
+2025-10-25 11:13:37 - INFO - [GPU Debug] sample (r=180, c=960): gpu_cost=0.049756, cpu_cost=0.049760, diff=0.000004
+2025-10-25 11:13:37 - INFO - [GPU Debug] sample (r=540, c=320): gpu_cost=0.206893, cpu_cost=0.206894, diff=0.000002
+2025-10-25 11:13:37 - INFO - [GPU Debug] sample (r=540, c=960): gpu_cost=0.067912, cpu_cost=0.067912, diff=0.000000
+2025-10-25 11:13:37 - INFO - PatchMatch MVS refinement finished.
+2025-10-25 11:13:38 - INFO - [Timing] refine_depth_with_patchmatch total time: 119.31s for index 7
+2025-10-25 11:13:38 - INFO - [Optimized Depth] MAE: 0.3301, AbsRel: 0.0161, RMSE: 1.5295, RMSElog: 0.0679, d1: 0.9794, d2: 0.9941, d3: 0.9989
+2025-10-25 11:13:38 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_optimized.png
+2025-10-25 11:13:38 - INFO - Filtering optimized depth map based on cost and photometric consistency...
+2025-10-25 11:13:43 - INFO - 50077 points invalidated by photometric consistency check.
+2025-10-25 11:13:43 - INFO -   [Photometric Filtered] MAE: 0.1093, AbsRel: 0.0048, RMSE: 0.6670, RMSElog: 0.0288, d1: 0.9964, d2: 0.9990, d3: 0.9997
+2025-10-25 11:13:43 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_photometric.png
+2025-10-25 11:13:43 - INFO - Saving photometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/photometric_filtered_depth.png
+2025-10-25 11:13:43 - INFO - Stored photometrically filtered depth map for index 7.
+2025-10-25 11:13:43 - INFO - Filtering depth map by geometric consistency...
+2025-10-25 11:13:43 - WARNING - No neighbor depth maps available for geometric consistency check.
+2025-10-25 11:13:43 - INFO -   [Geometric Filtered] MAE: 0.1093, AbsRel: 0.0048, RMSE: 0.6670, RMSElog: 0.0288, d1: 0.9964, d2: 0.9990, d3: 0.9997
+2025-10-25 11:13:43 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/error_map_geometric.png
+2025-10-25 11:13:43 - INFO - Saving geometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/geometrically_filtered_depth.png
+2025-10-25 11:13:43 - INFO - Saving ortho depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/ortho_depth.png
+2025-10-25 11:13:45 - INFO - Saved fused world-orthographic depth to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0007/fused_ortho_running.png
+2025-10-25 11:13:50 - INFO - Integrated 103703 points from multiple depth maps.
+2025-10-25 11:13:50 - INFO -
+--- Final: Saving the last integrated point cloud ---
+2025-10-25 11:13:50 - INFO - Initial merged point cloud size: 103703
+2025-10-25 11:13:50 - INFO - Point cloud size after outlier removal: 102726
+2025-10-25 11:13:50 - INFO - Final point cloud saved to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/point_cloud/output.ply
+2025-10-25 11:13:50 - INFO - Showing final integrated point cloud. Close the window to exit.
+2025-10-25 11:13:57 - INFO - Total point cloud generation time: 140.63s

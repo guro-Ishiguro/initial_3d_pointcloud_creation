@@ -112,80 +112,7 @@ pixel_size = scene_width / width
 
 window_size, min_disp, num_disp = 7, 0, 216
 
-# --- デバッグ用の設定 ---
-DEBUG_PATCH_MATCH_VISUALIZATION = (
-    False  # PatchMatch のホモグラフィ行列の移動先デバッグ可視化を行うか
-)
-DEBUG_PIXEL_COORDS = (230, 1000)  # デバッグ用のピクセル座標 (x, y)
-
-# --- PatchMatch MVS のパラメーター ---
-PATCHMATCH_ITERATIONS = 10  # PatchMatchの反復回数
-PATCHMATCH_PATCH_SIZE = 7  # パッチサイズ (奇数)
-NORMAL_ESTIMATION_NEIGHBORHOOD = 7  # 法線推定に使う近傍のサイズ
-ZNCC_EPSILON = 1e-6  # ZNCCコスト計算時の小さな値
-TOP_K_COSTS = 3  # 複数視点コストを集計する際の上位何個を考慮するか
-PATCHMATCH_VANILLA_MIN_DEPTH = 7.5
-PATCHMATCH_VANILLA_MAX_DEPTH = 35.0
-PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE = 50.0  # ランダム探索の初期探索幅
-DEBUG_VISUALIZATION = True  # 処理中の点群などをウィンドウで表示するか
-DEBUG_SAVE_DEPTH_MAPS = True  # 最適化前後のデプスマップを画像として保存するか
-DEBUG_SAVE_NORMAL_MAPS = True  # 法線マップを画像として保存するか
-TARGET_INDICES = [7]  # 対象の画像インデックス
-
-# --- PatchMatch MVS のパラメーター ---
-MAX_NEIGHBORS = 8  # 最大の近傍ビューの数
-
-# --- ビューワー ---
-STREAMING_VIEWER = False  # 逐次点群をビューワーに反映するか
-VIEWER_TOPDOWN_FRONT = [0.0, -1.0, 0.0]  # Unity想定: 上から俯瞰（-Y を見る）
-VIEWER_TOPDOWN_UP = [0.0, 0.0, 1.0]  # 上ベクトル（Z軸を上に）
-VIEWER_TOPDOWN_ZOOM = 0.7  # ズーム係数（0～1）
-VIEWER_ROLL_DEG = -90.0  # 俯瞰視点でのロール回転（+は画面を半時計回りに回転）
-
-# --- 深度融合（逐次統合） ---
-DEPTH_FUSION_ENABLE = True
-
-# --- 伝播の方法の選択 ---
-PROPAGATION_METHOD = ["checkerboard", "priority"]
-CHOICED_PROPAGATION_METHOD = PROPAGATION_METHOD[1]
-
-# --- 空間伝播の近傍方向数 ---
-PROPAGATION_NEIGHBOR_DIRECTIONS = int(os.getenv("PM_PROP_DIRS", "4"))  # 4 or 8
-
-# --- 適応的ランダム探索のパラメータ ---
-PATCHMATCH_DECAY_RATE = 0.90
-PATCHMATCH_NORMAL_SEARCH_ANGLE = 20.0
-ADAPTIVE_WEIGHT_SIGMA_COLOR = 10
-
-# --- 優先度付き伝播のパラメータ ---
-BUCKET_PROPAGATION_BINS = 4
-PRIORITY_MAX_SWEEPS = int(
-    os.getenv("PM_PRIORITY_SWEEPS", "8")
-)  # 1 bin内の内部スイープ回数
-
-# --- 光度一貫性チェックの設定 ---
-FILTERING_COLOR_DIFFERENCE_THRESHOLD = 20  # 色の差のしきい値 (0-255)
-FILTERING_MIN_CONSISTENT_VIEWS = 3  # 必要な近傍ビューの最小数
-
-# --- 幾何学的一貫性フィルターの設定 ---
-GEOMETRIC_FILTER_ENABLED = True  # 幾何学的一貫性チェックを有効にするか
-GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD = 0.05  # 幾何学的なエラー（相対深度差）のしきい値
-GEOMETRIC_MIN_CONSISTENT_VIEWS = (
-    2  # 一貫性があると判断するために必要な近傍ビューの最小数
-)
-
-# --- 誤差 ---
-POSITION_ERROR_SCALE = 0.0  # 位置の誤差スケール (メートル)
-ROTATION_ERROR_SCALE = 0.0  # 回転の誤差スケール (ラジアン)
-
-# --- ログ設定 ---
-LOG_TO_FILE = True
-LOG_LEVEL = os.getenv("PM_LOG_LEVEL", "INFO")  # DEBUG/INFO/WARNING/ERROR
-LOG_DIR = os.path.join(OUTPUT_TYPE_DIR, "logs")
-
-# --- ロバスト化オプション ---
-# Top-K集約を平均ではなく中央値に切替（0: mean, 1: median）
-USE_MEDIAN_TOP_K = int(os.getenv("PM_USE_MEDIAN_TOP_K", "1"))
+# 以降のMVSパラメータ定義は冗長回避のため削除。必ず app/mvs.yaml から読み込みます。
 
 # YAML(app/mvs.yaml もしくは APP_MVS_CONFIG) による MVS パラメータの上書き
 try:
@@ -198,8 +125,8 @@ try:
         if isinstance(_cfg, dict):
             g = globals()
             for k, v in _cfg.items():
-                if k in g and v is not None:
+                if v is not None:
                     g[k] = v
 except Exception:
-    # YAML が読めない場合は静かに既定値を使用
+    # YAML 読み込みに失敗した場合は、上位でのエラーハンドリングに委ねる
     pass

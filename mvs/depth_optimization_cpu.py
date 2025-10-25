@@ -1,23 +1,24 @@
 # mvs/depth_optimization.py
 
-import numpy as np
-import cv2
-from numba import njit, prange
 import logging
-import config
 import os
+import time
+
+import config
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+from logging_setup import time_block
+from numba import njit, prange
 from utils import (
-    save_depth_map_as_image,
-    compute_depth_metrics,
-    save_normal_map_as_image,
-    initialize_csv,
     append_to_csv,
     clear_folder,
+    compute_depth_metrics,
+    initialize_csv,
+    save_depth_map_as_image,
     save_error_map_as_image,
+    save_normal_map_as_image,
 )
-import time
-import matplotlib.pyplot as plt
-from logging_setup import time_block, log_ndarray_stats
 
 
 @njit(fastmath=True)
@@ -59,7 +60,9 @@ def _compute_homography_jit(
 
 
 @njit(fastmath=True)
-def _compute_weighted_zncc_cost_jit(patch_ref, warped_patch_src, sigma_color):
+def _compute_weighted_zncc_cost_jit(
+    patch_ref, warped_patch_src, sigma_color, zncc_epsilon
+):
     """
     適応的支持領域重み付けを用いてZNCCコストを計算する。
     """
@@ -88,7 +91,7 @@ def _compute_weighted_zncc_cost_jit(patch_ref, warped_patch_src, sigma_color):
     std_ref = np.sqrt(var_ref)
     std_src = np.sqrt(var_src)
 
-    if std_ref < config.ZNCC_EPSILON or std_src < config.ZNCC_EPSILON:
+    if std_ref < zncc_epsilon or std_src < zncc_epsilon:
         return 1.0
 
     # 3. 重み付きZNCCを計算
@@ -118,6 +121,7 @@ def _evaluate_cost_jit(
     src_T,
     top_k_costs,
     adaptive_weight_sigma_color,
+    zncc_epsilon,
 ):
     h, w = ref_image_gray.shape
     half = patch_size // 2
@@ -162,7 +166,7 @@ def _evaluate_cost_jit(
                     src_images_gray[i], v_src, u_src
                 )
         costs[i] = _compute_weighted_zncc_cost_jit(
-            patch_ref, warped_patch, adaptive_weight_sigma_color
+            patch_ref, warped_patch, adaptive_weight_sigma_color, zncc_epsilon
         )
 
     costs = np.sort(costs)
@@ -189,6 +193,7 @@ def _propagate_spatial_one_color_jit(
     patch_size,
     top_k_costs,
     adaptive_weight_sigma_color,
+    zncc_epsilon,
     # 参照ビューのデータ
     ref_image_gray,
     ref_pose_K,
@@ -214,6 +219,7 @@ def _propagate_spatial_one_color_jit(
             if (r + c) % 2 != color:
                 continue
 
+            # 無効深度の画素はスキップ（CPU基準の挙動）
             if not np.isfinite(depth_map[r, c]):
                 continue
 
@@ -249,6 +255,7 @@ def _propagate_spatial_one_color_jit(
                     src_T,
                     top_k_costs,
                     adaptive_weight_sigma_color,
+                    zncc_epsilon,
                 )
 
                 # コストが改善されれば、現在のピクセルの平面を更新
@@ -375,6 +382,7 @@ def _propagate_bucket_jit(
                     src_T,
                     top_k_costs,
                     adaptive_weight_sigma_color,
+                    np.float32(config.ZNCC_EPSILON),
                 )
 
                 # コストが改善される場合、伝播先の平面情報を更新
@@ -404,6 +412,7 @@ def _random_search_jit(
     src_R,
     src_T,
     adaptive_weight_sigma_color,
+    zncc_epsilon,
     depth_range_map,
 ):
     """画像全体に対してランダム探索を実行する"""
@@ -454,6 +463,7 @@ def _random_search_jit(
                 src_T,
                 top_k_costs,
                 adaptive_weight_sigma_color,
+                zncc_epsilon,
             )
             if new_cost < cost_map[r, c]:
                 depth_map[r, c], normal_map[r, c], cost_map[r, c] = (
@@ -846,9 +856,9 @@ class DepthOptimization:
         src_images_gray = np.stack(
             [
                 cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY).astype(np.float32)
-            for view in neighbor_views_data
-        ],
-        axis=0,
+                for view in neighbor_views_data
+            ],
+            axis=0,
         )
         src_K = np.stack(
             [view["K"].astype(np.float32) for view in neighbor_views_data], axis=0
@@ -880,6 +890,7 @@ class DepthOptimization:
                         src_T,
                         self.config.TOP_K_COSTS,
                         self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                        np.float32(self.config.ZNCC_EPSILON),
                     )
 
         depth_map_prev = np.zeros_like(depth_map)
@@ -959,6 +970,7 @@ class DepthOptimization:
                             self.config.PATCHMATCH_PATCH_SIZE,
                             self.config.TOP_K_COSTS,
                             self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                            np.float32(self.config.ZNCC_EPSILON),
                             ref_image_gray,
                             ref_pose_K,
                             ref_pose_R,
@@ -1018,6 +1030,7 @@ class DepthOptimization:
                     src_R,
                     src_T,
                     self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                    np.float32(self.config.ZNCC_EPSILON),
                     depth_range_map,
                 )
 
@@ -1264,6 +1277,7 @@ class DepthOptimization:
                 src_R,
                 src_T,
                 self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                np.float32(self.config.ZNCC_EPSILON),
                 depth_range_map,
             )
 

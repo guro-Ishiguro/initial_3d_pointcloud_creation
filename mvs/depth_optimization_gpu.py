@@ -13,6 +13,7 @@ from logging_setup import log_ndarray_stats, time_block
 from numba import cuda, njit, prange
 from numba.cuda.random import create_xoroshiro128p_states
 from utils import (
+    append_to_csv,
     clear_folder,
     compute_depth_metrics,
     initialize_csv,
@@ -357,6 +358,7 @@ def _evaluate_cost_cuda(
     top_k_costs,
     adaptive_weight_sigma_color,
     zncc_epsilon,
+    use_median_top_k,
 ):
     h, w = ref_image_gray.shape
     half = patch_size // 2
@@ -469,10 +471,26 @@ def _evaluate_cost_cuda(
             if costs[i] > costs[j]:
                 costs[i], costs[j] = costs[j], costs[i]
     top_k = min(top_k_costs, num_neighbors)
-    total_cost = 0.0
-    for i in range(top_k):
-        total_cost += costs[i]
-    return total_cost / top_k
+    # USE_MEDIAN_TOP_K による中央値/平均の切替（CPUと同等の動作）
+    if use_median_top_k != 0:
+        # costs は昇順ソート済み（下で2重ループの後に並べ替えがあるため、こちらでも整列を担保）
+        # ただし上の2重ループは隣接要素の交換なのでコストが単調とは限らない。念のため再整列。
+        # 軽量なローカル選択のため単純な挿入ソートでもよいが、件数が少ないので再使用。
+        # 手動の簡易ソート（バブル）
+        for ii in range(num_neighbors):
+            for jj in range(ii + 1, num_neighbors):
+                if costs[ii] > costs[jj]:
+                    tmp = costs[ii]
+                    costs[ii] = costs[jj]
+                    costs[jj] = tmp
+        # 中央値（偶数なら下側の中間値）
+        mid = top_k // 2
+        return costs[mid]
+    else:
+        total_cost = 0.0
+        for i in range(top_k):
+            total_cost += costs[i]
+        return total_cost / top_k
 
 
 @njit(fastmath=True)
@@ -581,7 +599,9 @@ def _propagate_spatial_one_color_cuda(
         return
     if (r + c) % 2 != color:
         return
-    # Allow propagation even if current pixel depth is invalid.
+    # 無効深度の画素はスキップ（CPU基準の挙動に統一）
+    if math.isnan(depth_map[r, c]) or math.isinf(depth_map[r, c]):
+        return
 
     for i in range(len(neighbors_dr)):
         dr = neighbors_dr[i]
@@ -615,6 +635,7 @@ def _propagate_spatial_one_color_cuda(
             top_k_costs,
             adaptive_weight_sigma_color,
             zncc_epsilon,
+            np.int32(config.USE_MEDIAN_TOP_K),
         )
 
         if new_cost < cost_map[r, c]:
@@ -737,6 +758,7 @@ def _propagate_bucket_push_dir_cuda(
             top_k_costs,
             adaptive_weight_sigma_color,
             zncc_epsilon,
+            np.int32(config.USE_MEDIAN_TOP_K),
         )
 
         if new_cost < cost_map[nr, nc]:
@@ -835,6 +857,7 @@ def _propagate_bucket_push4_cuda(
                 top_k_costs,
                 adaptive_weight_sigma_color,
                 zncc_epsilon,
+                np.int32(config.USE_MEDIAN_TOP_K),
             )
 
             if new_cost < cost_map[nr, nc]:
@@ -1198,6 +1221,7 @@ def _random_search_cuda(
         top_k_costs,
         adaptive_weight_sigma_color,
         zncc_epsilon,
+        np.int32(config.USE_MEDIAN_TOP_K),
     )
     if new_cost < cost_map[r, c]:
         depth_map[r, c] = d_new
@@ -2009,6 +2033,7 @@ class DepthOptimization:
             save_dir=save_each_depth_dir,
             gt_depth=gt_depth,
             iter_times=iter_times_gpu,
+            csv_files=csv_files if gt_depth is not None else None,
         )
 
         # --- Debug: cost_map statistics and CPU/GPU cost consistency check on samples ---
@@ -2336,6 +2361,7 @@ class DepthOptimization:
         save_dir=None,
         gt_depth=None,
         iter_times=None,
+        csv_files=None,
     ):
         h, w = depth_map.shape
 
@@ -2365,7 +2391,7 @@ class DepthOptimization:
             seed=1,
         )
 
-        depth_prev_for_conv = depth_map.copy()
+        # depth_prev_for_conv = depth_map.copy()  # early stopping disabled
         for i in range(self.config.PATCHMATCH_ITERATIONS):
             iter_start_time = time.time()
             logging.info(
@@ -2555,6 +2581,18 @@ class DepthOptimization:
                         f"[GPU] Iter {i+1}: {iter_duration:.2f}s{cum_txt} | MAE={metrics['mae']:.4f}, AbsRel={metrics['abs_rel']:.4f}, "
                         f"RMSE={metrics['rmse']:.4f}, RMSElog={metrics['rmse_log']:.4f}, d1={metrics['delta1']:.4f}, d2={metrics['delta2']:.4f}, d3={metrics['delta3']:.4f}"
                     )
+                    # CSV 出力
+                    if csv_files is not None:
+                        current_time = (
+                            float(np.sum(iter_times))
+                            if iter_times is not None
+                            else float(i + 1)
+                        )
+                        for metric_key, value in metrics.items():
+                            if metric_key in csv_files:
+                                append_to_csv(
+                                    csv_files[metric_key], [current_time, value]
+                                )
                 except Exception as e:
                     logging.warning(
                         f"[GPU] Could not compute metrics at iter {i+1}: {e}"
@@ -2562,25 +2600,25 @@ class DepthOptimization:
             else:
                 logging.info(f"[GPU] Iter {i+1}: {iter_duration:.2f}s{cum_txt}")
 
-            # Early convergence check to mirror CPU behavior
-            depth_curr = d_depth_map.copy_to_host()
-            valid_mask = (
-                np.isfinite(depth_prev_for_conv)
-                & (depth_prev_for_conv != 0)
-                & np.isfinite(depth_curr)
-            )
-            if np.any(valid_mask):
-                mean_change = np.mean(
-                    np.abs(depth_prev_for_conv[valid_mask] - depth_curr[valid_mask])
-                    / np.maximum(1e-6, np.abs(depth_prev_for_conv[valid_mask]))
-                )
-                logging.info(f"[GPU] Average depth change: {mean_change:.5f}")
-                if mean_change < 0.001:
-                    depth_map = depth_curr
-                    normal_map = d_normal_map.copy_to_host()
-                    cost_map = d_cost_map.copy_to_host()
-                    return depth_map, normal_map, cost_map
-            depth_prev_for_conv = depth_curr
+            # Early convergence check disabled
+            # depth_curr = d_depth_map.copy_to_host()
+            # valid_mask = (
+            #     np.isfinite(depth_prev_for_conv)
+            #     & (depth_prev_for_conv != 0)
+            #     & np.isfinite(depth_curr)
+            # )
+            # if np.any(valid_mask):
+            #     mean_change = np.mean(
+            #         np.abs(depth_prev_for_conv[valid_mask] - depth_curr[valid_mask])
+            #         / np.maximum(1e-6, np.abs(depth_prev_for_conv[valid_mask]))
+            #     )
+            #     logging.info(f"[GPU] Average depth change: {mean_change:.5f}")
+            #     if mean_change < 0.001:
+            #         depth_map = depth_curr
+            #         normal_map = d_normal_map.copy_to_host()
+            #         cost_map = d_cost_map.copy_to_host()
+            #         return depth_map, normal_map, cost_map
+            # depth_prev_for_conv = depth_curr
 
         depth_map = d_depth_map.copy_to_host()
         normal_map = d_normal_map.copy_to_host()

@@ -10,7 +10,7 @@ env:
   PM_PROP_DIRS: "4"
 
   # priority max sweeps per bin
-  PM_PRIORITY_SWEEPS: "8"
+  PM_PRIORITY_SWEEPS: "4"
 
   # gpu warmup (1/0)
   PM_GPU_WARMUP: "1"
