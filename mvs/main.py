@@ -132,14 +132,14 @@ def run():
         else None
     )
 
-    # 参照カメラ（最初のターゲット）で融合先を固定
+    # 参照カメラ（TARGET_INDICESの先頭）で融合先を固定
     if getattr(config, "DEPTH_FUSION_ENABLE", False) and target_indices:
         ref_idx0 = target_indices[0]
         _, ref_T0, _, _, ref_R0 = all_pairs_data[ref_idx0]
         if ref_idx0 in loaded_images:
             ref_h0, ref_w0, _ = loaded_images[ref_idx0].shape
         else:
-            # フォールバック：最初の読み込み済み画像サイズ
+            # フォールバック：読み込み済みのうち最初
             any_idx = next(iter(loaded_images))
             ref_h0, ref_w0, _ = loaded_images[any_idx].shape
         cam_fuser = CameraPlaneMedianFuser(
@@ -382,6 +382,22 @@ def run():
                 )
                 geometrically_filtered_depth = photometrically_filtered_depth
 
+            # --- 参照カメラ平面への逐次融合（中央値） ---
+            if cam_fuser is not None:
+                try:
+                    fused_ref = cam_fuser.add_depth_from_source(
+                        geometrically_filtered_depth, R_mat, T_pos
+                    )
+                    if (
+                        getattr(config, "DEBUG_SAVE_DEPTH_MAPS", False)
+                        and fused_ref is not None
+                    ):
+                        cam_fuser.save_fused(
+                            os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}")
+                        )
+                except Exception as e:
+                    logging.warning(f"Camera-plane fusion failed at {idx}: {e}")
+
             # --- 逐次で点群へ変換し、これまでのものと統合して表示 ---
             (
                 ortho_depth_map,
@@ -401,7 +417,7 @@ def run():
             merged_pts_list.append(world_points)
             merged_cols_list.append(world_colors)
 
-            # 逐次深度融合
+            # オルソ化後の逐次融合（世界座標グリッド，中央値）
             if world_ortho_fuser is not None:
                 fused_world_ortho = world_ortho_fuser.add_world_points(world_points)
                 if config.DEBUG_SAVE_DEPTH_MAPS and fused_world_ortho is not None:
@@ -489,6 +505,18 @@ def run():
 
     # --- 最終保存 ---
     logging.info("\n--- Final: Saving the last integrated point cloud ---")
+    # 最終融合深度（世界座標オルソ）を保存
+    try:
+        if world_ortho_fuser is not None:
+            final_world_ortho_path = os.path.join(
+                config.DEPTH_IMAGE_DIR, "fused_world_ortho_final.png"
+            )
+            world_ortho_fuser.save_fused_depth(
+                final_world_ortho_path, swap_axes=True, flip_y=True, flip_x=True
+            )
+    except Exception as e:
+        logging.warning(f"Could not save final fused world-ortho depth: {e}")
+
     if merged_pts_list:
         merged_pts = (
             last_integ_pts if last_integ_pts is not None else np.vstack(merged_pts_list)

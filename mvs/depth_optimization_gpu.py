@@ -2520,6 +2520,7 @@ class DepthOptimization:
         logging.info("Filtering depth map by geometric consistency...")
         h, w = ref_depth_map.shape
         filtered_depth_map = ref_depth_map.copy()
+        initial_valid = int(np.sum(np.isfinite(ref_depth_map) & (ref_depth_map > 0)))
 
         K_ref = ref_pose["K"].astype(np.float32)
         R_ref = ref_pose["R"].astype(np.float32)
@@ -2587,6 +2588,11 @@ class DepthOptimization:
         logging.info(
             f"{failures} points ({failures/(h*w)*100:.2f}%) invalidated by geometric consistency check."
         )
+        if initial_valid > 0 and failures >= 0.9 * initial_valid:
+            logging.warning(
+                "Geometric filter invalidated >90% of valid pixels. Returning unfiltered depth."
+            )
+            return ref_depth_map
         return filtered_depth_map
 
     def filter_depth_map_by_photometric_consistency(
