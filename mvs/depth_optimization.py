@@ -1,13 +1,18 @@
-import os
-import logging
 import importlib
+import logging
+import os
+
+
+def _detect_cupy_available():
+    try:
+        import cupy as cp  # noqa: F401
+
+        return True
+    except Exception:
+        return False
 
 
 def _detect_cuda_available():
-    try:
-        from numba import cuda  # noqa: F401
-    except Exception:
-        return False
     try:
         from numba import cuda
 
@@ -27,18 +32,28 @@ def _import_local_module(mod_name: str):
         return importlib.import_module(mod_name)
 
 
-if _detect_cuda_available():
+backend_pref = os.getenv("MVS_BACKEND", "auto").lower()
+
+DepthOptimization = None  # type: ignore
+USING_GPU = False
+
+if backend_pref in ("cupy", "auto") and _detect_cupy_available():
+    try:
+        DepthOptimization = _import_local_module("depth_optimization_cupy").DepthOptimization  # type: ignore[attr-defined]
+        USING_GPU = True
+        logging.info("DepthOptimization: Using CuPy backend.")
+    except Exception as e:
+        logging.warning(f"CuPy backend import failed ({e}).")
+
+if DepthOptimization is None and _detect_cuda_available():
     try:
         DepthOptimization = _import_local_module("depth_optimization_gpu").DepthOptimization  # type: ignore[attr-defined]
         USING_GPU = True
-        logging.info("DepthOptimization: Using GPU implementation.")
+        logging.info("DepthOptimization: Using Numba CUDA backend.")
     except Exception as e:
-        logging.warning(
-            f"DepthOptimization GPU import failed ({e}); falling back to CPU."
-        )
-        DepthOptimization = _import_local_module("depth_optimization_cpu").DepthOptimization  # type: ignore[attr-defined]
-        USING_GPU = False
-else:
+        logging.warning(f"Numba GPU backend import failed ({e}); falling back to CPU.")
+
+if DepthOptimization is None:
     DepthOptimization = _import_local_module("depth_optimization_cpu").DepthOptimization  # type: ignore[attr-defined]
     USING_GPU = False
 
