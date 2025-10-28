@@ -3362,3 +3362,301 @@ NameError: name 'depth_range_cp' is not defined
 2025-10-26 04:10:27 - INFO - Final point cloud saved to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/point_cloud/output.ply
 2025-10-26 04:10:27 - INFO - Showing final integrated point cloud. Close the window to exit.
 2025-10-26 04:10:53 - INFO - Total point cloud generation time: 146.91s
+2025-10-28 11:36:43 - INFO - init
+2025-10-28 11:36:43 - INFO - HOME_DIR=/home/geolab/Projects/initial_3d_pointcloud_creation DATA_DIR=/home/geolab/Projects/initial_3d_pointcloud_creation/data DATA_TYPE=1280_720_35_74.73365_92_0.25
+2025-10-28 11:36:43 - INFO - Loaded 22 camera poses.
+2025-10-28 11:36:43 - INFO - CuPy memory pools initialized
+2025-10-28 11:36:44 - INFO - DepthOptimization backend: GPU
+2025-10-28 11:36:44 - INFO - Targeting specific image indices for processing: [2]
+2025-10-28 11:36:44 - INFO - Pre-loading images...
+2025-10-28 11:36:45 - INFO -
+--- Step 1: Optimizing depth maps and applying photometric filter ---
+2025-10-28 11:36:45 - INFO - Optimizing depth map for image pair 2...
+2025-10-28 11:36:45 - INFO - Info: Detected 'Y' channel in the file. Reading it as depth data.
+2025-10-28 11:36:45 - INFO - Initial depth calculation time for image 2: 0.5031 seconds
+2025-10-28 11:36:45 - INFO - Saved disparity map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/disparity/disp_0002.png
+2025-10-28 11:36:46 - INFO - Saving initial depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/depth_iter_00.png
+2025-10-28 11:36:46 - INFO - [Initial Depth] MAE: 4.3534, AbsRel: 0.1986, RMSE: 4.4686, RMSElog: 0.1836, d1: 0.9086, d2: 0.9993, d3: 0.9998
+2025-10-28 11:36:46 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_initial.png
+2025-10-28 11:36:46 - INFO - [CuPy][H=4] Iter 1/8 - start
+2025-10-28 11:36:46 - INFO - [CuPy][H=4] Iter 1/8 - mean cost: 0.571423
+2025-10-28 11:36:46 - INFO - [CuPy][H=4] Iter 1/8 - MAE: 3.6372, AbsRel: 0.1708
+2025-10-28 11:36:46 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_01.png
+2025-10-28 11:36:46 - INFO - [CuPy][H=4] Iter 2/8 - start
+2025-10-28 11:36:46 - INFO - [CuPy][H=4] Iter 2/8 - mean cost: 0.413313
+2025-10-28 11:36:46 - INFO - [CuPy][H=4] Iter 2/8 - MAE: 1.6152, AbsRel: 0.0892
+2025-10-28 11:36:46 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_02.png
+2025-10-28 11:36:46 - INFO - [CuPy][H=4] Iter 3/8 - start
+2025-10-28 11:36:46 - INFO - [CuPy][H=4] Iter 3/8 - mean cost: 0.362082
+2025-10-28 11:36:46 - INFO - [CuPy][H=4] Iter 3/8 - MAE: 1.0227, AbsRel: 0.0564
+2025-10-28 11:36:46 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_03.png
+2025-10-28 11:36:46 - INFO - [CuPy][H=4] Iter 4/8 - start
+2025-10-28 11:36:47 - INFO - [CuPy][H=4] Iter 4/8 - mean cost: 0.323112
+2025-10-28 11:36:47 - INFO - [CuPy][H=4] Iter 4/8 - MAE: 0.4941, AbsRel: 0.0261
+2025-10-28 11:36:47 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_04.png
+2025-10-28 11:36:47 - INFO - [CuPy][H=4] Iter 5/8 - start
+2025-10-28 11:36:47 - INFO - [CuPy][H=4] Iter 5/8 - mean cost: 0.307774
+2025-10-28 11:36:47 - INFO - [CuPy][H=4] Iter 5/8 - MAE: 0.3094, AbsRel: 0.0156
+2025-10-28 11:36:47 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_05.png
+2025-10-28 11:36:47 - INFO - [CuPy][H=4] Iter 6/8 - start
+2025-10-28 11:36:47 - INFO - [CuPy][H=4] Iter 6/8 - mean cost: 0.304757
+2025-10-28 11:36:47 - INFO - [CuPy][H=4] Iter 6/8 - MAE: 0.2766, AbsRel: 0.0137
+2025-10-28 11:36:47 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_06.png
+2025-10-28 11:36:47 - INFO - [CuPy][H=4] Iter 7/8 - start
+2025-10-28 11:36:47 - INFO - [CuPy][H=4] Iter 7/8 - mean cost: 0.303939
+2025-10-28 11:36:47 - INFO - [CuPy][H=4] Iter 7/8 - MAE: 0.2708, AbsRel: 0.0133
+2025-10-28 11:36:47 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_07.png
+2025-10-28 11:36:47 - INFO - [CuPy][H=4] Iter 8/8 - start
+2025-10-28 11:36:47 - INFO - [CuPy][H=4] Iter 8/8 - mean cost: 0.303591
+2025-10-28 11:36:47 - INFO - [CuPy][H=4] Iter 8/8 - MAE: 0.2714, AbsRel: 0.0132
+2025-10-28 11:36:47 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_08.png
+2025-10-28 11:36:47 - INFO - [Timing] refine_depth_with_patchmatch total time: 1.30s for index 2
+2025-10-28 11:36:47 - INFO - [Optimized Depth] MAE: 0.2714, AbsRel: 0.0132, RMSE: 0.9929, RMSElog: 0.0466, d1: 0.9921, d2: 0.9986, d3: 0.9999
+2025-10-28 11:36:47 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_optimized.png
+2025-10-28 11:36:47 - INFO - Filtering optimized depth map based on cost and photometric consistency...
+2025-10-28 11:38:37 - INFO - 58989 points invalidated by photometric consistency check.
+2025-10-28 11:38:37 - INFO -   [Photometric Filtered] MAE: 0.0874, AbsRel: 0.0038, RMSE: 0.3728, RMSElog: 0.0167, d1: 0.9980, d2: 0.9998, d3: 1.0000
+2025-10-28 11:38:37 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_photometric.png
+2025-10-28 11:38:37 - INFO - Saving photometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/photometric_filtered_depth.png
+2025-10-28 11:38:37 - INFO - Stored photometrically filtered depth map for index 2.
+2025-10-28 11:38:37 - INFO - Filtering depth map by geometric consistency...
+2025-10-28 11:38:37 - WARNING - No neighbor depth maps available for geometric consistency check.
+2025-10-28 11:38:37 - INFO -   [Geometric Filtered] MAE: 0.0874, AbsRel: 0.0038, RMSE: 0.3728, RMSElog: 0.0167, d1: 0.9980, d2: 0.9998, d3: 1.0000
+2025-10-28 11:38:37 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_geometric.png
+2025-10-28 11:38:37 - INFO - Saving geometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/geometrically_filtered_depth.png
+2025-10-28 11:38:38 - INFO - Saved camera-plane fused depth to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/fused_camera_plane_running.png
+2025-10-28 11:38:39 - INFO - Saving ortho depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/ortho_depth.png
+2025-10-28 11:38:40 - INFO - Saved fused world-orthographic depth to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/fused_ortho_running.png
+2025-10-28 11:38:44 - INFO - Integrated 89009 points from multiple depth maps.
+2025-10-28 11:38:45 - INFO -
+--- Final: Saving the last integrated point cloud ---
+2025-10-28 11:38:45 - INFO - Saved fused world-orthographic depth to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/fused_world_ortho_final.png
+2025-10-28 11:38:45 - INFO - Initial merged point cloud size: 89009
+2025-10-28 11:38:45 - INFO - Point cloud size after outlier removal: 88171
+2025-10-28 11:38:45 - INFO - Final point cloud saved to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/point_cloud/output.ply
+2025-10-28 11:38:45 - INFO - Showing final integrated point cloud. Close the window to exit.
+2025-10-28 11:39:47 - INFO - Total point cloud generation time: 183.64s
+2025-10-28 11:40:15 - INFO - init
+2025-10-28 11:40:15 - INFO - HOME_DIR=/home/geolab/Projects/initial_3d_pointcloud_creation DATA_DIR=/home/geolab/Projects/initial_3d_pointcloud_creation/data DATA_TYPE=1280_720_35_74.73365_92_0.25
+2025-10-28 11:40:15 - INFO - Loaded 22 camera poses.
+2025-10-28 11:40:15 - INFO - CuPy memory pools initialized
+2025-10-28 11:40:15 - INFO - DepthOptimization backend: GPU
+2025-10-28 11:40:15 - INFO - Targeting specific image indices for processing: [1, 2, 3, 4, 5, 6, 7]
+2025-10-28 11:40:15 - INFO - Pre-loading images...
+2025-10-28 11:40:15 - INFO -
+--- Step 1: Optimizing depth maps and applying photometric filter ---
+2025-10-28 11:40:15 - INFO - Optimizing depth map for image pair 1...
+2025-10-28 11:40:15 - INFO - Info: Detected 'Y' channel in the file. Reading it as depth data.
+2025-10-28 11:40:16 - INFO - Initial depth calculation time for image 1: 0.5142 seconds
+2025-10-28 11:40:16 - INFO - Saved disparity map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/disparity/disp_0001.png
+2025-10-28 11:40:16 - INFO - Saving initial depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/depth_iter_00.png
+2025-10-28 11:40:16 - INFO - [Initial Depth] MAE: 4.3763, AbsRel: 0.1984, RMSE: 4.4816, RMSElog: 0.1834, d1: 0.9096, d2: 0.9995, d3: 1.0000
+2025-10-28 11:40:16 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/error_map_initial.png
+2025-10-28 11:40:16 - INFO - [CuPy][H=4] Iter 1/8 - start
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 1/8 - mean cost: 0.608780
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 1/8 - MAE: 3.6474, AbsRel: 0.1700
+2025-10-28 11:40:17 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/error_map_iter_01.png
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 2/8 - start
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 2/8 - mean cost: 0.446300
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 2/8 - MAE: 1.6657, AbsRel: 0.0898
+2025-10-28 11:40:17 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/error_map_iter_02.png
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 3/8 - start
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 3/8 - mean cost: 0.393859
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 3/8 - MAE: 1.0824, AbsRel: 0.0578
+2025-10-28 11:40:17 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/error_map_iter_03.png
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 4/8 - start
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 4/8 - mean cost: 0.357186
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 4/8 - MAE: 0.5960, AbsRel: 0.0301
+2025-10-28 11:40:17 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/error_map_iter_04.png
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 5/8 - start
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 5/8 - mean cost: 0.342765
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 5/8 - MAE: 0.4225, AbsRel: 0.0203
+2025-10-28 11:40:17 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/error_map_iter_05.png
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 6/8 - start
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 6/8 - mean cost: 0.339671
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 6/8 - MAE: 0.3948, AbsRel: 0.0186
+2025-10-28 11:40:17 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/error_map_iter_06.png
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 7/8 - start
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 7/8 - mean cost: 0.338982
+2025-10-28 11:40:17 - INFO - [CuPy][H=4] Iter 7/8 - MAE: 0.3912, AbsRel: 0.0184
+2025-10-28 11:40:18 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/error_map_iter_07.png
+2025-10-28 11:40:18 - INFO - [CuPy][H=4] Iter 8/8 - start
+2025-10-28 11:40:18 - INFO - [CuPy][H=4] Iter 8/8 - mean cost: 0.338658
+2025-10-28 11:40:18 - INFO - [CuPy][H=4] Iter 8/8 - MAE: 0.3914, AbsRel: 0.0183
+2025-10-28 11:40:18 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/error_map_iter_08.png
+2025-10-28 11:40:18 - INFO - [Timing] refine_depth_with_patchmatch total time: 1.22s for index 1
+2025-10-28 11:40:18 - INFO - [Optimized Depth] MAE: 0.3914, AbsRel: 0.0183, RMSE: 1.2296, RMSElog: 0.0552, d1: 0.9893, d2: 0.9985, d3: 0.9999
+2025-10-28 11:40:18 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/error_map_optimized.png
+2025-10-28 11:40:18 - INFO - Filtering optimized depth map based on cost and photometric consistency...
+2025-10-28 11:41:47 - INFO - 94527 points invalidated by photometric consistency check.
+2025-10-28 11:41:47 - INFO -   [Photometric Filtered] MAE: 0.1009, AbsRel: 0.0044, RMSE: 0.4566, RMSElog: 0.0194, d1: 0.9972, d2: 0.9999, d3: 1.0000
+2025-10-28 11:41:47 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/error_map_photometric.png
+2025-10-28 11:41:47 - INFO - Saving photometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/photometric_filtered_depth.png
+2025-10-28 11:41:47 - INFO - Stored photometrically filtered depth map for index 1.
+2025-10-28 11:41:47 - INFO - Filtering depth map by geometric consistency...
+2025-10-28 11:41:47 - WARNING - No neighbor depth maps available for geometric consistency check.
+2025-10-28 11:41:47 - INFO -   [Geometric Filtered] MAE: 0.1009, AbsRel: 0.0044, RMSE: 0.4566, RMSElog: 0.0194, d1: 0.9972, d2: 0.9999, d3: 1.0000
+2025-10-28 11:41:47 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/error_map_geometric.png
+2025-10-28 11:41:47 - INFO - Saving geometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/geometrically_filtered_depth.png
+2025-10-28 11:41:48 - INFO - Saved camera-plane fused depth to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/fused_camera_plane_running.png
+2025-10-28 11:41:48 - INFO - Saving ortho depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/ortho_depth.png
+2025-10-28 11:41:50 - INFO - Saved fused world-orthographic depth to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0001/fused_ortho_running.png
+2025-10-28 11:41:54 - INFO - Integrated 82894 points from multiple depth maps.
+2025-10-28 11:41:54 - INFO - Optimizing depth map for image pair 2...
+2025-10-28 11:41:54 - INFO - Info: Detected 'Y' channel in the file. Reading it as depth data.
+2025-10-28 11:41:55 - INFO - Initial depth calculation time for image 2: 0.4993 seconds
+2025-10-28 11:41:55 - INFO - Saved disparity map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/disparity/disp_0002.png
+2025-10-28 11:41:55 - INFO - Saving initial depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/depth_iter_00.png
+2025-10-28 11:41:55 - INFO - [Initial Depth] MAE: 4.3534, AbsRel: 0.1986, RMSE: 4.4686, RMSElog: 0.1836, d1: 0.9086, d2: 0.9993, d3: 0.9998
+2025-10-28 11:41:55 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_initial.png
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 1/8 - start
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 1/8 - mean cost: 0.571423
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 1/8 - MAE: 3.6372, AbsRel: 0.1708
+2025-10-28 11:41:55 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_01.png
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 2/8 - start
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 2/8 - mean cost: 0.413313
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 2/8 - MAE: 1.6152, AbsRel: 0.0892
+2025-10-28 11:41:55 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_02.png
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 3/8 - start
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 3/8 - mean cost: 0.362082
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 3/8 - MAE: 1.0227, AbsRel: 0.0564
+2025-10-28 11:41:55 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_03.png
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 4/8 - start
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 4/8 - mean cost: 0.323112
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 4/8 - MAE: 0.4941, AbsRel: 0.0261
+2025-10-28 11:41:55 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_04.png
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 5/8 - start
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 5/8 - mean cost: 0.307774
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 5/8 - MAE: 0.3094, AbsRel: 0.0156
+2025-10-28 11:41:55 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_05.png
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 6/8 - start
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 6/8 - mean cost: 0.304757
+2025-10-28 11:41:55 - INFO - [CuPy][H=4] Iter 6/8 - MAE: 0.2766, AbsRel: 0.0137
+2025-10-28 11:41:56 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_06.png
+2025-10-28 11:41:56 - INFO - [CuPy][H=4] Iter 7/8 - start
+2025-10-28 11:41:56 - INFO - [CuPy][H=4] Iter 7/8 - mean cost: 0.303939
+2025-10-28 11:41:56 - INFO - [CuPy][H=4] Iter 7/8 - MAE: 0.2708, AbsRel: 0.0133
+2025-10-28 11:41:56 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_07.png
+2025-10-28 11:41:56 - INFO - [CuPy][H=4] Iter 8/8 - start
+2025-10-28 11:41:56 - INFO - [CuPy][H=4] Iter 8/8 - mean cost: 0.303591
+2025-10-28 11:41:56 - INFO - [CuPy][H=4] Iter 8/8 - MAE: 0.2714, AbsRel: 0.0132
+2025-10-28 11:41:56 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_iter_08.png
+2025-10-28 11:41:56 - INFO - [Timing] refine_depth_with_patchmatch total time: 1.15s for index 2
+2025-10-28 11:41:56 - INFO - [Optimized Depth] MAE: 0.2714, AbsRel: 0.0132, RMSE: 0.9929, RMSElog: 0.0466, d1: 0.9921, d2: 0.9986, d3: 0.9999
+2025-10-28 11:41:56 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_optimized.png
+2025-10-28 11:41:56 - INFO - Filtering optimized depth map based on cost and photometric consistency...
+2025-10-28 11:43:44 - INFO - 58989 points invalidated by photometric consistency check.
+2025-10-28 11:43:44 - INFO -   [Photometric Filtered] MAE: 0.0874, AbsRel: 0.0038, RMSE: 0.3728, RMSElog: 0.0167, d1: 0.9980, d2: 0.9998, d3: 1.0000
+2025-10-28 11:43:44 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_photometric.png
+2025-10-28 11:43:44 - INFO - Saving photometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/photometric_filtered_depth.png
+2025-10-28 11:43:44 - INFO - Stored photometrically filtered depth map for index 2.
+2025-10-28 11:43:44 - INFO - Filtering depth map by geometric consistency...
+2025-10-28 11:43:59 - INFO - 634710 points (68.87%) invalidated by geometric consistency check.
+2025-10-28 11:43:59 - WARNING - Geometric filter invalidated >90% of valid pixels. Returning unfiltered depth.
+2025-10-28 11:43:59 - INFO -   [Geometric Filtered] MAE: 0.0874, AbsRel: 0.0038, RMSE: 0.3728, RMSElog: 0.0167, d1: 0.9980, d2: 0.9998, d3: 1.0000
+2025-10-28 11:43:59 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/error_map_geometric.png
+2025-10-28 11:43:59 - INFO - Saving geometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/geometrically_filtered_depth.png
+2025-10-28 11:44:00 - INFO - Saved camera-plane fused depth to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/fused_camera_plane_running.png
+2025-10-28 11:44:00 - INFO - Saving ortho depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/ortho_depth.png
+2025-10-28 11:44:02 - INFO - Saved fused world-orthographic depth to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0002/fused_ortho_running.png
+2025-10-28 11:44:08 - INFO - Integrated 112811 points from multiple depth maps.
+2025-10-28 11:44:08 - INFO - Optimizing depth map for image pair 3...
+2025-10-28 11:44:08 - INFO - Info: Detected 'Y' channel in the file. Reading it as depth data.
+2025-10-28 11:44:08 - INFO - Initial depth calculation time for image 3: 0.5064 seconds
+2025-10-28 11:44:08 - INFO - Saved disparity map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/disparity/disp_0003.png
+2025-10-28 11:44:08 - INFO - Saving initial depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/depth_iter_00.png
+2025-10-28 11:44:08 - INFO - [Initial Depth] MAE: 4.3192, AbsRel: 0.1986, RMSE: 4.4455, RMSElog: 0.1837, d1: 0.9076, d2: 0.9992, d3: 0.9998
+2025-10-28 11:44:09 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/error_map_initial.png
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 1/8 - start
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 1/8 - mean cost: 0.544343
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 1/8 - MAE: 3.6212, AbsRel: 0.1715
+2025-10-28 11:44:09 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/error_map_iter_01.png
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 2/8 - start
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 2/8 - mean cost: 0.395849
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 2/8 - MAE: 1.6425, AbsRel: 0.0918
+2025-10-28 11:44:09 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/error_map_iter_02.png
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 3/8 - start
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 3/8 - mean cost: 0.345977
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 3/8 - MAE: 1.0490, AbsRel: 0.0590
+2025-10-28 11:44:09 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/error_map_iter_03.png
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 4/8 - start
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 4/8 - mean cost: 0.304305
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 4/8 - MAE: 0.4841, AbsRel: 0.0264
+2025-10-28 11:44:09 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/error_map_iter_04.png
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 5/8 - start
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 5/8 - mean cost: 0.285917
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 5/8 - MAE: 0.2663, AbsRel: 0.0138
+2025-10-28 11:44:09 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/error_map_iter_05.png
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 6/8 - start
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 6/8 - mean cost: 0.281498
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 6/8 - MAE: 0.2245, AbsRel: 0.0113
+2025-10-28 11:44:09 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/error_map_iter_06.png
+2025-10-28 11:44:09 - INFO - [CuPy][H=4] Iter 7/8 - start
+2025-10-28 11:44:10 - INFO - [CuPy][H=4] Iter 7/8 - mean cost: 0.280628
+2025-10-28 11:44:10 - INFO - [CuPy][H=4] Iter 7/8 - MAE: 0.2205, AbsRel: 0.0110
+2025-10-28 11:44:10 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/error_map_iter_07.png
+2025-10-28 11:44:10 - INFO - [CuPy][H=4] Iter 8/8 - start
+2025-10-28 11:44:10 - INFO - [CuPy][H=4] Iter 8/8 - mean cost: 0.280337
+2025-10-28 11:44:10 - INFO - [CuPy][H=4] Iter 8/8 - MAE: 0.2215, AbsRel: 0.0110
+2025-10-28 11:44:10 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/error_map_iter_08.png
+2025-10-28 11:44:10 - INFO - [Timing] refine_depth_with_patchmatch total time: 1.24s for index 3
+2025-10-28 11:44:10 - INFO - [Optimized Depth] MAE: 0.2215, AbsRel: 0.0110, RMSE: 0.8848, RMSElog: 0.0433, d1: 0.9912, d2: 0.9984, d3: 1.0000
+2025-10-28 11:44:10 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/error_map_optimized.png
+2025-10-28 11:44:10 - INFO - Filtering optimized depth map based on cost and photometric consistency...
+2025-10-28 11:46:19 - INFO - 43849 points invalidated by photometric consistency check.
+2025-10-28 11:46:19 - INFO -   [Photometric Filtered] MAE: 0.0952, AbsRel: 0.0042, RMSE: 0.4084, RMSElog: 0.0184, d1: 0.9978, d2: 0.9997, d3: 1.0000
+2025-10-28 11:46:19 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/error_map_photometric.png
+2025-10-28 11:46:19 - INFO - Saving photometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/photometric_filtered_depth.png
+2025-10-28 11:46:19 - INFO - Stored photometrically filtered depth map for index 3.
+2025-10-28 11:46:19 - INFO - Filtering depth map by geometric consistency...
+2025-10-28 11:46:44 - INFO - 194376 points (21.09%) invalidated by geometric consistency check.
+2025-10-28 11:46:44 - INFO -   [Geometric Filtered] MAE: 0.0656, AbsRel: 0.0030, RMSE: 0.1751, RMSElog: 0.0081, d1: 0.9996, d2: 1.0000, d3: 1.0000
+2025-10-28 11:46:44 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/error_map_geometric.png
+2025-10-28 11:46:44 - INFO - Saving geometrically filtered depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/geometrically_filtered_depth.png
+2025-10-28 11:46:45 - INFO - Saved camera-plane fused depth to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/fused_camera_plane_running.png
+2025-10-28 11:46:45 - INFO - Saving ortho depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/ortho_depth.png
+2025-10-28 11:46:47 - INFO - Saved fused world-orthographic depth to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0003/fused_ortho_running.png
+2025-10-28 11:46:53 - INFO - Integrated 119452 points from multiple depth maps.
+2025-10-28 11:46:53 - INFO - Optimizing depth map for image pair 4...
+2025-10-28 11:46:53 - INFO - Info: Detected 'Y' channel in the file. Reading it as depth data.
+2025-10-28 11:46:54 - INFO - Initial depth calculation time for image 4: 0.5004 seconds
+2025-10-28 11:46:54 - INFO - Saved disparity map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/disparity/disp_0004.png
+2025-10-28 11:46:54 - INFO - Saving initial depth map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0004/depth_iter_00.png
+2025-10-28 11:46:54 - INFO - [Initial Depth] MAE: 4.2850, AbsRel: 0.1985, RMSE: 4.4194, RMSElog: 0.1837, d1: 0.9043, d2: 0.9992, d3: 0.9999
+2025-10-28 11:46:54 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0004/error_map_initial.png
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 1/8 - start
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 1/8 - mean cost: 0.534239
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 1/8 - MAE: 3.5897, AbsRel: 0.1714
+2025-10-28 11:46:54 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0004/error_map_iter_01.png
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 2/8 - start
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 2/8 - mean cost: 0.387868
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 2/8 - MAE: 1.6928, AbsRel: 0.0950
+2025-10-28 11:46:54 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0004/error_map_iter_02.png
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 3/8 - start
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 3/8 - mean cost: 0.336334
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 3/8 - MAE: 1.0798, AbsRel: 0.0610
+2025-10-28 11:46:54 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0004/error_map_iter_03.png
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 4/8 - start
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 4/8 - mean cost: 0.292054
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 4/8 - MAE: 0.4943, AbsRel: 0.0270
+2025-10-28 11:46:54 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0004/error_map_iter_04.png
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 5/8 - start
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 5/8 - mean cost: 0.272077
+2025-10-28 11:46:54 - INFO - [CuPy][H=4] Iter 5/8 - MAE: 0.2679, AbsRel: 0.0139
+2025-10-28 11:46:55 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0004/error_map_iter_05.png
+2025-10-28 11:46:55 - INFO - [CuPy][H=4] Iter 6/8 - start
+2025-10-28 11:46:55 - INFO - [CuPy][H=4] Iter 6/8 - mean cost: 0.267348
+2025-10-28 11:46:55 - INFO - [CuPy][H=4] Iter 6/8 - MAE: 0.2300, AbsRel: 0.0116
+2025-10-28 11:46:55 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0004/error_map_iter_06.png
+2025-10-28 11:46:55 - INFO - [CuPy][H=4] Iter 7/8 - start
+2025-10-28 11:46:55 - INFO - [CuPy][H=4] Iter 7/8 - mean cost: 0.266394
+2025-10-28 11:46:55 - INFO - [CuPy][H=4] Iter 7/8 - MAE: 0.2269, AbsRel: 0.0114
+2025-10-28 11:46:55 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0004/error_map_iter_07.png
+2025-10-28 11:46:55 - INFO - [CuPy][H=4] Iter 8/8 - start
+2025-10-28 11:46:55 - INFO - [CuPy][H=4] Iter 8/8 - mean cost: 0.266094
+2025-10-28 11:46:55 - INFO - [CuPy][H=4] Iter 8/8 - MAE: 0.2283, AbsRel: 0.0114
+2025-10-28 11:46:55 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0004/error_map_iter_08.png
+2025-10-28 11:46:55 - INFO - [Timing] refine_depth_with_patchmatch total time: 1.23s for index 4
+2025-10-28 11:46:55 - INFO - [Optimized Depth] MAE: 0.2283, AbsRel: 0.0114, RMSE: 0.9327, RMSElog: 0.0456, d1: 0.9916, d2: 0.9979, d3: 0.9998
+2025-10-28 11:46:55 - INFO - Saved depth error map to /home/geolab/Projects/initial_3d_pointcloud_creation/output/1280_720_35_74.73365_92_0.25/depth/depth_0004/error_map_optimized.png
+2025-10-28 11:46:55 - INFO - Filtering optimized depth map based on cost and photometric consistency...
