@@ -50,29 +50,20 @@
 
 1.  **データセットフォルダの作成**
 
-    ルートディレクトリに `data/<dataset_name>` フォルダを作成する。<dataset_name>の命名は、`config.py`がパラメータを読み込むために、以下の形式に従う必要がある。
+    ルートディレクトリに `data/<dataset_name>` フォルダを作成する。<dataset_name> の命名は任意でよい（カメラパラメータはフォルダ名からは取得しません）。
 
-    **フォーマット:**
-    `<width>_<height>_<camera_height>_<fov_v>_<fov_h>_<B>`
-
-    **各パラメータの説明:**
-    * `width`: 画像の幅 (ピクセル)
-    * `height`: 画像の高さ (ピクセル)
-    * `camera_height`: カメラの高さ (メートル)
-    * `fov_v`: カメラの垂直視野角 (度)
-    * `fov_h`: カメラの水平視野角 (度)
-    * `B`: ステレオカメラのベースライン長 (メートル)
-
-    **命名例:**
-    `3840_2160_16_74.73365_92_0.3`
+    カメラパラメータは `app/camera_settings.yaml` に記述し、本パイプラインは常にこのYAMLを使用します。
 
 2.  **RGB画像ファイルの配置**
-    ステレオカメラで撮影した左カメラと右カメラのRGB画像ファイルを、作成した `data/<dataset_name>/images/stereo/` ディレクトリに配置する。
+    左右画像を次のディレクトリ構成で配置する:
 
-2.  **真値深度画像ファイルの配置**
-    ステレオカメラで撮影した左カメラの真値深度画像を、作成した `data/<dataset_name>/images/depth/` ディレクトリに配置する。
+    - `data/<dataset_name>/images/image_0/` … 左カメラ（left）
+    - `data/<dataset_name>/images/image_1/` … 右カメラ（right）
 
-3.  **カメラ姿勢ログの配置**
+3.  **真値深度画像ファイルの配置**
+    左カメラの真値深度画像を `data/<dataset_name>/images/depth/` に配置する。
+
+4.  **カメラ姿勢ログの配置**
     各フレームに対応するカメラの位置と姿勢が記録されたログファイル（例: `drone_image_log.txt`）を `data/<dataset_name>/txt/` ディレクトリに配置する。
 
 ## 実行方法

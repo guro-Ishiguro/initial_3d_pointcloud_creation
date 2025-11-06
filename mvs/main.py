@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import time
 
 import config
@@ -19,8 +20,10 @@ from disparity_estimation import ImageProcessor
 from logging_setup import setup_logging
 from point_cloud_integrator import PointCloudIntegrator
 from utils import (
+    append_to_csv,
     clear_folder,
     compute_depth_metrics,
+    initialize_csv,
     parse_arguments,
     read_exr_depth,
     save_depth_map_as_image,
@@ -50,7 +53,7 @@ def run():
         f"HOME_DIR={getattr(config, 'HOME_DIR', None)} DATA_DIR={getattr(config, 'DATA_DIR', None)} DATA_TYPE={getattr(config, 'DATA_TYPE', None)}"
     )
 
-    data_loader = DataLoader(config.STEREO_IMAGE_DIR, config.DRONE_IMAGE_LOG)
+    data_loader = DataLoader(config.IMAGE_ROOT_DIR, config.DRONE_IMAGE_LOG)
     image_processor = ImageProcessor(config)
     depth_estimator = DepthEstimator(config)
     depth_optimization = DepthOptimization(config)
@@ -60,6 +63,23 @@ def run():
     os.makedirs(config.POINT_CLOUD_DIR, exist_ok=True)
 
     os.makedirs(config.CSV_DIR, exist_ok=True)
+    # CSV 初期化（存在しない場合のみヘッダー作成）
+    results_csv_path = os.path.join(config.CSV_DIR, "results.csv")
+    if not os.path.exists(results_csv_path):
+        initialize_csv(
+            results_csv_path,
+            [
+                "index",
+                "stage",
+                "mae",
+                "abs_rel",
+                "rmse",
+                "rmse_log",
+                "delta1",
+                "delta2",
+                "delta3",
+            ],
+        )
 
     os.makedirs(config.DISPARITY_IMAGE_DIR, exist_ok=True)
 
@@ -69,7 +89,56 @@ def run():
     if config.DEBUG_SAVE_NORMAL_MAPS:
         os.makedirs(config.NORMAL_IMAGE_DIR, exist_ok=True)
 
+    # --- 追加: GT深度(EXR)の一括保存を各 depth/depth_XXXX 配下に作成 ---
+    try:
+        exr_files = [
+            f
+            for f in os.listdir(getattr(config, "LABEL_DEPTH_IMAGE_DIR", ""))
+            if f.lower().endswith(".exr")
+        ]
+        for f in sorted(exr_files):
+            # depth_000007.exr または 000007.exr のどちらにも対応
+            m = re.match(r"^(?:depth_)?(\d+)\.exr$", f)
+            if not m:
+                continue
+            idx = int(m.group(1))
+            save_each_depth_dir = os.path.join(
+                config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}"
+            )
+            os.makedirs(save_each_depth_dir, exist_ok=True)
+
+            src_path = os.path.join(config.LABEL_DEPTH_IMAGE_DIR, f)
+            gt = read_exr_depth(src_path)
+            if gt is None:
+                continue
+
+            h_vis, w_vis = int(getattr(config, "height", gt.shape[0])), int(
+                getattr(config, "width", gt.shape[1])
+            )
+            if gt.shape != (h_vis, w_vis):
+                gt_resized = cv2.resize(
+                    gt, (w_vis, h_vis), interpolation=cv2.INTER_NEAREST
+                )
+            else:
+                gt_resized = gt
+
+            # 可視化PNGのみを保存
+            save_depth_map_as_image(
+                gt_resized,
+                os.path.join(save_each_depth_dir, f"gt_depth_{idx:04d}.png"),
+            )
+        logging.info(
+            f"Exported {len(exr_files)} GT depth files into per-view folders under {config.DEPTH_IMAGE_DIR}"
+        )
+    except Exception as e:
+        logging.warning(f"GT per-view export skipped: {e}")
+
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
+    if not all_pairs_data:
+        logging.error(
+            "No valid image pairs found. Check images under images/image_0 & image_1 and the txt/drone_image_log.txt."
+        )
+        return 1
 
     if hasattr(config, "TARGET_INDICES") and config.TARGET_INDICES:
         target_indices = config.TARGET_INDICES
@@ -167,10 +236,15 @@ def run():
         clear_folder(save_each_normal_dir)
 
         # --- Ground Truth Depthの読み込み ---
+        # depth_######.exr と ######.exr の両方に対応
         gt_depth_path = os.path.join(
             config.LABEL_DEPTH_IMAGE_DIR, f"depth_{idx:06d}.exr"
         )
         if not os.path.exists(gt_depth_path):
+            alt_path = os.path.join(config.LABEL_DEPTH_IMAGE_DIR, f"{idx:06d}.exr")
+            gt_depth_path = alt_path if os.path.exists(alt_path) else ""
+
+        if not gt_depth_path or not os.path.exists(gt_depth_path):
             logging.warning(
                 f"Ground truth depth file not found for index {idx}, skipping evaluation for this view."
             )
@@ -183,10 +257,11 @@ def run():
                     gt_depth = cv2.resize(
                         gt_depth, (w, h), interpolation=cv2.INTER_NEAREST
                     )
-                save_depth_map_as_image(
-                    gt_depth,
-                    os.path.join(save_each_depth_dir, f"gt_depth_{idx:04d}.png"),
+                # 可視化PNGのみを保存
+                gt_vis_path = os.path.join(
+                    save_each_depth_dir, f"gt_depth_{idx:04d}.png"
                 )
+                save_depth_map_as_image(gt_depth, gt_vis_path)
 
         try:
             li_bgr = cv2.imread(left_path)
@@ -248,6 +323,20 @@ def run():
                     gt_depth,
                     os.path.join(save_each_depth_dir, "error_map_initial.png"),
                 )
+                append_to_csv(
+                    results_csv_path,
+                    [
+                        idx,
+                        "initial",
+                        metrics["mae"],
+                        metrics["abs_rel"],
+                        metrics["rmse"],
+                        metrics["rmse_log"],
+                        metrics["delta1"],
+                        metrics["delta2"],
+                        metrics["delta3"],
+                    ],
+                )
 
             # PatchMatchによる深度マップの最適化
             neighbor_views_data = []
@@ -302,6 +391,20 @@ def run():
                     gt_depth,
                     os.path.join(save_each_depth_dir, "error_map_optimized.png"),
                 )
+                append_to_csv(
+                    results_csv_path,
+                    [
+                        idx,
+                        "optimized",
+                        metrics["mae"],
+                        metrics["abs_rel"],
+                        metrics["rmse"],
+                        metrics["rmse_log"],
+                        metrics["delta1"],
+                        metrics["delta2"],
+                        metrics["delta3"],
+                    ],
+                )
 
             # 光度一貫性フィルタリング
             photometrically_filtered_depth = (
@@ -326,6 +429,20 @@ def run():
                     photometrically_filtered_depth,
                     gt_depth,
                     os.path.join(save_each_depth_dir, "error_map_photometric.png"),
+                )
+                append_to_csv(
+                    results_csv_path,
+                    [
+                        idx,
+                        "photometric",
+                        metrics["mae"],
+                        metrics["abs_rel"],
+                        metrics["rmse"],
+                        metrics["rmse_log"],
+                        metrics["delta1"],
+                        metrics["delta2"],
+                        metrics["delta3"],
+                    ],
                 )
 
             if config.DEBUG_SAVE_DEPTH_MAPS:
@@ -364,6 +481,20 @@ def run():
                         geometrically_filtered_depth,
                         gt_depth,
                         os.path.join(save_each_depth_dir, "error_map_geometric.png"),
+                    )
+                    append_to_csv(
+                        results_csv_path,
+                        [
+                            idx,
+                            "geometric",
+                            metrics["mae"],
+                            metrics["abs_rel"],
+                            metrics["rmse"],
+                            metrics["rmse_log"],
+                            metrics["delta1"],
+                            metrics["delta2"],
+                            metrics["delta3"],
+                        ],
                     )
                 if config.DEBUG_SAVE_DEPTH_MAPS:
                     save_geometrically_filtered_depth_path = os.path.join(
