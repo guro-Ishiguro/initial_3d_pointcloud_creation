@@ -72,8 +72,10 @@ print(f"Selected data type: {DATA_TYPE}")
 
 # パスの設定
 DATA_TYPE_DIR = os.path.join(DATA_DIR, DATA_TYPE)
-STEREO_IMAGE_DIR = os.path.join(DATA_TYPE_DIR, "images/stereo")
-LABEL_DEPTH_IMAGE_DIR = os.path.join(DATA_TYPE_DIR, "images/depth")
+IMAGE_ROOT_DIR = os.path.join(DATA_TYPE_DIR, "images")
+LEFT_IMAGE_DIR = os.path.join(IMAGE_ROOT_DIR, "image_0")
+RIGHT_IMAGE_DIR = os.path.join(IMAGE_ROOT_DIR, "image_1")
+LABEL_DEPTH_IMAGE_DIR = os.path.join(IMAGE_ROOT_DIR, "depth")
 TXT_DIR = os.path.join(DATA_TYPE_DIR, "txt")
 DRONE_IMAGE_LOG = os.path.join(TXT_DIR, "drone_image_log.txt")
 ORB_SLAM_LOG = os.path.join(TXT_DIR, "KeyFrameTrajectory.txt")
@@ -92,23 +94,54 @@ NORMAL_IMAGE_DIR = os.path.join(OUTPUT_TYPE_DIR, "normal")
 HISTGRAM_DIR = os.path.join(OUTPUT_TYPE_DIR, "histgram")
 CSV_DIR = os.path.join(OUTPUT_TYPE_DIR, "csv")
 
-# スケールの設定
-B, fov_h, fov_v, width, height = (
-    float(DATA_TYPE.split("_")[5]),
-    float(DATA_TYPE.split("_")[4]),
-    float(DATA_TYPE.split("_")[3]),
-    int(DATA_TYPE.split("_")[0]),
-    int(DATA_TYPE.split("_")[1]),
+"""
+カメラ設定の読み込み
+app/camera_settings.yaml または環境変数 APP_CAMERA_SETTINGS で指定された YAML から
+ステレオ基線長 B、画像サイズ、視野角、内部パラメータを読み込む。
+"""
+_camera_yaml_path = os.getenv(
+    "APP_CAMERA_SETTINGS", os.path.join(DEFAULT_HOME, "app", "camera_settings.yaml")
 )
-focal_length = width / (2 * np.tan(fov_h * np.pi / 180 / 2))
-camera_height = int(DATA_TYPE.split("_")[2])
-cx, cy = int(DATA_TYPE.split("_")[0]) / 2, int(DATA_TYPE.split("_")[1]) / 2
-K = np.array(
-    [[focal_length, 0, cx], [0, focal_length, cy], [0, 0, 1]], dtype=np.float32
+_cam_cfg = {}
+try:
+    if yaml and os.path.exists(_camera_yaml_path):
+        with open(_camera_yaml_path, "r") as _f:
+            _cam_cfg = yaml.safe_load(_f) or {}
+    else:
+        _cam_cfg = {}
+except Exception:
+    _cam_cfg = {}
+
+_required_keys = ["width", "height", "camera_height", "fov_h", "fov_v", "B"]
+_missing = [k for k in _required_keys if _cam_cfg.get(k) is None]
+if _missing:
+    raise ValueError(
+        f"Missing required keys in camera settings YAML: {_missing}. Path={_camera_yaml_path}"
+    )
+
+width = int(_cam_cfg["width"])  # pixels
+height = int(_cam_cfg["height"])  # pixels
+B = float(_cam_cfg["B"])  # meters
+camera_height = float(_cam_cfg["camera_height"])  # meters
+fov_h = float(_cam_cfg["fov_h"])  # degrees
+fov_v = float(_cam_cfg["fov_v"])  # degrees
+
+# intrinsics
+fx = (
+    float(_cam_cfg.get("fx"))
+    if _cam_cfg.get("fx") is not None
+    else width / (2.0 * np.tan(np.deg2rad(fov_h) / 2.0))
 )
-scene_width = 2 * camera_height * np.tan(np.radians(fov_h) / 2)
-scene_height = 2 * camera_height * np.tan(np.radians(fov_v) / 2)
-pixel_size = scene_width / width
+fy = float(_cam_cfg.get("fy", fx))
+cx = float(_cam_cfg.get("cx", width / 2.0))
+cy = float(_cam_cfg.get("cy", height / 2.0))
+focal_length = float(fx)
+K = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float32)
+
+# for orthographic plane sizing
+scene_width = 2.0 * camera_height * np.tan(np.deg2rad(fov_h) / 2.0)
+scene_height = 2.0 * camera_height * np.tan(np.deg2rad(fov_v) / 2.0)
+pixel_size = scene_width / float(width)
 
 window_size, min_disp, num_disp = 7, 0, 216
 
