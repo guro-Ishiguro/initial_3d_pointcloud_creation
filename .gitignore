@@ -12,4 +12,4 @@ depth_maps
 evaluation
 .DS_Store
 
-logs/
+logs/*
