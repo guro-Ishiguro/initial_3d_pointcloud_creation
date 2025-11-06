@@ -1999,7 +1999,7 @@ class DepthOptimization:
                 ),
             }
             for metric, path in csv_files.items():
-                initialize_csv(path, ["time", metric])
+                initialize_csv(path, ["image_idx", "iter", "time", metric])
 
         # start_refinement_time removed (unused)
 
@@ -2029,6 +2029,7 @@ class DepthOptimization:
             src_K,
             src_R,
             src_T,
+            ref_idx=ref_idx,
             save_per_iter=config.DEBUG_SAVE_DEPTH_MAPS,
             save_dir=save_each_depth_dir,
             gt_depth=gt_depth,
@@ -2200,6 +2201,7 @@ class DepthOptimization:
                 if config.DEBUG_SAVE_DEPTH_MAPS
                 else None
             ),
+            ref_idx=ref_idx,
         )
 
         logging.info("Vanilla PatchMatch MVS refinement finished.")
@@ -2357,6 +2359,7 @@ class DepthOptimization:
         src_K,
         src_R,
         src_T,
+        ref_idx=0,
         save_per_iter=False,
         save_dir=None,
         gt_depth=None,
@@ -2591,7 +2594,13 @@ class DepthOptimization:
                         for metric_key, value in metrics.items():
                             if metric_key in csv_files:
                                 append_to_csv(
-                                    csv_files[metric_key], [current_time, value]
+                                    csv_files[metric_key],
+                                    [
+                                        int(ref_idx),
+                                        int(i + 1),
+                                        float(current_time),
+                                        float(value),
+                                    ],
                                 )
                 except Exception as e:
                     logging.warning(
