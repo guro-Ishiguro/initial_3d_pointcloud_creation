@@ -53,7 +53,9 @@ def run():
         f"HOME_DIR={getattr(config, 'HOME_DIR', None)} DATA_DIR={getattr(config, 'DATA_DIR', None)} DATA_TYPE={getattr(config, 'DATA_TYPE', None)}"
     )
 
-    data_loader = DataLoader(config.IMAGE_ROOT_DIR, config.DRONE_IMAGE_LOG)
+    data_loader = DataLoader(
+        config.IMAGE_ROOT_DIR, getattr(config, "LEFT_CAMERA_POSES", None)
+    )
     image_processor = ImageProcessor(config)
     depth_estimator = DepthEstimator(config)
     depth_optimization = DepthOptimization(config)

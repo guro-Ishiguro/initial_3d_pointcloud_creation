@@ -10,40 +10,47 @@ import mvs.config as config
 
 
 class DataLoader:
-    def __init__(self, image_root_dir, drone_image_log):
+    def __init__(self, image_root_dir, left_camera_poses_csv):
         # images ディレクトリのルート
         self.image_root_dir = image_root_dir
         self.left_dir = os.path.join(image_root_dir, "image_0")
         self.right_dir = os.path.join(image_root_dir, "image_1")
-        self.drone_image_log = drone_image_log
+        self.left_camera_poses_csv = left_camera_poses_csv
         self.camera_data = self._load_camera_data()
 
     def _load_camera_data(self):
         camera_data = []
         try:
-            with open(self.drone_image_log, newline="") as f:
-                reader = csv.reader(f)
+            if not self.left_camera_poses_csv or not os.path.exists(
+                self.left_camera_poses_csv
+            ):
+                logging.error(
+                    f"Camera poses CSV not found: {self.left_camera_poses_csv}"
+                )
+                sys.exit(1)
+            with open(self.left_camera_poses_csv, newline="") as f:
+                reader = csv.DictReader(f)
                 for row in reader:
                     if not row:
                         continue
-                    if len(row) != 8:
-                        logging.warning(f"Skipping malformed line: {','.join(row)}")
-                        continue
-                    fn, x, y, z, qx, qy, qz, qw = [c.strip() for c in row]
-                    # ヘッダ行の可能性（pos_x 等）や数値変換失敗はスキップ
                     try:
-                        pos = (float(x), float(y), float(z))
-                        quat = (float(qx), float(qy), float(qz), float(qw))
-                    except ValueError:
-                        logging.warning(
-                            f"Skipping header/non-numeric line: {','.join(row)}"
-                        )
+                        fn = str(row.get("filename")).strip()
+                        x = float(row.get("pos_x"))
+                        y = float(row.get("pos_y"))
+                        z = float(row.get("pos_z"))
+                        qx = float(row.get("rot_x"))
+                        qy = float(row.get("rot_y"))
+                        qz = float(row.get("rot_z"))
+                        qw = float(row.get("rot_w"))
+                    except Exception:
+                        logging.warning(f"Skipping malformed line: {row}")
                         continue
-                    # パスが含まれている場合はベース名のみ使用
+                    pos = (x, y, z)
+                    quat = (qx, qy, qz, qw)
                     base_fn = os.path.basename(fn)
                     camera_data.append((base_fn, pos, quat))
         except FileNotFoundError:
-            logging.error(f"Camera log file not found: {self.drone_image_log}")
+            logging.error(f"Camera poses CSV not found: {self.left_camera_poses_csv}")
             sys.exit(1)
         logging.info(f"Loaded {len(camera_data)} camera poses.")
         return camera_data
