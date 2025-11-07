@@ -1,3 +1,4 @@
+import csv
 import os
 
 import numpy as np
@@ -77,7 +78,8 @@ LEFT_IMAGE_DIR = os.path.join(IMAGE_ROOT_DIR, "image_0")
 RIGHT_IMAGE_DIR = os.path.join(IMAGE_ROOT_DIR, "image_1")
 LABEL_DEPTH_IMAGE_DIR = os.path.join(IMAGE_ROOT_DIR, "depth")
 TXT_DIR = os.path.join(DATA_TYPE_DIR, "txt")
-DRONE_IMAGE_LOG = os.path.join(TXT_DIR, "drone_image_log.txt")
+LEFT_CAMERA_POSES = os.path.join(TXT_DIR, "left_camera_poses.csv")
+CAMERA_PARAMS_CSV = os.path.join(TXT_DIR, "camera_params.csv")
 ORB_SLAM_LOG = os.path.join(TXT_DIR, "KeyFrameTrajectory.txt")
 
 OUTPUT_DIR = os.path.join(HOME_DIR, "output")
@@ -96,27 +98,48 @@ CSV_DIR = os.path.join(OUTPUT_TYPE_DIR, "csv")
 
 """
 カメラ設定の読み込み
-app/camera_settings.yaml または環境変数 APP_CAMERA_SETTINGS で指定された YAML から
-ステレオ基線長 B、画像サイズ、視野角、内部パラメータを読み込む。
+必須: データセット内の txt/camera_params.csv
+   - baseline,width,height,camera_height,fov_v_deg,fov_h_deg,fx_pixels,fy_pixels,cx_pixels,cy_pixels
 """
-_camera_yaml_path = os.getenv(
-    "APP_CAMERA_SETTINGS", os.path.join(DEFAULT_HOME, "app", "camera_settings.yaml")
-)
-_cam_cfg = {}
-try:
-    if yaml and os.path.exists(_camera_yaml_path):
-        with open(_camera_yaml_path, "r") as _f:
-            _cam_cfg = yaml.safe_load(_f) or {}
-    else:
-        _cam_cfg = {}
-except Exception:
-    _cam_cfg = {}
+
+
+def _load_camera_params_from_csv(csv_path: str):
+    if not os.path.exists(csv_path):
+        return None
+    try:
+        with open(csv_path, newline="") as f:
+            reader = csv.DictReader(f)
+            row = next(reader, None)
+            if not row:
+                return None
+            params = {
+                "B": float(row.get("baseline")),
+                "width": int(row.get("width")),
+                "height": int(row.get("height")),
+                "camera_height": float(row.get("camera_height")),
+                "fov_v": float(row.get("fov_v_deg")),
+                "fov_h": float(row.get("fov_h_deg")),
+                "fx": float(row.get("fx_pixels")) if row.get("fx_pixels") else None,
+                "fy": float(row.get("fy_pixels")) if row.get("fy_pixels") else None,
+                "cx": float(row.get("cx_pixels")) if row.get("cx_pixels") else None,
+                "cy": float(row.get("cy_pixels")) if row.get("cy_pixels") else None,
+            }
+            return params
+    except Exception:
+        return None
+
+
+_cam_cfg = _load_camera_params_from_csv(CAMERA_PARAMS_CSV)
+if _cam_cfg is None:
+    raise FileNotFoundError(
+        f"camera_params.csv not found or invalid: {CAMERA_PARAMS_CSV}. This file is required."
+    )
 
 _required_keys = ["width", "height", "camera_height", "fov_h", "fov_v", "B"]
 _missing = [k for k in _required_keys if _cam_cfg.get(k) is None]
 if _missing:
     raise ValueError(
-        f"Missing required keys in camera settings YAML: {_missing}. Path={_camera_yaml_path}"
+        f"Missing required camera parameters: {_missing} in {CAMERA_PARAMS_CSV}"
     )
 
 width = int(_cam_cfg["width"])  # pixels
@@ -132,20 +155,20 @@ fx = (
     if _cam_cfg.get("fx") is not None
     else width / (2.0 * np.tan(np.deg2rad(fov_h) / 2.0))
 )
-fy = float(_cam_cfg.get("fy", fx))
-cx = float(_cam_cfg.get("cx", width / 2.0))
-cy = float(_cam_cfg.get("cy", height / 2.0))
+_fy = _cam_cfg.get("fy")
+fy = float(_fy) if _fy is not None else fx
+_cx = _cam_cfg.get("cx")
+cx = float(_cx) if _cx is not None else (width / 2.0)
+_cy = _cam_cfg.get("cy")
+cy = float(_cy) if _cy is not None else (height / 2.0)
 focal_length = float(fx)
 K = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float32)
-
 # for orthographic plane sizing
 scene_width = 2.0 * camera_height * np.tan(np.deg2rad(fov_h) / 2.0)
 scene_height = 2.0 * camera_height * np.tan(np.deg2rad(fov_v) / 2.0)
 pixel_size = scene_width / float(width)
 
 window_size, min_disp, num_disp = 7, 0, 216
-
-# 以降のMVSパラメータ定義は冗長回避のため削除。必ず app/mvs.yaml から読み込みます。
 
 # YAML(app/mvs.yaml もしくは APP_MVS_CONFIG) による MVS パラメータの上書き
 try:
