@@ -2014,6 +2014,14 @@ class DepthOptimization:
             save_path0 = os.path.join(save_each_depth_dir, f"depth_iter_00.png")
             logging.info(f"Saving initial depth map to {save_path0}")
             save_depth_map_as_image(depth_map, save_path0)
+        if self.config.DEBUG_SAVE_NORMAL_MAPS:
+            save_each_normal_dir = os.path.join(
+                config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}"
+            )
+            os.makedirs(save_each_normal_dir, exist_ok=True)
+            save_pathn0 = os.path.join(save_each_normal_dir, f"normal_iter_00.png")
+            logging.info(f"Saving initial normal map to {save_pathn0}")
+            save_normal_map_as_image(normal_map.copy(), save_pathn0)
         iter_times_gpu = []
         depth_map, normal_map, cost_map = self._propagate_and_search_gpu(
             depth_map,
@@ -2032,6 +2040,12 @@ class DepthOptimization:
             ref_idx=ref_idx,
             save_per_iter=config.DEBUG_SAVE_DEPTH_MAPS,
             save_dir=save_each_depth_dir,
+            save_normals_per_iter=self.config.DEBUG_SAVE_NORMAL_MAPS,
+            normal_save_dir=(
+                os.path.join(config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}")
+                if self.config.DEBUG_SAVE_NORMAL_MAPS
+                else None
+            ),
             gt_depth=gt_depth,
             iter_times=iter_times_gpu,
             csv_files=csv_files if gt_depth is not None else None,
@@ -2362,6 +2376,8 @@ class DepthOptimization:
         ref_idx=0,
         save_per_iter=False,
         save_dir=None,
+        save_normals_per_iter=False,
+        normal_save_dir=None,
         gt_depth=None,
         iter_times=None,
         csv_files=None,
@@ -2562,6 +2578,14 @@ class DepthOptimization:
                 save_depth_map_as_image(depth_tmp, save_path)
             else:
                 depth_tmp = None
+            # Save normal per-iteration if requested
+            if save_normals_per_iter and normal_save_dir is not None:
+                normal_tmp = d_normal_map.copy_to_host()
+                save_path_n = os.path.join(
+                    normal_save_dir, f"normal_iter_{i+1:02d}.png"
+                )
+                logging.info(f"Saving normal map at iteration {i+1} to {save_path_n}")
+                save_normal_map_as_image(normal_tmp, save_path_n)
             # Record iteration duration
             if iter_times is not None:
                 iter_times.append(time.time() - iter_start_time)
