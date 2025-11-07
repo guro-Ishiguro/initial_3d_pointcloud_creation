@@ -11,5 +11,3 @@ depth_comparison
 depth_maps
 evaluation
 .DS_Store
-
-logs/*

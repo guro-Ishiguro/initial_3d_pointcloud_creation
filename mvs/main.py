@@ -44,7 +44,7 @@ def run():
         setup_logging(
             getattr(config, "LOG_DIR", os.path.join(os.getcwd(), "logs")),
             getattr(config, "LOG_LEVEL", "INFO"),
-            getattr(config, "LOG_TO_FILE", True),
+            False,
         )
     except Exception:
         pass
