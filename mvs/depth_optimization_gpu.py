@@ -6,7 +6,6 @@ import os
 import threading
 import time
 
-import config
 import cv2
 import numpy as np
 from logging_setup import log_ndarray_stats, time_block
@@ -21,6 +20,8 @@ from utils import (
     save_error_map_as_image,
     save_normal_map_as_image,
 )
+
+import mvs.config as config
 
 # Constants for CUDA kernels
 PATCHMATCH_PATCH_SIZE_CONST = config.PATCHMATCH_PATCH_SIZE

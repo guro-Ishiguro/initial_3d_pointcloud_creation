@@ -5,7 +5,6 @@ import os
 import re
 import time
 
-import config
 import cv2
 import numpy as np
 import open3d as o3d
@@ -32,6 +31,7 @@ from utils import (
     save_normal_map_as_image,
 )
 
+import mvs.config as config
 from app.data_loader import DataLoader
 
 

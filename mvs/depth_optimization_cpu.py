@@ -4,7 +4,6 @@ import logging
 import os
 import time
 
-import config
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,6 +18,8 @@ from utils import (
     save_error_map_as_image,
     save_normal_map_as_image,
 )
+
+import mvs.config as config
 
 
 @njit(fastmath=True)
