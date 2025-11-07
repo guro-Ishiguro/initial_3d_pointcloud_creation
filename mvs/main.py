@@ -29,9 +29,44 @@ from utils import (
     save_depth_map_as_image,
     save_disparity_map_with_colorbar,
     save_error_map_as_image,
+    save_normal_map_as_image,
 )
 
 from app.data_loader import DataLoader
+
+
+def _compute_normals_from_depth(depth_map: np.ndarray, K: np.ndarray) -> np.ndarray:
+    h, w = depth_map.shape
+    normals = np.zeros((h, w, 3), dtype=np.float32)
+    cx, cy = float(K[0, 2]), float(K[1, 2])
+    fx, fy = float(K[0, 0]), float(K[1, 1])
+    for r in range(1, h - 1):
+        for c in range(1, w - 1):
+            dc = depth_map[r, c]
+            if not np.isfinite(dc):
+                continue
+            p_center = np.array(
+                [(c - cx) * dc / fx, (r - cy) * dc / fy, dc], dtype=np.float32
+            )
+            dr = depth_map[r, c + 1]
+            dd = depth_map[r + 1, c]
+            if not (np.isfinite(dr) and np.isfinite(dd)):
+                continue
+            p_right = np.array(
+                [(c + 1 - cx) * dr / fx, (r - cy) * dr / fy, dr], dtype=np.float32
+            )
+            p_down = np.array(
+                [(c - cx) * dd / fx, (r + 1 - cy) * dd / fy, dd], dtype=np.float32
+            )
+            v_c = p_right - p_center
+            v_r = p_down - p_center
+            n = np.cross(v_r, v_c)
+            norm = np.linalg.norm(n)
+            if norm > 1e-6:
+                normals[r, c] = n / norm
+            else:
+                normals[r, c] = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    return normals
 
 
 def run():
@@ -312,6 +347,13 @@ def run():
                 )
                 logging.info(f"Saving initial depth map to {save_initial_depth_path}")
                 save_depth_map_as_image(initial_depth, save_initial_depth_path)
+            if getattr(config, "DEBUG_SAVE_NORMAL_MAPS", False):
+                init_normals = _compute_normals_from_depth(initial_depth, config.K)
+                save_initial_normal_path = os.path.join(
+                    save_each_normal_dir, f"normal_iter_00.png"
+                )
+                logging.info(f"Saving initial normal map to {save_initial_normal_path}")
+                save_normal_map_as_image(init_normals, save_initial_normal_path)
 
             # 初期深度を評価
             if gt_depth is not None:
@@ -417,6 +459,16 @@ def run():
                     neighbor_views_data,
                 )
             )
+            if getattr(config, "DEBUG_SAVE_NORMAL_MAPS", False):
+                normals_photo = _compute_normals_from_depth(
+                    photometrically_filtered_depth, config.K
+                )
+                save_normal_map_as_image(
+                    normals_photo,
+                    os.path.join(
+                        save_each_normal_dir, "photometric_filtered_normal.png"
+                    ),
+                )
 
             # 光度フィルタリング後の深度を評価
             if gt_depth is not None:
@@ -508,6 +560,16 @@ def run():
                     save_depth_map_as_image(
                         geometrically_filtered_depth,
                         save_geometrically_filtered_depth_path,
+                    )
+                if getattr(config, "DEBUG_SAVE_NORMAL_MAPS", False):
+                    normals_geo = _compute_normals_from_depth(
+                        geometrically_filtered_depth, config.K
+                    )
+                    save_normal_map_as_image(
+                        normals_geo,
+                        os.path.join(
+                            save_each_normal_dir, "geometrically_filtered_normal.png"
+                        ),
                     )
             except Exception as e:
                 logging.warning(
