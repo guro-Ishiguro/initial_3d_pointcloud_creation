@@ -166,9 +166,8 @@ def read_exr_depth(file_path):
             logging.error(f"Available channels: {available_channels}")
             return None
 
-        logging.info(
-            f"Info: Detected '{target_channel}' channel in the file. Reading it as depth data."
-        )
+        # noisy: channel detection log
+        logging.debug(f"Detected '{target_channel}' channel in EXR; using it as depth.")
 
         dw = header["dataWindow"]
         size = (dw.max.y - dw.min.y + 1, dw.max.x - dw.min.x + 1)
