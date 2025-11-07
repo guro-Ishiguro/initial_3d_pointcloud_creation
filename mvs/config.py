@@ -13,12 +13,9 @@ except Exception:
 load_dotenv()
 
 """
-データタイプ選択の方針
-1. 環境変数 DATA_TYPE が存在し、data配下に一致するディレクトリがあればそれを採用
-2. 環境変数 DATA_TYPE_INDEX が存在すれば 1-indexed で採用
-3. 環境変数 PM_INTERACTIVE=="1" のときのみ、従来の対話選択を有効化
-4. 上記がなければ、data配下の最初のディレクトリを採用
-HOME_DIR が未設定の場合は、mvsの親ディレクトリをプロジェクトルートとして扱う
+データセット選択の方針（環境変数やYAMLによる選択は廃止）
+1. 複数ディレクトリがある場合は、ターミナルで対話選択
+2. 1件のみなら自動選択
 """
 
 # プロジェクトルート推定と環境変数の取得
@@ -34,40 +31,21 @@ if not directories:
     raise FileNotFoundError(f"No directories found in {DATA_DIR}")
 directories.sort()
 
-# 非対話優先の選択
-env_data_type = os.getenv("DATA_TYPE")
-env_data_type_index = os.getenv("DATA_TYPE_INDEX")
-PM_INTERACTIVE = os.getenv("PM_INTERACTIVE") == "1"
-
-if env_data_type and env_data_type in directories:
-    DATA_TYPE = env_data_type
-elif env_data_type_index is not None:
-    try:
-        idx = int(env_data_type_index)
-        if 1 <= idx <= len(directories):
-            DATA_TYPE = directories[idx - 1]
-        else:
-            raise ValueError
-    except Exception:
-        raise ValueError(
-            f"Invalid DATA_TYPE_INDEX: {env_data_type_index}. Valid range is [1-{len(directories)}]"
-        )
-elif PM_INTERACTIVE:
-    print("Select data type:")
-    for i, directory in enumerate(directories):
-        print(f"{i+1}) {directory}")
-    choice = input(f"Enter choice [1-{len(directories)}]: ")
-    try:
-        choice_index = int(choice) - 1
-        if choice_index < 0 or choice_index >= len(directories):
-            raise ValueError
-        DATA_TYPE = directories[choice_index]
-    except ValueError:
-        print("Invalid choice. Exiting.")
-        exit(1)
-else:
-    # 非対話デフォルト: 先頭を採用
+if len(directories) == 1:
     DATA_TYPE = directories[0]
+else:
+    # 対話選択
+    print("Select dataset:")
+    for i, d in enumerate(directories, 1):
+        print(f"{i}) {d}")
+    choice = input(f"Enter choice [1-{len(directories)}]: ").strip()
+    try:
+        idx = int(choice) - 1
+        assert 0 <= idx < len(directories)
+        DATA_TYPE = directories[idx]
+    except Exception:
+        # フォールバック: 先頭を採用
+        DATA_TYPE = directories[0]
 
 print(f"Selected data type: {DATA_TYPE}")
 

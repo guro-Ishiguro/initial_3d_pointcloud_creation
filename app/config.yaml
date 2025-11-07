@@ -1,8 +1,4 @@
 env:
-  # dataset selection (either DATA_TYPE or DATA_TYPE_INDEX)
-  DATA_TYPE: ""
-  DATA_TYPE_INDEX: ""
-
   # logging
   PM_LOG_LEVEL: "INFO"
 

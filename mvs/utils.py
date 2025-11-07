@@ -4,11 +4,12 @@ import logging
 import os
 import shutil
 
-import config
 import cv2
 import Imath
 import numpy as np
 import OpenEXR
+
+import mvs.config as config
 
 # ここでの basicConfig は削除（共通初期化は mvs.logging_setup.setup_logging 側に統一）
 
