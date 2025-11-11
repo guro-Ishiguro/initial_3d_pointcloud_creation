@@ -12,3 +12,4 @@ depth_maps
 evaluation
 .DS_Store
 logs/
+mvs/kernels/cupy/*.ptx
