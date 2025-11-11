@@ -68,7 +68,22 @@ def clear_folder(dir_path):
         logging.info(f"The folder {dir_path} does not exist.")
 
 
-def save_depth_map_as_image(depth_map, file_path):
+def _resolve_cmap_code(cmap_name: str) -> int:
+    name = (cmap_name or "").strip().lower()
+    table = {
+        "jet": cv2.COLORMAP_JET,
+        "viridis": getattr(cv2, "COLORMAP_VIRIDIS", cv2.COLORMAP_JET),
+        "turbo": getattr(cv2, "COLORMAP_TURBO", cv2.COLORMAP_JET),
+        "magma": getattr(cv2, "COLORMAP_MAGMA", cv2.COLORMAP_JET),
+        "inferno": getattr(cv2, "COLORMAP_INFERNO", cv2.COLORMAP_JET),
+        "plasma": getattr(cv2, "COLORMAP_PLASMA", cv2.COLORMAP_JET),
+    }
+    return table.get(name, cv2.COLORMAP_JET)
+
+
+def save_depth_map_as_image(
+    depth_map, file_path, viz_min=None, viz_max=None, viz_cmap=None
+):
     """
     デプスマップを保存する。
     """
@@ -90,8 +105,18 @@ def save_depth_map_as_image(depth_map, file_path):
             cv2.imwrite(file_path, black_image)
             return
 
-        min_val = 0
-        max_val = config.camera_height
+        # 可視化レンジの解決（引数優先→config→従来値）
+        min_val = (
+            float(viz_min)
+            if viz_min is not None
+            else float(getattr(config, "VIZ_DEPTH_MIN", 0.0))
+        )
+        default_max = float(getattr(config, "camera_height", 50.0))
+        max_val = (
+            float(viz_max)
+            if viz_max is not None
+            else float(getattr(config, "VIZ_DEPTH_MAX", default_max))
+        )
 
         if max_val - min_val > 1e-6:
             normalized_map = 255.0 * (depth_map - min_val) / (max_val - min_val)
@@ -99,7 +124,13 @@ def save_depth_map_as_image(depth_map, file_path):
             normalized_map = np.full(depth_map.shape, 128, dtype=np.float32)
 
         vis_map = np.nan_to_num(normalized_map).astype(np.uint8)
-        colored_map = cv2.applyColorMap(vis_map, cv2.COLORMAP_JET)
+        # カラーマップの解決（引数優先→config→従来JET）
+        cmap_name = (
+            str(viz_cmap)
+            if viz_cmap is not None
+            else str(getattr(config, "VIZ_CMAP", "jet"))
+        )
+        colored_map = cv2.applyColorMap(vis_map, _resolve_cmap_code(cmap_name))
         colored_map[~valid_mask] = [0, 0, 0]
 
         # サイドバー無しでそのまま保存
@@ -176,6 +207,7 @@ def compute_depth_metrics(pred_depth, gt_depth):
     rmse = np.sqrt(np.mean((pred_valid - gt_valid) ** 2))
     mae = np.mean(np.abs(pred_valid - gt_valid))
     abs_rel = np.mean(np.abs(pred_valid - gt_valid) / gt_valid)
+    sq_rel = np.mean(((pred_valid - gt_valid) ** 2) / gt_valid)
 
     # RMSE log の計算
     # 予測値にも0以下の値がないことを確認
@@ -199,6 +231,7 @@ def compute_depth_metrics(pred_depth, gt_depth):
         "rmse": rmse,
         "mae": mae,
         "abs_rel": abs_rel,
+        "sq_rel": sq_rel,
         "rmse_log": rmse_log,
         "delta1": delta1,
         "delta2": delta2,

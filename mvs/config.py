@@ -148,6 +148,11 @@ pixel_size = scene_width / float(width)
 
 window_size, min_disp, num_disp = 7, 0, 216
 
+# 可視化のデフォルト設定（YAMLで上書き可能）
+VIZ_DEPTH_MIN = 0.0
+VIZ_DEPTH_MAX = float(camera_height)
+VIZ_CMAP = "viridis"
+
 # YAML(app/mvs.yaml もしくは APP_MVS_CONFIG) による MVS パラメータの上書き
 try:
     mvs_yaml_path = os.getenv(

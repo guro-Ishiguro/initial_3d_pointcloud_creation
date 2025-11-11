@@ -1982,6 +1982,10 @@ class DepthOptimization:
                     save_each_csv_dir,
                     f"abs_rel_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
                 ),
+                "sq_rel": os.path.join(
+                    save_each_csv_dir,
+                    f"sq_rel_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
+                ),
                 "rmse_log": os.path.join(
                     save_each_csv_dir,
                     f"rmse_log_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
@@ -2001,6 +2005,17 @@ class DepthOptimization:
             }
             for metric, path in csv_files.items():
                 initialize_csv(path, ["image_idx", "iter", "time", metric])
+            # 追加: 初期深度の指標を iter=0 として保存
+            try:
+                init_metrics = compute_depth_metrics(initial_depth, gt_depth)
+                for metric_key, value in init_metrics.items():
+                    if metric_key in csv_files:
+                        append_to_csv(
+                            csv_files[metric_key],
+                            [int(ref_idx), 0, 0.0, float(value)],
+                        )
+            except Exception as e:
+                logging.warning(f"Could not write initial metrics (iter=0) CSV: {e}")
 
         # start_refinement_time removed (unused)
 
@@ -2590,7 +2605,10 @@ class DepthOptimization:
             # Record iteration duration
             if iter_times is not None:
                 iter_times.append(time.time() - iter_start_time)
-                if gt_depth is not None:
+                if gt_depth is not None and save_per_iter and (save_dir is not None):
+                    # depth_tmp が未作成（保存オフ）ならホストへコピー
+                    if depth_tmp is None:
+                        depth_tmp = d_depth_map.copy_to_host()
                     err_path = os.path.join(save_dir, f"error_iter_{i+1:02d}.png")
                     save_error_map_as_image(depth_tmp, gt_depth, err_path)
             # Log per-iteration metrics and elapsed time (and cumulative since after JIT)
@@ -2606,8 +2624,10 @@ class DepthOptimization:
                 try:
                     metrics = compute_depth_metrics(depth_host, gt_depth)
                     logging.info(
-                        f"[GPU] Iter {i+1}: {iter_duration:.2f}s{cum_txt} | MAE={metrics['mae']:.4f}, AbsRel={metrics['abs_rel']:.4f}, "
-                        f"RMSE={metrics['rmse']:.4f}, RMSElog={metrics['rmse_log']:.4f}, d1={metrics['delta1']:.4f}, d2={metrics['delta2']:.4f}, d3={metrics['delta3']:.4f}"
+                        f"[GPU] Iter {i+1}: {iter_duration:.2f}s{cum_txt} | "
+                        f"MAE={metrics['mae']:.4f}, AbsRel={metrics['abs_rel']:.4f}, SqRel={metrics['sq_rel']:.4f}, "
+                        f"RMSE={metrics['rmse']:.4f}, RMSElog={metrics['rmse_log']:.4f}, "
+                        f"d1={metrics['delta1']:.4f}, d2={metrics['delta2']:.4f}, d3={metrics['delta3']:.4f}"
                     )
                     # CSV 出力
                     if csv_files is not None:

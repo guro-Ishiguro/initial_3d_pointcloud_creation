@@ -914,6 +914,10 @@ class DepthOptimization:
                     save_each_csv_dir,
                     f"abs_rel_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
                 ),
+                "sq_rel": os.path.join(
+                    save_each_csv_dir,
+                    f"sq_rel_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
+                ),
                 "rmse_log": os.path.join(
                     save_each_csv_dir,
                     f"rmse_log_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
@@ -932,7 +936,17 @@ class DepthOptimization:
                 ),
             }
             for metric, path in csv_files.items():
-                initialize_csv(path, ["time", metric])
+                initialize_csv(path, ["image_idx", "iter", "time", metric])
+            # 追加: 初期深度の指標を iter=0 として保存
+            try:
+                init_metrics = compute_depth_metrics(initial_depth, gt_depth)
+                for metric_key, value in init_metrics.items():
+                    if metric_key in csv_files:
+                        append_to_csv(
+                            csv_files[metric_key], [int(ref_idx), 0, 0.0, float(value)]
+                        )
+            except Exception as e:
+                logging.warning(f"Could not write initial metrics (iter=0) CSV: {e}")
 
         start_refinement_time = time.time()
         iter_times = []
@@ -1088,13 +1102,16 @@ class DepthOptimization:
             if gt_depth is not None:
                 metrics = compute_depth_metrics(depth_map, gt_depth)
                 logging.info(
-                    f"MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                    f"MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
                 current_time = time.time() - start_refinement_time
                 for metric, value in metrics.items():
                     if metric in csv_files:
-                        append_to_csv(csv_files[metric], [current_time, value])
+                        append_to_csv(
+                            csv_files[metric],
+                            [int(ref_idx), int(i + 1), current_time, value],
+                        )
                 save_error_map_as_image(
                     depth_map,
                     gt_depth,

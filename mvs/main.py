@@ -110,6 +110,7 @@ def run():
                 "stage",
                 "mae",
                 "abs_rel",
+                "sq_rel",
                 "rmse",
                 "rmse_log",
                 "delta1",
@@ -359,7 +360,7 @@ def run():
             if gt_depth is not None:
                 metrics = compute_depth_metrics(initial_depth, gt_depth)
                 logging.info(
-                    f"[Initial Depth] MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                    f"[Initial Depth] MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
                 save_error_map_as_image(
@@ -374,6 +375,7 @@ def run():
                         "initial",
                         metrics["mae"],
                         metrics["abs_rel"],
+                        metrics["sq_rel"],
                         metrics["rmse"],
                         metrics["rmse_log"],
                         metrics["delta1"],
@@ -427,7 +429,7 @@ def run():
             if gt_depth is not None:
                 metrics = compute_depth_metrics(optimized_depth, gt_depth)
                 logging.info(
-                    f"[Optimized Depth] MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                    f"[Optimized Depth] MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
                 save_error_map_as_image(
@@ -442,6 +444,7 @@ def run():
                         "optimized",
                         metrics["mae"],
                         metrics["abs_rel"],
+                        metrics["sq_rel"],
                         metrics["rmse"],
                         metrics["rmse_log"],
                         metrics["delta1"],
@@ -476,8 +479,11 @@ def run():
                     photometrically_filtered_depth, gt_depth
                 )
                 logging.info(
-                    f"  [Photometric Filtered] MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
-                    f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
+                    f"  [Photometric Filtered] MAE: {metrics['mae']:.4f}, "
+                    f"AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, "
+                    f"RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                    f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, "
+                    f"d3: {metrics['delta3']:.4f}"
                 )
                 save_error_map_as_image(
                     photometrically_filtered_depth,
@@ -491,6 +497,7 @@ def run():
                         "photometric",
                         metrics["mae"],
                         metrics["abs_rel"],
+                        metrics["sq_rel"],
                         metrics["rmse"],
                         metrics["rmse_log"],
                         metrics["delta1"],
@@ -528,8 +535,11 @@ def run():
                         geometrically_filtered_depth, gt_depth
                     )
                     logging.info(
-                        f"  [Geometric Filtered] MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
-                        f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
+                        f"  [Geometric Filtered] MAE: {metrics['mae']:.4f}, "
+                        f"AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, "
+                        f"RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                        f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, "
+                        f"d3: {metrics['delta3']:.4f}"
                     )
                     save_error_map_as_image(
                         geometrically_filtered_depth,
@@ -543,6 +553,7 @@ def run():
                             "geometric",
                             metrics["mae"],
                             metrics["abs_rel"],
+                            metrics["sq_rel"],
                             metrics["rmse"],
                             metrics["rmse_log"],
                             metrics["delta1"],
