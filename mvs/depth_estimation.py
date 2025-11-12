@@ -134,6 +134,46 @@ class DepthEstimator:
         return ortho_depth_map, ortho_color_map
 
     @staticmethod
+    def depth_to_world(depth_map, color_image, K, R, T):
+        """
+        透視投影深度マップを直接ワールド座標の点群に変換する。
+        オルソ投影を経由せずに、カメラ座標→ワールド座標へ直接変換する。
+        """
+        h, w = depth_map.shape
+        u, v = np.meshgrid(np.arange(w), np.arange(h))
+        valid_mask = np.isfinite(depth_map) & (depth_map > 0)
+
+        if not np.any(valid_mask):
+            return np.empty((0, 3), dtype=np.float32), np.empty(
+                (0, 3), dtype=np.float32
+            )
+
+        fx, fy = K[0, 0], K[1, 1]
+        cx, cy = K[0, 2], K[1, 2]
+
+        # 有効なピクセルのみを抽出
+        u_vals = u[valid_mask]
+        v_vals = v[valid_mask]
+        z_vals = depth_map[valid_mask]
+
+        # カメラ座標系での3D点に逆投影
+        x_cam = (u_vals - cx) * z_vals / fx
+        y_cam = (v_vals - cy) * z_vals / fy
+        z_cam = z_vals
+
+        # カメラ座標をワールド座標に変換
+        # R は world->camera の回転行列、T は world->camera の並進ベクトル
+        # したがって、camera->world は R.T @ (point_cam - T)
+        pts_cam = np.vstack((x_cam, y_cam, z_cam))  # (3, N)
+        T_reshaped = T.reshape(3, 1) if T.ndim == 1 else T
+        pts_world = (R.T @ (pts_cam - T_reshaped)).T  # (N, 3)
+
+        # 色を抽出
+        colors = color_image.reshape(-1, 3)[valid_mask.flatten()] / 255.0
+
+        return pts_world.astype(np.float32), colors.astype(np.float32)
+
+    @staticmethod
     def ortho_depth_to_world(depth_map, color_image, R, T, pixel_size):
         """
         正射投影深度マップをワールド座標の点群に変換する。

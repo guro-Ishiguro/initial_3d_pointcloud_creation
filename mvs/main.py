@@ -607,21 +607,26 @@ def run():
                 geometrically_filtered_depth = photometrically_filtered_depth
 
             # --- 逐次で点群へ変換し、これまでのものと統合して表示 ---
-            (
-                ortho_depth_map,
-                ortho_color_map,
-            ) = depth_estimator.to_orthographic_projection(
-                geometrically_filtered_depth, li_rgb, config.camera_height
+            # 透視投影深度マップから直接ワールド座標の点群に変換（オルソ投影をスキップ）
+            world_points, world_colors = depth_estimator.depth_to_world(
+                geometrically_filtered_depth, li_rgb, config.K, R_mat, T_pos
             )
-            if config.DEBUG_SAVE_DEPTH_MAPS:
-                save_ortho_depth_path = os.path.join(
-                    save_each_depth_dir, f"ortho_depth.png"
-                )
-                logging.info(f"Saving ortho depth map to {save_ortho_depth_path}")
-                save_depth_map_as_image(ortho_depth_map, save_ortho_depth_path)
-            world_points, world_colors = depth_estimator.ortho_depth_to_world(
-                ortho_depth_map, ortho_color_map, R_mat, T_pos, config.pixel_size
-            )
+            # オルソ投影を経由する旧方式（コメントアウト）
+            # (
+            #     ortho_depth_map,
+            #     ortho_color_map,
+            # ) = depth_estimator.to_orthographic_projection(
+            #     geometrically_filtered_depth, li_rgb, config.camera_height
+            # )
+            # if config.DEBUG_SAVE_DEPTH_MAPS:
+            #     save_ortho_depth_path = os.path.join(
+            #         save_each_depth_dir, f"ortho_depth.png"
+            #     )
+            #     logging.info(f"Saving ortho depth map to {save_ortho_depth_path}")
+            #     save_depth_map_as_image(ortho_depth_map, save_ortho_depth_path)
+            # world_points, world_colors = depth_estimator.ortho_depth_to_world(
+            #     ortho_depth_map, ortho_color_map, R_mat, T_pos, config.pixel_size
+            # )
             merged_pts_list.append(world_points)
             merged_cols_list.append(world_colors)
 
