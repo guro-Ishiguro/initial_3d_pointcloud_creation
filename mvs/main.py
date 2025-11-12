@@ -204,18 +204,15 @@ def run():
         if img is not None:
             loaded_images[idx] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    # --- ステップ1: 各ビューの深度マップを最適化 & 光度フィルタリング & 逐次点群統合/表示 ---
+    # --- ステップ1: 各ビューの深度マップを最適化 & 光度フィルタリング ---
     logging.info(
         "\n--- Step 1: Optimizing depth maps and applying photometric filter ---"
     )
     all_optimized_depths = {}
-    live_pcd = None
-    vis = None
-    added = False
-    if getattr(config, "STREAMING_VIEWER", False):
-        live_pcd = o3d.geometry.PointCloud()
-    last_integ_pts, last_integ_cols = None, None
-    merged_pts_list, merged_cols_list = [], []
+    # 各画像のポーズ情報を保存（幾何学的一貫性フィルタリング用）
+    all_poses = {}
+    all_images = {}
+    all_gt_depths = {}
     # 逐次深度融合: カメラ平面（参照ビュー）へワープして中央値融合
     cam_fuser = None
     ortho_fuser = (
@@ -528,193 +525,421 @@ def run():
                 )
 
             all_optimized_depths[idx] = photometrically_filtered_depth
+            all_poses[idx] = {"R": R_mat, "T": T_pos, "K": config.K}
+            all_images[idx] = li_rgb
+            if gt_depth is not None:
+                all_gt_depths[idx] = gt_depth
             logging.info(f"Stored photometrically filtered depth map for index {idx}.")
 
-            # --- 幾何学的一貫性フィルタリングを即時適用 ---
-            try:
-                geometrically_filtered_depth = (
-                    depth_optimization.filter_depth_map_by_geometric_consistency(
-                        ref_depth_map=photometrically_filtered_depth,
-                        ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
-                        neighbor_views_data=neighbor_views_data,
-                        all_optimized_depths=all_optimized_depths,
-                    )
-                )
-                if gt_depth is not None:
-                    valid_pixels_after_geo = np.sum(
-                        np.isfinite(geometrically_filtered_depth)
-                    )
-                    pixels_filtered_geo = (
-                        valid_pixels_after_photo - valid_pixels_after_geo
-                    )
-                    metrics = compute_depth_metrics(
-                        geometrically_filtered_depth, gt_depth
-                    )
-                    logging.info(
-                        f"  [Geometric Filtered] Valid pixels: {valid_pixels_after_geo} "
-                        f"({pixels_filtered_geo} filtered, {pixels_filtered_geo/valid_pixels_after_photo*100:.2f}%), "
-                        f"MAE: {metrics['mae']:.4f}, "
-                        f"AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, "
-                        f"RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
-                        f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, "
-                        f"d3: {metrics['delta3']:.4f}"
-                    )
-                    save_error_map_as_image(
-                        geometrically_filtered_depth,
-                        gt_depth,
-                        os.path.join(save_each_depth_dir, "error_map_geometric.png"),
-                    )
-                    append_to_csv(
-                        results_csv_path,
-                        [
-                            idx,
-                            "geometric",
-                            metrics["mae"],
-                            metrics["abs_rel"],
-                            metrics["sq_rel"],
-                            metrics["rmse"],
-                            metrics["rmse_log"],
-                            metrics["delta1"],
-                            metrics["delta2"],
-                            metrics["delta3"],
-                        ],
-                    )
-                if config.DEBUG_SAVE_DEPTH_MAPS:
-                    save_geometrically_filtered_depth_path = os.path.join(
-                        save_each_depth_dir, f"geometrically_filtered_depth.png"
-                    )
-                    logging.info(
-                        f"Saving geometrically filtered depth map to {save_geometrically_filtered_depth_path}"
-                    )
-                    save_depth_map_as_image(
-                        geometrically_filtered_depth,
-                        save_geometrically_filtered_depth_path,
-                    )
-                if getattr(config, "DEBUG_SAVE_NORMAL_MAPS", False):
-                    normals_geo = _compute_normals_from_depth(
-                        geometrically_filtered_depth, config.K
-                    )
-                    save_normal_map_as_image(
-                        normals_geo,
-                        os.path.join(
-                            save_each_normal_dir, "geometrically_filtered_normal.png"
-                        ),
-                    )
-            except Exception as e:
-                logging.warning(
-                    f"Geometric consistency filtering skipped for {idx}: {e}"
-                )
-                geometrically_filtered_depth = photometrically_filtered_depth
-
-            # --- 逐次で点群へ変換し、これまでのものと統合して表示 ---
-            # 透視投影深度マップから直接ワールド座標の点群に変換（オルソ投影をスキップ）
-            world_points, world_colors = depth_estimator.depth_to_world(
-                geometrically_filtered_depth, li_rgb, config.K, R_mat, T_pos
-            )
-            # オルソ投影を経由する旧方式（コメントアウト）
-            # (
-            #     ortho_depth_map,
-            #     ortho_color_map,
-            # ) = depth_estimator.to_orthographic_projection(
-            #     geometrically_filtered_depth, li_rgb, config.camera_height
-            # )
-            # if config.DEBUG_SAVE_DEPTH_MAPS:
-            #     save_ortho_depth_path = os.path.join(
-            #         save_each_depth_dir, f"ortho_depth.png"
+            # --- 幾何学的一貫性フィルタリングは全画像処理後に実行（コメントアウト） ---
+            # try:
+            #     geometrically_filtered_depth = (
+            #         depth_optimization.filter_depth_map_by_geometric_consistency(
+            #             ref_depth_map=photometrically_filtered_depth,
+            #             ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
+            #             neighbor_views_data=neighbor_views_data,
+            #             all_optimized_depths=all_optimized_depths,
+            #         )
             #     )
-            #     logging.info(f"Saving ortho depth map to {save_ortho_depth_path}")
-            #     save_depth_map_as_image(ortho_depth_map, save_ortho_depth_path)
-            # world_points, world_colors = depth_estimator.ortho_depth_to_world(
-            #     ortho_depth_map, ortho_color_map, R_mat, T_pos, config.pixel_size
+            #     if gt_depth is not None:
+            #         valid_pixels_after_geo = np.sum(
+            #             np.isfinite(geometrically_filtered_depth)
+            #         )
+            #         pixels_filtered_geo = (
+            #             valid_pixels_after_photo - valid_pixels_after_geo
+            #         )
+            #         metrics = compute_depth_metrics(
+            #             geometrically_filtered_depth, gt_depth
+            #         )
+            #         logging.info(
+            #             f"  [Geometric Filtered] Valid pixels: {valid_pixels_after_geo} "
+            #             f"({pixels_filtered_geo} filtered, {pixels_filtered_geo/valid_pixels_after_photo*100:.2f}%), "
+            #             f"MAE: {metrics['mae']:.4f}, "
+            #             f"AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, "
+            #             f"RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+            #             f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, "
+            #             f"d3: {metrics['delta3']:.4f}"
+            #         )
+            #         save_error_map_as_image(
+            #             geometrically_filtered_depth,
+            #             gt_depth,
+            #             os.path.join(save_each_depth_dir, "error_map_geometric.png"),
+            #         )
+            #         append_to_csv(
+            #             results_csv_path,
+            #             [
+            #                 idx,
+            #                 "geometric",
+            #                 metrics["mae"],
+            #                 metrics["abs_rel"],
+            #                 metrics["sq_rel"],
+            #                 metrics["rmse"],
+            #                 metrics["rmse_log"],
+            #                 metrics["delta1"],
+            #                 metrics["delta2"],
+            #                 metrics["delta3"],
+            #             ],
+            #         )
+            #     if config.DEBUG_SAVE_DEPTH_MAPS:
+            #         save_geometrically_filtered_depth_path = os.path.join(
+            #             save_each_depth_dir, f"geometrically_filtered_depth.png"
+            #         )
+            #         logging.info(
+            #             f"Saving geometrically filtered depth map to {save_geometrically_filtered_depth_path}"
+            #         )
+            #         save_depth_map_as_image(
+            #             geometrically_filtered_depth,
+            #             save_geometrically_filtered_depth_path,
+            #         )
+            #     if getattr(config, "DEBUG_SAVE_NORMAL_MAPS", False):
+            #         normals_geo = _compute_normals_from_depth(
+            #             geometrically_filtered_depth, config.K
+            #         )
+            #         save_normal_map_as_image(
+            #             normals_geo,
+            #             os.path.join(
+            #                 save_each_normal_dir, "geometrically_filtered_normal.png"
+            #             ),
+            #         )
+            # except Exception as e:
+            #     logging.warning(
+            #         f"Geometric consistency filtering skipped for {idx}: {e}"
+            #     )
+            #     geometrically_filtered_depth = photometrically_filtered_depth
+
+            # --- 点群への変換と統合は全画像処理後に実行（コメントアウト） ---
+            # # 透視投影深度マップから直接ワールド座標の点群に変換（オルソ投影をスキップ）
+            # world_points, world_colors = depth_estimator.depth_to_world(
+            #     geometrically_filtered_depth, li_rgb, config.K, R_mat, T_pos
             # )
-            merged_pts_list.append(world_points)
-            merged_cols_list.append(world_colors)
+            # # オルソ投影を経由する旧方式（コメントアウト）
+            # # (
+            # #     ortho_depth_map,
+            # #     ortho_color_map,
+            # # ) = depth_estimator.to_orthographic_projection(
+            # #     geometrically_filtered_depth, li_rgb, config.camera_height
+            # # )
+            # # if config.DEBUG_SAVE_DEPTH_MAPS:
+            # #     save_ortho_depth_path = os.path.join(
+            # #         save_each_depth_dir, f"ortho_depth.png"
+            # #     )
+            # #     logging.info(f"Saving ortho depth map to {save_ortho_depth_path}")
+            # #     save_depth_map_as_image(ortho_depth_map, save_ortho_depth_path)
+            # # world_points, world_colors = depth_estimator.ortho_depth_to_world(
+            # #     ortho_depth_map, ortho_color_map, R_mat, T_pos, config.pixel_size
+            # # )
+            # merged_pts_list.append(world_points)
+            # merged_cols_list.append(world_colors)
 
-            # 逐次深度融合
-            if world_ortho_fuser is not None:
-                fused_world_ortho = world_ortho_fuser.add_world_points(world_points)
-                if config.DEBUG_SAVE_DEPTH_MAPS and fused_world_ortho is not None:
-                    world_ortho_fuser.save_fused_depth(
-                        os.path.join(
-                            config.DEPTH_IMAGE_DIR,
-                            f"depth_{idx:04d}",
-                            "fused_ortho_running.png",
-                        ),
-                        swap_axes=True,
-                        flip_y=True,
-                        flip_x=True,
-                    )
+            # # 逐次深度融合
+            # if world_ortho_fuser is not None:
+            #     fused_world_ortho = world_ortho_fuser.add_world_points(world_points)
+            #     if config.DEBUG_SAVE_DEPTH_MAPS and fused_world_ortho is not None:
+            #         world_ortho_fuser.save_fused_depth(
+            #             os.path.join(
+            #                 config.DEPTH_IMAGE_DIR,
+            #                 f"depth_{idx:04d}",
+            #                 "fused_ortho_running.png",
+            #             ),
+            #             swap_axes=True,
+            #             flip_y=True,
+            #             flip_x=True,
+            #         )
 
-            integ_pts, integ_cols = point_cloud_integrator.integrate_depth_maps_median(
-                merged_pts_list, merged_cols_list, voxel_size=0.1
-            )
-            if getattr(config, "STREAMING_VIEWER", False) and integ_pts.size > 0:
-                try:
-                    if vis is None:
-                        vis = o3d.visualization.Visualizer()
-                        vis.create_window(
-                            window_name="Streaming Point Cloud",
-                            width=1280,
-                            height=720,
-                            visible=True,
-                        )
-                        opt = vis.get_render_option()
-                        opt.background_color = np.asarray([0, 0, 0])
-                        added = False
-                    live_pcd.points = o3d.utility.Vector3dVector(integ_pts)
-                    live_pcd.colors = o3d.utility.Vector3dVector(integ_cols)
-                    if not added:
-                        vis.add_geometry(live_pcd)
-                        # 初回のみカメラ姿勢を設定
-                        ctr = vis.get_view_control()
-                        front = np.asarray(
-                            getattr(config, "VIEWER_TOPDOWN_FRONT", [0.0, -1.0, 0.0])
-                        )
-                        up = np.asarray(
-                            getattr(config, "VIEWER_TOPDOWN_UP", [0.0, 0.0, 1.0])
-                        )
-                        # ロール回転（画面の回転）を up ベクトルに反映
-                        roll_deg = float(getattr(config, "VIEWER_ROLL_DEG", 0.0))
-                        if abs(roll_deg) > 1e-3:
-                            theta = np.deg2rad(roll_deg)
-                            # front 軸まわり回転（Rodrigues）
-                            f = front / (np.linalg.norm(front) + 1e-9)
-                            Kx = np.array(
-                                [[0, -f[2], f[1]], [f[2], 0, -f[0]], [-f[1], f[0], 0]],
-                                dtype=float,
-                            )
-                            Rf = (
-                                np.eye(3)
-                                + np.sin(theta) * Kx
-                                + (1 - np.cos(theta)) * (Kx @ Kx)
-                            )
-                            up = (Rf @ up.reshape(3, 1)).ravel()
-                        center = (
-                            np.mean(integ_pts, axis=0)
-                            if integ_pts.size > 0
-                            else np.array([0, 0, 0], dtype=float)
-                        )
-                        zoom = float(getattr(config, "VIEWER_TOPDOWN_ZOOM", 0.7))
-                        try:
-                            ctr.set_front(front)
-                            ctr.set_up(up)
-                            ctr.set_lookat(center)
-                            ctr.set_zoom(zoom)
-                        except Exception:
-                            pass
-                        added = True
-                    else:
-                        vis.update_geometry(live_pcd)
-                    vis.poll_events()
-                    vis.update_renderer()
-                except Exception as e:
-                    logging.warning(f"Streaming viewer update failed: {e}")
-            last_integ_pts, last_integ_cols = integ_pts, integ_cols
+            # integ_pts, integ_cols = point_cloud_integrator.integrate_depth_maps_median(
+            #     merged_pts_list, merged_cols_list, voxel_size=0.1
+            # )
+            # if getattr(config, "STREAMING_VIEWER", False) and integ_pts.size > 0:
+            #     try:
+            #         if vis is None:
+            #             vis = o3d.visualization.Visualizer()
+            #             vis.create_window(
+            #                 window_name="Streaming Point Cloud",
+            #                 width=1280,
+            #                 height=720,
+            #                 visible=True,
+            #             )
+            #             opt = vis.get_render_option()
+            #             opt.background_color = np.asarray([0, 0, 0])
+            #             added = False
+            #         live_pcd.points = o3d.utility.Vector3dVector(integ_pts)
+            #         live_pcd.colors = o3d.utility.Vector3dVector(integ_cols)
+            #         if not added:
+            #             vis.add_geometry(live_pcd)
+            #             # 初回のみカメラ姿勢を設定
+            #             ctr = vis.get_view_control()
+            #             front = np.asarray(
+            #                 getattr(config, "VIEWER_TOPDOWN_FRONT", [0.0, -1.0, 0.0])
+            #             )
+            #             up = np.asarray(
+            #                 getattr(config, "VIEWER_TOPDOWN_UP", [0.0, 0.0, 1.0])
+            #             )
+            #             # ロール回転（画面の回転）を up ベクトルに反映
+            #             roll_deg = float(getattr(config, "VIEWER_ROLL_DEG", 0.0))
+            #             if abs(roll_deg) > 1e-3:
+            #                 theta = np.deg2rad(roll_deg)
+            #                 # front 軸まわり回転（Rodrigues）
+            #                 f = front / (np.linalg.norm(front) + 1e-9)
+            #                 Kx = np.array(
+            #                     [[0, -f[2], f[1]], [f[2], 0, -f[0]], [-f[1], f[0], 0]],
+            #                     dtype=float,
+            #                 )
+            #                 Rf = (
+            #                     np.eye(3)
+            #                     + np.sin(theta) * Kx
+            #                     + (1 - np.cos(theta)) * (Kx @ Kx)
+            #                 )
+            #                 up = (Rf @ up.reshape(3, 1)).ravel()
+            #             center = (
+            #                 np.mean(integ_pts, axis=0)
+            #                 if integ_pts.size > 0
+            #                 else np.array([0, 0, 0], dtype=float)
+            #             )
+            #             zoom = float(getattr(config, "VIEWER_TOPDOWN_ZOOM", 0.7))
+            #             try:
+            #                 ctr.set_front(front)
+            #                 ctr.set_up(up)
+            #                 ctr.set_lookat(center)
+            #                 ctr.set_zoom(zoom)
+            #             except Exception:
+            #                 pass
+            #             added = True
+            #         else:
+            #             vis.update_geometry(live_pcd)
+            #         vis.poll_events()
+            #         vis.update_renderer()
+            #     except Exception as e:
+            #         logging.warning(f"Streaming viewer update failed: {e}")
+            # last_integ_pts, last_integ_cols = integ_pts, integ_cols
 
         except Exception as e:
             logging.error(f"Error in Step 1 for image pair {idx}: {e}", exc_info=True)
 
         evaluation_results.append(view_metrics)
+
+    # --- ステップ2: 全画像の深度マップが揃った状態で幾何学的一貫性フィルタリングを実行 ---
+    logging.info(
+        "\n--- Step 2: Applying geometric consistency filtering to all depth maps ---"
+    )
+    all_geometrically_filtered_depths = {}
+    for idx in target_indices:
+        if idx not in all_optimized_depths:
+            continue
+
+        save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}")
+        save_each_normal_dir = os.path.join(
+            config.NORMAL_IMAGE_DIR, f"normal_{idx:04d}"
+        )
+        gt_depth = all_gt_depths.get(idx, None)
+        photometrically_filtered_depth = all_optimized_depths[idx]
+        ref_pose = all_poses[idx]
+
+        # 近傍ビューのデータを準備
+        neighbor_views_data = []
+        for offset in neighbor_view_offsets:
+            neighbor_idx = idx + offset
+            if (
+                0 <= neighbor_idx < len(all_pairs_data)
+                and neighbor_idx in loaded_images
+                and neighbor_idx in all_optimized_depths
+            ):
+                _, T_n, _, _, R_n = all_pairs_data[neighbor_idx]
+                neighbor_views_data.append(
+                    {
+                        "image": loaded_images[neighbor_idx],
+                        "image_idx": neighbor_idx,
+                        "R": R_n,
+                        "T": T_n,
+                        "K": config.K,
+                    }
+                )
+
+        # 幾何学的一貫性フィルタリングを実行
+        try:
+            valid_pixels_after_photo = np.sum(
+                np.isfinite(photometrically_filtered_depth)
+            )
+            geometrically_filtered_depth = (
+                depth_optimization.filter_depth_map_by_geometric_consistency(
+                    ref_depth_map=photometrically_filtered_depth,
+                    ref_pose=ref_pose,
+                    neighbor_views_data=neighbor_views_data,
+                    all_optimized_depths=all_optimized_depths,
+                )
+            )
+            all_geometrically_filtered_depths[idx] = geometrically_filtered_depth
+
+            if gt_depth is not None:
+                valid_pixels_after_geo = np.sum(
+                    np.isfinite(geometrically_filtered_depth)
+                )
+                pixels_filtered_geo = valid_pixels_after_photo - valid_pixels_after_geo
+                metrics = compute_depth_metrics(geometrically_filtered_depth, gt_depth)
+                logging.info(
+                    f"[Geometric Filtered {idx}] Valid pixels: {valid_pixels_after_geo} "
+                    f"({pixels_filtered_geo} filtered, {pixels_filtered_geo/valid_pixels_after_photo*100:.2f}%), "
+                    f"MAE: {metrics['mae']:.4f}, "
+                    f"AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, "
+                    f"RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                    f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, "
+                    f"d3: {metrics['delta3']:.4f}"
+                )
+                save_error_map_as_image(
+                    geometrically_filtered_depth,
+                    gt_depth,
+                    os.path.join(save_each_depth_dir, "error_map_geometric.png"),
+                )
+                append_to_csv(
+                    results_csv_path,
+                    [
+                        idx,
+                        "geometric",
+                        metrics["mae"],
+                        metrics["abs_rel"],
+                        metrics["sq_rel"],
+                        metrics["rmse"],
+                        metrics["rmse_log"],
+                        metrics["delta1"],
+                        metrics["delta2"],
+                        metrics["delta3"],
+                    ],
+                )
+            if config.DEBUG_SAVE_DEPTH_MAPS:
+                save_geometrically_filtered_depth_path = os.path.join(
+                    save_each_depth_dir, f"geometrically_filtered_depth.png"
+                )
+                logging.info(
+                    f"Saving geometrically filtered depth map to {save_geometrically_filtered_depth_path}"
+                )
+                save_depth_map_as_image(
+                    geometrically_filtered_depth,
+                    save_geometrically_filtered_depth_path,
+                )
+            if getattr(config, "DEBUG_SAVE_NORMAL_MAPS", False):
+                normals_geo = _compute_normals_from_depth(
+                    geometrically_filtered_depth, config.K
+                )
+                save_normal_map_as_image(
+                    normals_geo,
+                    os.path.join(
+                        save_each_normal_dir, "geometrically_filtered_normal.png"
+                    ),
+                )
+        except Exception as e:
+            logging.warning(f"Geometric consistency filtering skipped for {idx}: {e}")
+            all_geometrically_filtered_depths[idx] = photometrically_filtered_depth
+
+    # --- ステップ3: 点群への変換と統合 ---
+    logging.info(
+        "\n--- Step 3: Converting depth maps to point clouds and integrating ---"
+    )
+    merged_pts_list, merged_cols_list = [], []
+    live_pcd = None
+    vis = None
+    added = False
+    if getattr(config, "STREAMING_VIEWER", False):
+        live_pcd = o3d.geometry.PointCloud()
+    last_integ_pts, last_integ_cols = None, None
+
+    for idx in target_indices:
+        if idx not in all_geometrically_filtered_depths:
+            continue
+
+        geometrically_filtered_depth = all_geometrically_filtered_depths[idx]
+        ref_pose = all_poses[idx]
+        li_rgb = all_images[idx]
+        R_mat = ref_pose["R"]
+        T_pos = ref_pose["T"]
+
+        # 透視投影深度マップから直接ワールド座標の点群に変換（オルソ投影をスキップ）
+        world_points, world_colors = depth_estimator.depth_to_world(
+            geometrically_filtered_depth, li_rgb, config.K, R_mat, T_pos
+        )
+        merged_pts_list.append(world_points)
+        merged_cols_list.append(world_colors)
+
+        # 逐次深度融合
+        if world_ortho_fuser is not None:
+            fused_world_ortho = world_ortho_fuser.add_world_points(world_points)
+            if config.DEBUG_SAVE_DEPTH_MAPS and fused_world_ortho is not None:
+                save_each_depth_dir = os.path.join(
+                    config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}"
+                )
+                world_ortho_fuser.save_fused_depth(
+                    os.path.join(
+                        save_each_depth_dir,
+                        "fused_ortho_running.png",
+                    ),
+                    swap_axes=True,
+                    flip_y=True,
+                    flip_x=True,
+                )
+
+        integ_pts, integ_cols = point_cloud_integrator.integrate_depth_maps_median(
+            merged_pts_list, merged_cols_list, voxel_size=0.1
+        )
+        if getattr(config, "STREAMING_VIEWER", False) and integ_pts.size > 0:
+            try:
+                if vis is None:
+                    vis = o3d.visualization.Visualizer()
+                    vis.create_window(
+                        window_name="Streaming Point Cloud",
+                        width=1280,
+                        height=720,
+                        visible=True,
+                    )
+                    opt = vis.get_render_option()
+                    opt.background_color = np.asarray([0, 0, 0])
+                    added = False
+                live_pcd.points = o3d.utility.Vector3dVector(integ_pts)
+                live_pcd.colors = o3d.utility.Vector3dVector(integ_cols)
+                if not added:
+                    vis.add_geometry(live_pcd)
+                    # 初回のみカメラ姿勢を設定
+                    ctr = vis.get_view_control()
+                    front = np.asarray(
+                        getattr(config, "VIEWER_TOPDOWN_FRONT", [0.0, -1.0, 0.0])
+                    )
+                    up = np.asarray(
+                        getattr(config, "VIEWER_TOPDOWN_UP", [0.0, 0.0, 1.0])
+                    )
+                    # ロール回転（画面の回転）を up ベクトルに反映
+                    roll_deg = float(getattr(config, "VIEWER_ROLL_DEG", 0.0))
+                    if abs(roll_deg) > 1e-3:
+                        theta = np.deg2rad(roll_deg)
+                        # front 軸まわり回転（Rodrigues）
+                        f = front / (np.linalg.norm(front) + 1e-9)
+                        Kx = np.array(
+                            [[0, -f[2], f[1]], [f[2], 0, -f[0]], [-f[1], f[0], 0]],
+                            dtype=float,
+                        )
+                        Rf = (
+                            np.eye(3)
+                            + np.sin(theta) * Kx
+                            + (1 - np.cos(theta)) * (Kx @ Kx)
+                        )
+                        up = (Rf @ up.reshape(3, 1)).ravel()
+                    center = (
+                        np.mean(integ_pts, axis=0)
+                        if integ_pts.size > 0
+                        else np.array([0, 0, 0], dtype=float)
+                    )
+                    zoom = float(getattr(config, "VIEWER_TOPDOWN_ZOOM", 0.7))
+                    try:
+                        ctr.set_front(front)
+                        ctr.set_up(up)
+                        ctr.set_lookat(center)
+                        ctr.set_zoom(zoom)
+                    except Exception:
+                        pass
+                    added = True
+                else:
+                    vis.update_geometry(live_pcd)
+                vis.poll_events()
+                vis.update_renderer()
+            except Exception as e:
+                logging.warning(f"Streaming viewer update failed: {e}")
+        last_integ_pts, last_integ_cols = integ_pts, integ_cols
 
     # --- 最終保存 ---
     logging.info("\n--- Final: Saving the last integrated point cloud ---")
