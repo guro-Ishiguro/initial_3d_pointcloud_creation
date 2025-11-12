@@ -427,9 +427,11 @@ def run():
 
             # 最適化後の深度を評価
             if gt_depth is not None:
+                valid_pixels_before_photo = np.sum(np.isfinite(optimized_depth))
                 metrics = compute_depth_metrics(optimized_depth, gt_depth)
                 logging.info(
-                    f"[Optimized Depth] MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
+                    f"[Optimized Depth] Valid pixels: {valid_pixels_before_photo}, "
+                    f"MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
                 save_error_map_as_image(
@@ -475,11 +477,19 @@ def run():
 
             # 光度フィルタリング後の深度を評価
             if gt_depth is not None:
+                valid_pixels_after_photo = np.sum(
+                    np.isfinite(photometrically_filtered_depth)
+                )
+                pixels_filtered_photo = (
+                    valid_pixels_before_photo - valid_pixels_after_photo
+                )
                 metrics = compute_depth_metrics(
                     photometrically_filtered_depth, gt_depth
                 )
                 logging.info(
-                    f"  [Photometric Filtered] MAE: {metrics['mae']:.4f}, "
+                    f"  [Photometric Filtered] Valid pixels: {valid_pixels_after_photo} "
+                    f"({pixels_filtered_photo} filtered, {pixels_filtered_photo/valid_pixels_before_photo*100:.2f}%), "
+                    f"MAE: {metrics['mae']:.4f}, "
                     f"AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, "
                     f"RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, "
@@ -531,11 +541,19 @@ def run():
                     )
                 )
                 if gt_depth is not None:
+                    valid_pixels_after_geo = np.sum(
+                        np.isfinite(geometrically_filtered_depth)
+                    )
+                    pixels_filtered_geo = (
+                        valid_pixels_after_photo - valid_pixels_after_geo
+                    )
                     metrics = compute_depth_metrics(
                         geometrically_filtered_depth, gt_depth
                     )
                     logging.info(
-                        f"  [Geometric Filtered] MAE: {metrics['mae']:.4f}, "
+                        f"  [Geometric Filtered] Valid pixels: {valid_pixels_after_geo} "
+                        f"({pixels_filtered_geo} filtered, {pixels_filtered_geo/valid_pixels_after_photo*100:.2f}%), "
+                        f"MAE: {metrics['mae']:.4f}, "
                         f"AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, "
                         f"RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                         f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, "
