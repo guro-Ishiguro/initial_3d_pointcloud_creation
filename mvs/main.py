@@ -952,6 +952,27 @@ def run():
             if last_integ_cols is not None
             else np.vstack(merged_cols_list)
         )
+
+        # 複数ビュー可視性フィルタリング（オプション）
+        if getattr(config, "MULTI_VIEW_VISIBILITY_FILTER_ENABLED", False):
+            logging.info(
+                "\n--- Applying multi-view visibility filtering to point cloud ---"
+            )
+            visibility_threshold = getattr(config, "MULTI_VIEW_VISIBILITY_THRESHOLD", 2)
+            geometric_error_threshold = getattr(
+                config, "MULTI_VIEW_GEOMETRIC_ERROR_THRESHOLD", 0.05
+            )
+            merged_pts, merged_cols = (
+                point_cloud_integrator.filter_points_by_multi_view_visibility(
+                    merged_pts,
+                    merged_cols,
+                    all_poses,
+                    all_geometrically_filtered_depths,
+                    visibility_threshold=visibility_threshold,
+                    geometric_error_threshold=geometric_error_threshold,
+                )
+            )
+
         final_pcd = point_cloud_integrator.process_and_save_final_point_cloud(
             merged_pts, merged_cols, config.POINT_CLOUD_FILE_PATH
         )
