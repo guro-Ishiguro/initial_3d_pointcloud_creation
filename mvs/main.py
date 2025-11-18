@@ -209,6 +209,8 @@ def run():
         "\n--- Step 1: Optimizing depth maps and applying photometric filter ---"
     )
     all_optimized_depths = {}
+    # 各ステージの深度マップを保存（エラーマップの統一スケール用）
+    all_stage_depths = {}
     # 各画像のポーズ情報を保存（幾何学的一貫性フィルタリング用）
     all_poses = {}
     all_images = {}
@@ -353,18 +355,14 @@ def run():
                 logging.info(f"Saving initial normal map to {save_initial_normal_path}")
                 save_normal_map_as_image(init_normals, save_initial_normal_path)
 
-            # 初期深度を評価
+            # 初期深度を評価（エラーマップは後で統一スケールで保存）
             if gt_depth is not None:
                 metrics = compute_depth_metrics(initial_depth, gt_depth)
                 logging.info(
                     f"[Initial Depth] MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
-                save_error_map_as_image(
-                    initial_depth,
-                    gt_depth,
-                    os.path.join(save_each_depth_dir, "error_map_initial.png"),
-                )
+                # エラーマップは後で統一スケールで保存するため、ここでは保存しない
                 append_to_csv(
                     results_csv_path,
                     [
@@ -422,7 +420,7 @@ def run():
             #     ref_idx=idx,
             # )
 
-            # 最適化後の深度を評価
+            # 最適化後の深度を評価（エラーマップは後で統一スケールで保存）
             if gt_depth is not None:
                 valid_pixels_before_photo = np.sum(np.isfinite(optimized_depth))
                 metrics = compute_depth_metrics(optimized_depth, gt_depth)
@@ -431,11 +429,7 @@ def run():
                     f"MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
-                save_error_map_as_image(
-                    optimized_depth,
-                    gt_depth,
-                    os.path.join(save_each_depth_dir, "error_map_optimized.png"),
-                )
+                # エラーマップは後で統一スケールで保存するため、ここでは保存しない
                 append_to_csv(
                     results_csv_path,
                     [
@@ -492,11 +486,7 @@ def run():
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, "
                     f"d3: {metrics['delta3']:.4f}"
                 )
-                save_error_map_as_image(
-                    photometrically_filtered_depth,
-                    gt_depth,
-                    os.path.join(save_each_depth_dir, "error_map_photometric.png"),
-                )
+                # エラーマップは後で統一スケールで保存するため、ここでは保存しない
                 append_to_csv(
                     results_csv_path,
                     [
@@ -529,6 +519,16 @@ def run():
             all_images[idx] = li_rgb
             if gt_depth is not None:
                 all_gt_depths[idx] = gt_depth
+            # 各ステージの深度マップを保存（エラーマップの統一スケール用）
+            if gt_depth is not None:
+                if idx not in all_stage_depths:
+                    all_stage_depths[idx] = {}
+                all_stage_depths[idx]["initial"] = initial_depth.copy()
+                all_stage_depths[idx]["optimized"] = optimized_depth.copy()
+                all_stage_depths[idx][
+                    "photometric"
+                ] = photometrically_filtered_depth.copy()
+                all_stage_depths[idx]["save_dir"] = save_each_depth_dir
             logging.info(f"Stored photometrically filtered depth map for index {idx}.")
 
             # --- 幾何学的一貫性フィルタリングは全画像処理後に実行（コメントアウト） ---
@@ -784,11 +784,12 @@ def run():
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, "
                     f"d3: {metrics['delta3']:.4f}"
                 )
-                save_error_map_as_image(
-                    geometrically_filtered_depth,
-                    gt_depth,
-                    os.path.join(save_each_depth_dir, "error_map_geometric.png"),
-                )
+                # エラーマップは後で統一スケールで保存するため、ここでは保存しない
+                # 幾何学フィルタリング後の深度マップも保存
+                if idx in all_stage_depths:
+                    all_stage_depths[idx][
+                        "geometric"
+                    ] = geometrically_filtered_depth.copy()
                 append_to_csv(
                     results_csv_path,
                     [
@@ -828,6 +829,74 @@ def run():
         except Exception as e:
             logging.warning(f"Geometric consistency filtering skipped for {idx}: {e}")
             all_geometrically_filtered_depths[idx] = photometrically_filtered_depth
+
+    # --- ステップ2.5: すべてのエラーマップを統一スケールで再保存 ---
+    # 各画像ごとに、その画像のすべてのステージ/イテレーションの誤差を集めて統一スケールを計算
+    if all_stage_depths:
+        logging.info(
+            "\n--- Step 2.5: Re-saving all error maps with unified scale (per image) ---"
+        )
+        for idx in target_indices:
+            if idx not in all_stage_depths:
+                continue
+            if idx not in all_gt_depths:
+                continue
+
+            stage_depths = all_stage_depths[idx]
+            gt_depth = all_gt_depths[idx]
+            save_each_depth_dir = stage_depths.get("save_dir")
+
+            if save_each_depth_dir is None:
+                continue
+
+            # すべてのステージの誤差を収集してパーセンタイルを計算（外れ値に引っ張られないように）
+            all_errors = []
+            for stage_name, depth in stage_depths.items():
+                if stage_name == "save_dir":
+                    continue
+                valid_mask = np.isfinite(depth) & np.isfinite(gt_depth) & (gt_depth > 0)
+                if np.any(valid_mask):
+                    errors = np.abs(depth[valid_mask] - gt_depth[valid_mask])
+                    all_errors.extend(errors.tolist())
+
+            if all_errors:
+                # 95パーセンタイルを使用（外れ値に引っ張られない）
+                error_percentile = getattr(config, "ERROR_MAP_PERCENTILE", 95.0)
+                max_error_all = float(np.percentile(all_errors, error_percentile))
+                # マージンを追加（5%）
+                max_error_all = max_error_all * 1.05
+                # 最大誤差も記録（参考用）
+                max_error_actual = float(np.max(all_errors))
+            else:
+                max_error_all = 1.0
+                max_error_actual = 1.0
+
+            if max_error_all < 0.01:  # 最小値の設定
+                max_error_all = 1.0
+
+            logging.info(
+                f"Re-saving error maps for image {idx} with unified scale "
+                f"(percentile={getattr(config, 'ERROR_MAP_PERCENTILE', 95.0):.1f}%: {max_error_all:.4f} m, "
+                f"max: {max_error_actual:.4f} m)"
+            )
+
+            # 各ステージのエラーマップを統一スケールで保存
+            stage_map = {
+                "initial": "error_map_initial.png",
+                "optimized": "error_map_optimized.png",
+                "photometric": "error_map_photometric.png",
+                "geometric": "error_map_geometric.png",
+            }
+            for stage_name, depth in stage_depths.items():
+                if stage_name == "save_dir":
+                    continue
+                if stage_name in stage_map:
+                    save_error_map_as_image(
+                        depth,
+                        gt_depth,
+                        os.path.join(save_each_depth_dir, stage_map[stage_name]),
+                        max_error=max_error_all,
+                    )
 
     # --- ステップ3: 点群への変換と統合 ---
     logging.info(

@@ -2039,33 +2039,93 @@ class DepthOptimization:
             logging.info(f"Saving initial normal map to {save_pathn0}")
             save_normal_map_as_image(normal_map.copy(), save_pathn0)
         iter_times_gpu = []
-        depth_map, normal_map, cost_map = self._propagate_and_search_gpu(
-            depth_map,
-            normal_map,
-            cost_map,
-            propagation_mask,
-            initial_depth_error,
-            ref_image_gray,
-            ref_pose_K,
-            ref_pose_R,
-            ref_pose_T,
-            src_images_gray,
-            src_K,
-            src_R,
-            src_T,
-            ref_idx=ref_idx,
-            save_per_iter=config.DEBUG_SAVE_DEPTH_MAPS,
-            save_dir=save_each_depth_dir,
-            save_normals_per_iter=self.config.DEBUG_SAVE_NORMAL_MAPS,
-            normal_save_dir=(
-                os.path.join(config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}")
-                if self.config.DEBUG_SAVE_NORMAL_MAPS
-                else None
-            ),
-            gt_depth=gt_depth,
-            iter_times=iter_times_gpu,
-            csv_files=csv_files if gt_depth is not None else None,
+        # 各イテレーションの深度マップを保存するリスト（エラーマップの統一スケール用）
+        all_iteration_depths = []
+        if gt_depth is not None:
+            all_iteration_depths.append(initial_depth.copy())
+
+        depth_map, normal_map, cost_map, iteration_depths = (
+            self._propagate_and_search_gpu(
+                depth_map,
+                normal_map,
+                cost_map,
+                propagation_mask,
+                initial_depth_error,
+                ref_image_gray,
+                ref_pose_K,
+                ref_pose_R,
+                ref_pose_T,
+                src_images_gray,
+                src_K,
+                src_R,
+                src_T,
+                ref_idx=ref_idx,
+                save_per_iter=config.DEBUG_SAVE_DEPTH_MAPS,
+                save_dir=save_each_depth_dir,
+                save_normals_per_iter=self.config.DEBUG_SAVE_NORMAL_MAPS,
+                normal_save_dir=(
+                    os.path.join(config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}")
+                    if self.config.DEBUG_SAVE_NORMAL_MAPS
+                    else None
+                ),
+                gt_depth=gt_depth,
+                iter_times=iter_times_gpu,
+                csv_files=csv_files if gt_depth is not None else None,
+            )
         )
+
+        # すべてのイテレーションの深度マップを結合
+        if gt_depth is not None and iteration_depths:
+            all_iteration_depths.extend(iteration_depths)
+
+        # すべてのイテレーションの誤差を収集してパーセンタイルを計算（外れ値に引っ張られないように）
+        if (
+            gt_depth is not None
+            and all_iteration_depths
+            and save_each_depth_dir is not None
+        ):
+            all_errors = []
+            for depth in all_iteration_depths:
+                valid_mask = np.isfinite(depth) & np.isfinite(gt_depth) & (gt_depth > 0)
+                if np.any(valid_mask):
+                    errors = np.abs(depth[valid_mask] - gt_depth[valid_mask])
+                    all_errors.extend(errors.tolist())
+
+            if all_errors:
+                # 95パーセンタイルを使用（外れ値に引っ張られない）
+                error_percentile = getattr(config, "ERROR_MAP_PERCENTILE", 95.0)
+                max_error_all = float(np.percentile(all_errors, error_percentile))
+                # マージンを追加（5%）
+                max_error_all = max_error_all * 1.05
+                # 最大誤差も記録（参考用）
+                max_error_actual = float(np.max(all_errors))
+            else:
+                max_error_all = 1.0
+                max_error_actual = 1.0
+
+            if max_error_all < 0.01:  # 最小値の設定
+                max_error_all = 1.0
+
+            logging.info(
+                f"Re-saving all error maps with unified scale "
+                f"(percentile={getattr(config, 'ERROR_MAP_PERCENTILE', 95.0):.1f}%: {max_error_all:.4f} m, "
+                f"max: {max_error_actual:.4f} m)"
+            )
+
+            # 初期深度のエラーマップを再保存
+            save_error_map_as_image(
+                initial_depth,
+                gt_depth,
+                os.path.join(save_each_depth_dir, "error_map_initial.png"),
+                max_error=max_error_all,
+            )
+
+            # 各イテレーションのエラーマップを再保存
+            for i, depth in enumerate(iteration_depths, start=1):
+                err_path = os.path.join(save_each_depth_dir, f"error_iter_{i:02d}.png")
+                save_error_map_as_image(
+                    depth, gt_depth, err_path, max_error=max_error_all
+                )
 
         # --- Debug: cost_map statistics and CPU/GPU cost consistency check on samples ---
         try:
@@ -2119,6 +2179,7 @@ class DepthOptimization:
         logging.info("PatchMatch MVS refinement finished.")
         final_depth_map = depth_map.copy()
         final_depth_map[~propagation_mask] = np.nan
+
         # Save per-iteration timing plot (optional)
         try:
             import matplotlib.pyplot as _plt  # local import to avoid hard dependency
@@ -2138,6 +2199,7 @@ class DepthOptimization:
                 _plt.close()
         except Exception as e:
             logging.debug(f"Skip plotting GPU iteration time: {e}")
+
         return final_depth_map
 
     def refine_depth_with_patchmatch_vanilla(
@@ -2398,6 +2460,8 @@ class DepthOptimization:
         iter_times=None,
         csv_files=None,
     ):
+        # 各イテレーションの深度マップを保存するリスト（エラーマップの統一スケール用）
+        iteration_depths = []
         h, w = depth_map.shape
 
         # CPU実装に合わせ、invalid depthの強制シードは行わず、そのまま扱う
@@ -2609,8 +2673,9 @@ class DepthOptimization:
                     # depth_tmp が未作成（保存オフ）ならホストへコピー
                     if depth_tmp is None:
                         depth_tmp = d_depth_map.copy_to_host()
-                    err_path = os.path.join(save_dir, f"error_iter_{i+1:02d}.png")
-                    save_error_map_as_image(depth_tmp, gt_depth, err_path)
+                    # エラーマップは後で統一スケールで再保存するため、ここでは保存しない
+                    # 代わりに深度マップをリストに保存
+                    iteration_depths.append(depth_tmp.copy())
             # Log per-iteration metrics and elapsed time (and cumulative since after JIT)
             iter_duration = time.time() - iter_start_time
             cum_txt = ""
@@ -2678,4 +2743,4 @@ class DepthOptimization:
         normal_map = d_normal_map.copy_to_host()
         cost_map = d_cost_map.copy_to_host()
 
-        return depth_map, normal_map, cost_map
+        return depth_map, normal_map, cost_map, iteration_depths
