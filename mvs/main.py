@@ -1,5 +1,6 @@
 # mvs/main.py
 
+import csv
 import logging
 import os
 import re
@@ -183,6 +184,32 @@ def run():
         return 1
 
     available_indices = sorted(list(all_pairs_data.keys()))
+
+    # --- Log which images will be used (after subsampling & file existence checks) ---
+    try:
+        save_selected_csv = bool(getattr(config, "SAVE_SELECTED_FRAMES_CSV", True))
+        if save_selected_csv:
+            selected_csv_name = str(
+                getattr(config, "SELECTED_FRAMES_CSV_NAME", "selected_frames.csv")
+            ).strip() or "selected_frames.csv"
+            selected_frames_csv_path = os.path.join(config.CSV_DIR, selected_csv_name)
+            with open(selected_frames_csv_path, "w", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["index", "left_path", "right_path"])
+                for idx in available_indices:
+                    _, _, left_path, right_path, _ = all_pairs_data[idx]
+                    w.writerow([idx, left_path, right_path])
+            logging.info(
+                f"Selected frames CSV saved: {selected_frames_csv_path} (count={len(available_indices)})"
+            )
+            max_print = int(getattr(config, "LOG_SELECTED_FRAMES_MAX", 10) or 10)
+            max_print = max(0, max_print)
+            if max_print > 0:
+                preview = available_indices[:max_print]
+                logging.info(f"Selected frame indices (first {len(preview)}): {preview}")
+    except Exception as e:
+        logging.warning(f"Failed to write selected frames CSV: {e}")
+
     if hasattr(config, "TARGET_INDICES") and config.TARGET_INDICES:
         # Filter to actually available indices (after frame selection / missing file skips)
         requested = list(config.TARGET_INDICES)

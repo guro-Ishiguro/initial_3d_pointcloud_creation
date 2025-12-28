@@ -44,6 +44,11 @@ KEYFRAME_END_INDEX: null
 # When frames are subsampled, neighbor views are chosen from adjacent selected keyframes.
 # This controls how many neighbors to take on each side of the reference view.
 NEIGHBOR_KEYFRAMES_EACH_SIDE: 3
+
+# Write out which frames (and file paths) are actually used after subsampling.
+SAVE_SELECTED_FRAMES_CSV: true
+SELECTED_FRAMES_CSV_NAME: selected_frames.csv
+LOG_SELECTED_FRAMES_MAX: 10
 CHOICED_PROPAGATION_METHOD: checkerboard
 PATCHMATCH_DECAY_RATE: 0.90
 PATCHMATCH_NORMAL_SEARCH_ANGLE: 20.0
