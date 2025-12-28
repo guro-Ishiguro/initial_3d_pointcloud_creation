@@ -594,14 +594,21 @@ def run():
         if p is not None and q is not None:
             local_pose[i] = {"pos": tuple(p), "quat": tuple(q), "dataset": getattr(config, "DATA_TYPE", ""), "local_idx": i}
 
-    # optional global pool
-    global_pool_csv = str(getattr(config, "GLOBAL_NEIGHBOR_POOL_CSV", "") or os.getenv("GLOBAL_NEIGHBOR_POOL_CSV", "")).strip()
-    global_frames, global_by_key, global_ordered = _load_global_neighbor_pool(global_pool_csv) if (neighbor_pool_mode == "global_csv") else ([], {}, [])
+    # optional global pool (cross-dataset)
+    # Global neighbor pool CSV is provided via environment variable by app/cli.py in multi-dataset runs.
+    # We intentionally do not require a YAML key for this, so mvs.yaml can stay identical for single/multi use.
+    global_pool_csv = str(os.getenv("GLOBAL_NEIGHBOR_POOL_CSV", "")).strip()
+    want_global = neighbor_pool_mode in ("global_csv", "auto")
+    global_frames, global_by_key, global_ordered = (
+        _load_global_neighbor_pool(global_pool_csv) if want_global else ([], {}, [])
+    )
 
-    if neighbor_pool_mode == "global_csv" and not global_frames:
-        logging.warning(
-            f"NEIGHBOR_POOL_MODE=global_csv but GLOBAL_NEIGHBOR_POOL_CSV not available/readable: {global_pool_csv!r}. Falling back to local pool."
-        )
+    # auto/global fallback behavior
+    if want_global and not global_frames:
+        if neighbor_pool_mode == "global_csv":
+            logging.warning(
+                f"NEIGHBOR_POOL_MODE=global_csv but GLOBAL_NEIGHBOR_POOL_CSV not available/readable: {global_pool_csv!r}. Falling back to local pool."
+            )
         neighbor_pool_mode = "local"
 
     # parameters for adjacent (existing behavior)

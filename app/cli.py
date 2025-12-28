@@ -615,7 +615,8 @@ def main():
         home_dir = _get_home_dir(project_root)
         group_output_dir = os.path.join(home_dir, "output", group_name)
         mvs_cfg = _load_mvs_yaml(project_root)
-        need_global_pool = str(mvs_cfg.get("NEIGHBOR_POOL_MODE", "local")).strip().lower() == "global_csv"
+        pool_mode = str(mvs_cfg.get("NEIGHBOR_POOL_MODE", "local")).strip().lower()
+        need_global_pool = pool_mode in ("global_csv", "auto")
 
         # We keep the user's MVS YAML (if any) for the full run.
         base_mvs_yaml = _get_mvs_yaml_path(project_root)

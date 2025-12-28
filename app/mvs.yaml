@@ -53,8 +53,8 @@ NEIGHBOR_SELECTION_MODE: adjacent
 # Neighbor pool source:
 # local: only frames from the current dataset
 # global_csv: use a global pool CSV (e.g. output/<group>/csv/global_selected_poses.csv) to allow cross-dataset neighbors
-NEIGHBOR_POOL_MODE: local
-GLOBAL_NEIGHBOR_POOL_CSV: null
+# auto: if a global pool CSV is available (set by CLI in multi-dataset runs), use it; otherwise fall back to local.
+NEIGHBOR_POOL_MODE: auto
 
 # concentric mode parameters (units follow left_camera_poses.csv; typically meters)
 NEIGHBOR_CONCENTRIC_COUNT: 10
