@@ -10,6 +10,9 @@ import bisect
 import cv2
 import numpy as np
 import open3d as o3d
+import matplotlib
+matplotlib.use("Agg")  # headless save
+import matplotlib.pyplot as plt
 from depth_estimation import DepthEstimator
 from depth_fusion import (
     CameraPlaneMedianFuser,
@@ -20,6 +23,7 @@ from depth_optimization import DepthOptimization, is_gpu_enabled
 from disparity_estimation import ImageProcessor
 from logging_setup import setup_logging
 from point_cloud_integrator import PointCloudIntegrator
+from scipy.spatial.transform import Rotation
 from utils import (
     append_to_csv,
     clear_folder,
@@ -35,6 +39,104 @@ from utils import (
 
 import mvs.config as config
 from app.data_loader import DataLoader
+
+
+def _save_selected_pose_plot(
+    *,
+    data_loader: DataLoader,
+    selected_indices: list,
+    out_path: str,
+    plane: str = "xz",
+    arrow_stride: int = 5,
+    arrow_scale: float = 0.25,
+    title: str = "",
+):
+    """
+    Plot camera positions (trajectory) and approximate viewing direction arrows for selected frames.
+
+    - plane: "xz" (recommended for Unity-like top-down), "xy", "yz"
+    - arrow_stride: draw direction arrows every N selected frames (>=1)
+    - arrow_scale: arrow length multiplier in plot units
+    """
+    if not selected_indices:
+        return
+
+    plane = (plane or "xz").strip().lower()
+    axes_map = {"xy": (0, 1), "xz": (0, 2), "yz": (1, 2)}
+    ax_i, ax_j = axes_map.get(plane, (0, 2))
+    axis_names = ["x", "y", "z"]
+
+    xs, ys = [], []
+    # forward direction (projected)
+    dxs, dys = [], []
+    arrow_points_x, arrow_points_y = [], []
+    arrow_dxs, arrow_dys = [], []
+
+    for k, idx in enumerate(selected_indices):
+        fn, pos, quat = data_loader.get_camera_pose(idx)
+        if pos is None or quat is None:
+            continue
+        p = np.array(pos, dtype=np.float64)
+        xs.append(float(p[ax_i]))
+        ys.append(float(p[ax_j]))
+
+        # Direction arrow: assume camera forward is +Z in the pose coordinate.
+        try:
+            rot = Rotation.from_quat(np.array(quat, dtype=np.float64))
+            forward = rot.apply(np.array([0.0, 0.0, 1.0], dtype=np.float64))
+            d = np.array([forward[ax_i], forward[ax_j]], dtype=np.float64)
+            n = float(np.linalg.norm(d))
+            if n > 1e-9:
+                d = d / n
+        except Exception:
+            d = np.array([np.nan, np.nan], dtype=np.float64)
+
+        dxs.append(float(d[0]))
+        dys.append(float(d[1]))
+
+        if arrow_stride >= 1 and (k % arrow_stride == 0):
+            arrow_points_x.append(xs[-1])
+            arrow_points_y.append(ys[-1])
+            arrow_dxs.append(dxs[-1])
+            arrow_dys.append(dys[-1])
+
+    if len(xs) < 2:
+        return
+
+    fig = plt.figure(figsize=(10, 8), dpi=150)
+    ax = fig.add_subplot(1, 1, 1)
+    ax.plot(xs, ys, "-", linewidth=1.0, alpha=0.8, label="trajectory")
+    ax.scatter(xs, ys, s=6, alpha=0.8)
+
+    # Start/end markers
+    ax.scatter([xs[0]], [ys[0]], s=40, marker="o", label="start")
+    ax.scatter([xs[-1]], [ys[-1]], s=40, marker="x", label="end")
+
+    # Direction arrows
+    if arrow_points_x:
+        ax.quiver(
+            arrow_points_x,
+            arrow_points_y,
+            arrow_dxs,
+            arrow_dys,
+            angles="xy",
+            scale_units="xy",
+            scale=1.0 / max(1e-6, arrow_scale),
+            width=0.003,
+            alpha=0.7,
+        )
+
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
+    ax.set_xlabel(axis_names[ax_i])
+    ax.set_ylabel(axis_names[ax_j])
+    ax.set_title(title or f"Selected camera poses ({plane.upper()} plane)")
+    ax.legend(loc="best")
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(out_path)
+    plt.close(fig)
 
 
 def _compute_normals_from_depth(depth_map: np.ndarray, K: np.ndarray) -> np.ndarray:
@@ -209,6 +311,31 @@ def run():
                 logging.info(f"Selected frame indices (first {len(preview)}): {preview}")
     except Exception as e:
         logging.warning(f"Failed to write selected frames CSV: {e}")
+
+    # --- Plot & save selected camera poses (trajectory) ---
+    try:
+        if bool(getattr(config, "SAVE_SELECTED_POSE_PLOT", True)):
+            plots_dir = os.path.join(config.OUTPUT_TYPE_DIR, "plots")
+            plot_name = str(
+                getattr(config, "SELECTED_POSE_PLOT_NAME", "selected_camera_poses.png")
+            ).strip() or "selected_camera_poses.png"
+            plot_path = os.path.join(plots_dir, plot_name)
+            plane = str(getattr(config, "POSE_PLOT_PLANE", "xz") or "xz")
+            arrow_stride = int(getattr(config, "POSE_PLOT_ARROW_STRIDE", 5) or 5)
+            arrow_stride = max(1, arrow_stride)
+            arrow_scale = float(getattr(config, "POSE_PLOT_ARROW_SCALE", 0.25) or 0.25)
+            _save_selected_pose_plot(
+                data_loader=data_loader,
+                selected_indices=available_indices,
+                out_path=plot_path,
+                plane=plane,
+                arrow_stride=arrow_stride,
+                arrow_scale=arrow_scale,
+                title=f"Session={getattr(config, 'DATA_TYPE', '')} selected={len(available_indices)}",
+            )
+            logging.info(f"Selected pose plot saved: {plot_path}")
+    except Exception as e:
+        logging.warning(f"Failed to save selected pose plot: {e}")
 
     if hasattr(config, "TARGET_INDICES") and config.TARGET_INDICES:
         # Filter to actually available indices (after frame selection / missing file skips)

@@ -49,6 +49,16 @@ NEIGHBOR_KEYFRAMES_EACH_SIDE: 3
 SAVE_SELECTED_FRAMES_CSV: true
 SELECTED_FRAMES_CSV_NAME: selected_frames.csv
 LOG_SELECTED_FRAMES_MAX: 10
+
+# Plot and save camera pose trajectory for the selected frames.
+SAVE_SELECTED_POSE_PLOT: true
+SELECTED_POSE_PLOT_NAME: selected_camera_poses.png
+# Plane to project: "xz" (top-down for Unity-like), "xy", "yz"
+POSE_PLOT_PLANE: xz
+# Draw direction arrows every N selected frames
+POSE_PLOT_ARROW_STRIDE: 5
+# Arrow length (plot units; increase if arrows look too small)
+POSE_PLOT_ARROW_SCALE: 0.25
 CHOICED_PROPAGATION_METHOD: checkerboard
 PATCHMATCH_DECAY_RATE: 0.90
 PATCHMATCH_NORMAL_SEARCH_ANGLE: 20.0
