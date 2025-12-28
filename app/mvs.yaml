@@ -47,8 +47,8 @@ NEIGHBOR_KEYFRAMES_EACH_SIDE: 3
 
 # --- Neighbor selection ---
 # adjacent: (existing) pick neighbors adjacent in the selected-frame order
-# concentric: pick neighbors "concentrically" around the reference pose on a plane
-NEIGHBOR_SELECTION_MODE: concentric
+# nearest: pick the nearest frames by distance from the reference camera position
+NEIGHBOR_SELECTION_MODE: nearest
 
 # Neighbor pool source:
 # local: only frames from the current dataset
@@ -56,12 +56,10 @@ NEIGHBOR_SELECTION_MODE: concentric
 # auto: if a global pool CSV is available (set by CLI in multi-dataset runs), use it; otherwise fall back to local.
 NEIGHBOR_POOL_MODE: auto
 
-# concentric mode parameters (units follow left_camera_poses.csv; typically meters)
-NEIGHBOR_CONCENTRIC_COUNT: 10
-NEIGHBOR_CONCENTRIC_RINGS: 5
-NEIGHBOR_CONCENTRIC_PLANE: xz
-NEIGHBOR_CONCENTRIC_MIN_RADIUS_M: 0.0
-NEIGHBOR_CONCENTRIC_MAX_RADIUS_M: 1000000000.0
+# nearest mode parameters (units follow left_camera_poses.csv; typically meters)
+NEIGHBOR_NEAREST_COUNT: 10
+NEIGHBOR_NEAREST_MIN_RADIUS_M: 0.0
+NEIGHBOR_NEAREST_MAX_RADIUS_M: 1000000000.0
 
 # Write out which frames (and file paths) are actually used after subsampling.
 SAVE_SELECTED_FRAMES_CSV: true

@@ -122,118 +122,40 @@ def _load_global_neighbor_pool(csv_path: str):
     return frames, by_key, ordered
 
 
-def _circular_angle_diff(a: float, b: float) -> float:
-    """Smallest absolute difference between angles a,b in radians."""
-    d = abs(a - b) % (2.0 * np.pi)
-    return float(min(d, 2.0 * np.pi - d))
-
-
-def _select_concentric_neighbors(
+def _select_nearest_neighbors(
     *,
     ref_pos: tuple,
     candidates: list,
-    plane: str,
     count: int,
-    rings: int,
     r_min: float,
     r_max: float,
 ):
     """
-    Select neighbors in a concentric manner around ref_pos on a 2D plane.
+    Select neighbors by distance from ref_pos (nearest first).
     - candidates: list of dicts with at least {"pos": (x,y,z), ...}
     Returns a list of candidate dicts (length <= count).
     """
-    plane = (plane or "xz").strip().lower()
-    axes_map = {"xy": (0, 1), "xz": (0, 2), "yz": (1, 2)}
-    ax_i, ax_j = axes_map.get(plane, (0, 2))
-
-    rx, ry, rz = ref_pos
-    ref2 = np.array([ref_pos[ax_i], ref_pos[ax_j]], dtype=np.float64)
+    ref = np.array(ref_pos, dtype=np.float64)
 
     items = []
     for fr in candidates:
         p = fr.get("pos", None)
         if not p:
             continue
-        v = np.array([p[ax_i], p[ax_j]], dtype=np.float64) - ref2
+        v = np.array(p, dtype=np.float64) - ref
         r = float(np.linalg.norm(v))
         if r < max(0.0, r_min) or r > max(r_min, r_max):
             continue
-        ang = float(np.arctan2(v[1], v[0]))
-        items.append((r, ang, fr))
+        items.append((r, fr))
 
     if not items:
         return []
 
-    items.sort(key=lambda t: t[0])  # by radius
+    items.sort(key=lambda t: t[0])  # by distance
     count = max(0, int(count))
     if count <= 0:
         return []
-
-    rings = max(1, int(rings))
-    r_min_eff = max(0.0, float(r_min))
-    r_max_eff = max(r_min_eff + 1e-6, float(r_max))
-    edges = np.linspace(r_min_eff, r_max_eff, rings + 1)
-
-    selected = []
-    selected_angles = []
-
-    # allocate picks per ring (roughly uniform)
-    picks_per_ring = int(np.ceil(count / float(rings)))
-
-    for ri in range(rings):
-        lo, hi = float(edges[ri]), float(edges[ri + 1])
-        ring_items = [it for it in items if (lo <= it[0] <= hi)]
-        if not ring_items:
-            continue
-
-        # greedy: pick points maximizing angular diversity (and closer radius first as tie-break)
-        used = set()
-        for _ in range(picks_per_ring):
-            if len(selected) >= count:
-                break
-            best = None
-            best_score = None
-            for (r, ang, fr) in ring_items:
-                key = (fr.get("dataset"), fr.get("local_idx"), fr.get("global_idx"), fr.get("left_path"))
-                if key in used:
-                    continue
-                if not selected_angles:
-                    score = 1e9 - r  # first pick: smallest radius
-                else:
-                    mind = min(_circular_angle_diff(ang, a) for a in selected_angles)
-                    score = mind * 1000.0 - r  # prioritize angle diversity, then slightly prefer closer
-                if best is None or score > best_score:
-                    best = (r, ang, fr, key)
-                    best_score = score
-            if best is None:
-                break
-            _, ang, fr, key = best
-            used.add(key)
-            selected.append(fr)
-            selected_angles.append(float(ang))
-
-    # fill remaining from all items with angular diversity
-    if len(selected) < count:
-        used = set((fr.get("dataset"), fr.get("local_idx"), fr.get("global_idx"), fr.get("left_path")) for fr in selected)
-        for (r, ang, fr) in items:
-            if len(selected) >= count:
-                break
-            key = (fr.get("dataset"), fr.get("local_idx"), fr.get("global_idx"), fr.get("left_path"))
-            if key in used:
-                continue
-            if not selected_angles:
-                selected.append(fr)
-                selected_angles.append(float(ang))
-                used.add(key)
-                continue
-            mind = min(_circular_angle_diff(ang, a) for a in selected_angles)
-            if mind >= (np.pi / max(3.0, float(count))):
-                selected.append(fr)
-                selected_angles.append(float(ang))
-                used.add(key)
-
-    return selected[:count]
+    return [fr for _, fr in items[:count]]
 
 
 def _log_selected_neighbors(ref_idx: int, frames: list):
@@ -633,7 +555,7 @@ def run():
         os.getenv("NEIGHBOR_POOL_MODE", getattr(config, "NEIGHBOR_POOL_MODE", "local"))
     ).strip().lower()
 
-    # local pool pose cache (for concentric selection)
+    # local pool pose cache (for neighbor selection)
     local_pose = {}
     for i in available_indices:
         _, p, q = data_loader.get_camera_pose(i)
@@ -656,17 +578,19 @@ def run():
                 f"NEIGHBOR_POOL_MODE=global_csv but GLOBAL_NEIGHBOR_POOL_CSV not available/readable: {global_pool_csv!r}. Falling back to local pool."
             )
         neighbor_pool_mode = "local"
+    elif neighbor_pool_mode == "auto" and global_frames:
+        # Treat 'auto' as 'global_csv' when the pool is actually available,
+        # so downstream selection uses cross-dataset candidates.
+        neighbor_pool_mode = "global_csv"
 
     # parameters for adjacent (existing behavior)
     neighbor_each_side = int(getattr(config, "NEIGHBOR_KEYFRAMES_EACH_SIDE", 3) or 3)
     neighbor_each_side = max(0, neighbor_each_side)
 
-    # parameters for concentric selection
-    concentric_count = int(getattr(config, "NEIGHBOR_CONCENTRIC_COUNT", 10) or 10)
-    concentric_rings = int(getattr(config, "NEIGHBOR_CONCENTRIC_RINGS", 5) or 5)
-    concentric_plane = str(getattr(config, "NEIGHBOR_CONCENTRIC_PLANE", "xz") or "xz")
-    concentric_r_min = float(getattr(config, "NEIGHBOR_CONCENTRIC_MIN_RADIUS_M", 0.0) or 0.0)
-    concentric_r_max = float(getattr(config, "NEIGHBOR_CONCENTRIC_MAX_RADIUS_M", 1e9) or 1e9)
+    # parameters for nearest-neighbor selection (by distance)
+    nearest_count = int(getattr(config, "NEIGHBOR_NEAREST_COUNT", 10) or 10)
+    nearest_r_min = float(getattr(config, "NEIGHBOR_NEAREST_MIN_RADIUS_M", 0.0) or 0.0)
+    nearest_r_max = float(getattr(config, "NEIGHBOR_NEAREST_MAX_RADIUS_M", 1e9) or 1e9)
 
     # image caches
     logging.info("Pre-loading reference images...")
@@ -739,7 +663,7 @@ def run():
                         out.append(fr)
                 return out
 
-        # concentric (cross-dataset capable)
+        # nearest-by-distance (cross-dataset capable)
         if neighbor_pool_mode == "global_csv":
             ref_fr = global_by_key.get((ref_ds, int(ref_idx)), None)
             if ref_fr is None:
@@ -749,14 +673,12 @@ def run():
                 for fr in global_frames
                 if not (fr.get("dataset") == ref_ds and int(fr.get("local_idx")) == int(ref_idx))
             ]
-            picked = _select_concentric_neighbors(
+            picked = _select_nearest_neighbors(
                 ref_pos=tuple(ref_fr["pos"]),
                 candidates=candidates,
-                plane=concentric_plane,
-                count=concentric_count,
-                rings=concentric_rings,
-                r_min=concentric_r_min,
-                r_max=concentric_r_max,
+                count=nearest_count,
+                r_min=nearest_r_min,
+                r_max=nearest_r_max,
             )
             out = []
             for fr in picked:
@@ -773,14 +695,12 @@ def run():
                 for i in available_indices
                 if i != ref_idx and i in local_pose
             ]
-            picked = _select_concentric_neighbors(
+            picked = _select_nearest_neighbors(
                 ref_pos=tuple(ref["pos"]),
                 candidates=candidates,
-                plane=concentric_plane,
-                count=concentric_count,
-                rings=concentric_rings,
-                r_min=concentric_r_min,
-                r_max=concentric_r_max,
+                count=nearest_count,
+                r_min=nearest_r_min,
+                r_max=nearest_r_max,
             )
             return picked
 
