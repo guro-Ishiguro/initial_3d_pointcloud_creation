@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time
+import bisect
 
 import cv2
 import numpy as np
@@ -171,6 +172,9 @@ def run():
     except Exception as e:
         logging.warning(f"GT per-view export skipped: {e}")
 
+    # NOTE: all_pairs_data is a mapping from original frame index -> pair data.
+    # Keeping original indices is important because many artifacts (depth_XXXX, GT exr names, etc.)
+    # are keyed by the frame index coming from the dataset.
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
     if not all_pairs_data:
         logging.error(
@@ -178,10 +182,23 @@ def run():
         )
         return 1
 
+    available_indices = sorted(list(all_pairs_data.keys()))
     if hasattr(config, "TARGET_INDICES") and config.TARGET_INDICES:
-        target_indices = config.TARGET_INDICES
+        # Filter to actually available indices (after frame selection / missing file skips)
+        requested = list(config.TARGET_INDICES)
+        target_indices = [i for i in requested if i in all_pairs_data]
+        missing = [i for i in requested if i not in all_pairs_data]
+        if missing:
+            logging.warning(
+                f"Some TARGET_INDICES are not available (skipped/missing/filtered): {missing}"
+            )
+        if not target_indices:
+            logging.error(
+                "No TARGET_INDICES are available after filtering. Check FRAME_SELECTION_MODE or dataset integrity."
+            )
+            return 1
     else:
-        target_indices = list(range(len(all_pairs_data)))
+        target_indices = available_indices
 
     evaluation_results = []
 
@@ -189,12 +206,30 @@ def run():
 
     # --- パフォーマンス向上のため、必要な画像を事前に一括ロード ---
     image_indices_to_load = set()
-    neighbor_view_offsets = (-3, -2, -1, 1, 2, 3)
+    # Neighbor selection must work even after subsampling (FRAME_SELECTION_MODE),
+    # so we select neighbors as "adjacent selected keyframes" around the current idx.
+    neighbor_each_side = int(getattr(config, "NEIGHBOR_KEYFRAMES_EACH_SIDE", 3) or 3)
+    neighbor_each_side = max(0, neighbor_each_side)
+
+    def _neighbor_indices(center_idx: int):
+        if neighbor_each_side <= 0:
+            return []
+        pos = bisect.bisect_left(available_indices, center_idx)
+        out = []
+        for k in range(1, neighbor_each_side + 1):
+            j = pos - k
+            if j >= 0:
+                out.append(available_indices[j])
+        for k in range(1, neighbor_each_side + 1):
+            j = pos + k
+            if j < len(available_indices):
+                out.append(available_indices[j])
+        return out
+
     for idx in target_indices:
         image_indices_to_load.add(idx)
-        for offset in neighbor_view_offsets:
-            neighbor_idx = idx + offset
-            if 0 <= neighbor_idx < len(all_pairs_data):
+        for neighbor_idx in _neighbor_indices(idx):
+            if neighbor_idx in all_pairs_data:
                 image_indices_to_load.add(neighbor_idx)
     logging.info("Pre-loading images...")
     loaded_images = {}
@@ -257,6 +292,11 @@ def run():
             logging.warning(f"Image for index {idx} could not be loaded. Skipping.")
             continue
 
+        if idx not in all_pairs_data:
+            logging.warning(
+                f"Pair data for index {idx} not found (skipped/missing). Skipping."
+            )
+            continue
         _, T_pos, left_path, right_path, R_mat = all_pairs_data[idx]
         logging.info(f"Optimizing depth map for image pair {idx}...")
 
@@ -381,10 +421,9 @@ def run():
 
             # PatchMatchによる深度マップの最適化
             neighbor_views_data = []
-            for offset in neighbor_view_offsets:
-                neighbor_idx = idx + offset
+            for neighbor_idx in _neighbor_indices(idx):
                 if (
-                    0 <= neighbor_idx < len(all_pairs_data)
+                    neighbor_idx in all_pairs_data
                     and neighbor_idx in loaded_images
                 ):
                     _, T_n, _, _, R_n = all_pairs_data[neighbor_idx]
@@ -736,10 +775,9 @@ def run():
 
         # 近傍ビューのデータを準備
         neighbor_views_data = []
-        for offset in neighbor_view_offsets:
-            neighbor_idx = idx + offset
+        for neighbor_idx in _neighbor_indices(idx):
             if (
-                0 <= neighbor_idx < len(all_pairs_data)
+                neighbor_idx in all_pairs_data
                 and neighbor_idx in loaded_images
                 and neighbor_idx in all_optimized_depths
             ):

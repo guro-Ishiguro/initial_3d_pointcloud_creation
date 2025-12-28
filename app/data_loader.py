@@ -69,6 +69,126 @@ class DataLoader:
         quat_with_error = rotated_orientation.as_quat()
         return pos_with_error, quat_with_error
 
+    def _select_frame_indices(self):
+        """
+        Select a subset of frame indices (indices into self.camera_data) to reduce redundant views.
+
+        Selection modes (via app/mvs.yaml overrides read in mvs/config.py):
+          - FRAME_SELECTION_MODE: "none" | "stride" | "pose"
+          - FRAME_STRIDE: int (used when mode == "stride")
+          - KEYFRAME_MIN_TRANSLATION_M: float (used when mode == "pose")
+          - KEYFRAME_MIN_ROTATION_DEG: float (used when mode == "pose")
+          - KEYFRAME_MAX_FRAME_GAP: int (force-select at least every N frames; used when mode == "pose")
+          - KEYFRAME_MIN_FRAME_GAP: int (do not select frames closer than this gap unless forced; used when mode == "pose")
+          - KEYFRAME_START_INDEX / KEYFRAME_END_INDEX: optional inclusive range clamp
+
+        Rationale (photogrammetry/CV):
+          - Too-dense frames add compute but little parallax; translation/rotation thresholds keep useful baselines.
+          - A max-gap guard prevents long dead zones that can hurt multi-view fusion/neighbor selection.
+        """
+        mode = str(getattr(config, "FRAME_SELECTION_MODE", "none")).strip().lower()
+
+        n = len(self.camera_data)
+        if n <= 0:
+            return []
+
+        start = int(getattr(config, "KEYFRAME_START_INDEX", 0) or 0)
+        end_cfg = getattr(config, "KEYFRAME_END_INDEX", None)
+        end = int(end_cfg) if end_cfg is not None else (n - 1)
+        start = max(0, min(start, n - 1))
+        end = max(start, min(end, n - 1))
+        candidates = list(range(start, end + 1))
+
+        # Filter: ignore rows that look like right camera entries (some logs may include them)
+        filtered = []
+        for i in candidates:
+            fn, _, _ = self.camera_data[i]
+            if str(fn).lower().startswith("right_"):
+                continue
+            filtered.append(i)
+
+        if mode in ("none", "", "off", "false"):
+            return filtered
+
+        if mode == "stride":
+            stride = int(getattr(config, "FRAME_STRIDE", 1) or 1)
+            stride = max(1, stride)
+            return filtered[::stride]
+
+        if mode != "pose":
+            logging.warning(f"Unknown FRAME_SELECTION_MODE={mode!r}; falling back to none.")
+            return filtered
+
+        # pose-based keyframe selection
+        min_t = float(getattr(config, "KEYFRAME_MIN_TRANSLATION_M", 0.0) or 0.0)
+        min_r_deg = float(getattr(config, "KEYFRAME_MIN_ROTATION_DEG", 0.0) or 0.0)
+        max_gap = int(getattr(config, "KEYFRAME_MAX_FRAME_GAP", 0) or 0)
+        min_gap = int(getattr(config, "KEYFRAME_MIN_FRAME_GAP", 0) or 0)
+        max_gap = max(0, max_gap)
+        min_gap = max(0, min_gap)
+
+        if min_t <= 0.0 and min_r_deg <= 0.0 and max_gap <= 0:
+            logging.warning(
+                "pose mode selected but KEYFRAME_MIN_TRANSLATION_M/KEYFRAME_MIN_ROTATION_DEG/KEYFRAME_MAX_FRAME_GAP are all disabled; falling back to using all candidate frames."
+            )
+            return filtered
+
+        selected = []
+        last_sel = None
+        last_pos = None
+        last_rot = None
+
+        for i in filtered:
+            fn, pos, quat = self.camera_data[i]
+            pos_np = np.array(pos, dtype=np.float64)
+            try:
+                rot = Rotation.from_quat(np.array(quat, dtype=np.float64))
+            except Exception:
+                # If quaternion is malformed, keep the frame (safer than dropping)
+                rot = None
+
+            if last_sel is None:
+                selected.append(i)
+                last_sel = i
+                last_pos = pos_np
+                last_rot = rot
+                continue
+
+            gap = i - int(last_sel)
+            force_by_gap = (max_gap > 0) and (gap >= max_gap)
+            if not force_by_gap and (gap < min_gap):
+                continue
+
+            # translation
+            t_ok = False
+            if last_pos is not None and min_t > 0.0:
+                t = float(np.linalg.norm(pos_np - last_pos))
+                t_ok = t >= min_t
+
+            # rotation
+            r_ok = False
+            if min_r_deg > 0.0 and (rot is not None) and (last_rot is not None):
+                try:
+                    delta = (last_rot.inv() * rot)
+                    r_deg = float(np.degrees(delta.magnitude()))
+                    r_ok = r_deg >= min_r_deg
+                except Exception:
+                    r_ok = True
+
+            # Select if either translation OR rotation threshold is exceeded (typical keyframe heuristic),
+            # or if forced by max-gap.
+            if force_by_gap or t_ok or r_ok:
+                selected.append(i)
+                last_sel = i
+                last_pos = pos_np
+                last_rot = rot
+
+        logging.info(
+            f"Frame selection mode={mode}: selected {len(selected)}/{len(filtered)} frames "
+            f"(range {start}-{end}, thresholds: t>={min_t}m r>={min_r_deg}deg, gap min={min_gap} max={max_gap})"
+        )
+        return selected
+
     def get_image_paths(self, idx):
         if 0 <= idx < len(self.camera_data):
             base_fn, _, _ = self.camera_data[idx]
@@ -107,10 +227,16 @@ class DataLoader:
             return None, None, None
 
     def get_all_camera_pairs(self, K):
-        pairs = []
+        """
+        Build mapping from original frame index -> (idx, T_cv, left_path, right_path, R_cv).
+        Keeps idx aligned to self.camera_data indices, so downstream code can use idx consistently
+        even when frames are subsampled.
+        """
+        pairs = {}
         position_error_scale = config.POSITION_ERROR_SCALE
         rotation_error_scale = config.ROTATION_ERROR_SCALE
-        for idx in range(len(self.camera_data)):
+        selected_indices = self._select_frame_indices()
+        for idx in selected_indices:
             fn, pos_unity, quat_unity = self.camera_data[idx]
             # 右画像ログ行はスキップ（ある場合）
             if fn.lower().startswith("right_"):
@@ -133,5 +259,5 @@ class DataLoader:
             if not os.path.exists(left_path) or not os.path.exists(right_path):
                 logging.warning(f"Image files for index {idx} not found. Skipping.")
                 continue
-            pairs.append((idx, T_cv, left_path, right_path, R_cv))
+            pairs[idx] = (idx, T_cv, left_path, right_path, R_cv)
         return pairs
