@@ -32,7 +32,7 @@ FRAME_STRIDE: 1
 # - KEYFRAME_MIN_ROTATION_DEG: select when camera rotated this much (degrees)
 # - KEYFRAME_MAX_FRAME_GAP: force-select at least every N frames (0 disables)
 # - KEYFRAME_MIN_FRAME_GAP: don't select frames closer than this gap unless forced
-KEYFRAME_MIN_TRANSLATION_M: 0.75
+KEYFRAME_MIN_TRANSLATION_M: 1.5
 KEYFRAME_MIN_ROTATION_DEG: 5.0
 KEYFRAME_MAX_FRAME_GAP: 30
 KEYFRAME_MIN_FRAME_GAP: 1
@@ -44,6 +44,22 @@ KEYFRAME_END_INDEX: null
 # When frames are subsampled, neighbor views are chosen from adjacent selected keyframes.
 # This controls how many neighbors to take on each side of the reference view.
 NEIGHBOR_KEYFRAMES_EACH_SIDE: 3
+
+# --- Neighbor selection ---
+# adjacent: (existing) pick neighbors adjacent in the selected-frame order
+# nearest: pick the nearest frames by distance from the reference camera position
+NEIGHBOR_SELECTION_MODE: nearest
+
+# Neighbor pool source:
+# local: only frames from the current dataset
+# global_csv: use a global pool CSV (e.g. output/<group>/csv/global_selected_poses.csv) to allow cross-dataset neighbors
+# auto: if a global pool CSV is available (set by CLI in multi-dataset runs), use it; otherwise fall back to local.
+NEIGHBOR_POOL_MODE: auto
+
+# nearest mode parameters (units follow left_camera_poses.csv; typically meters)
+NEIGHBOR_NEAREST_COUNT: 10
+NEIGHBOR_NEAREST_MIN_RADIUS_M: 0.0
+NEIGHBOR_NEAREST_MAX_RADIUS_M: 1000000000.0
 
 # Write out which frames (and file paths) are actually used after subsampling.
 SAVE_SELECTED_FRAMES_CSV: true

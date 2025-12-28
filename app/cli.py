@@ -53,11 +53,13 @@ def _get_home_dir(project_root: str) -> str:
 
 
 def _load_mvs_yaml(project_root: str):
+    """Load MVS YAML configuration file and return as dict."""
     try:
         import yaml  # type: ignore
     except Exception:
         return {}
-    cfg_path = os.getenv("APP_MVS_CONFIG", os.path.join(project_root, "app", "mvs.yaml"))
+
+    cfg_path = _get_mvs_yaml_path(project_root)
     if not os.path.exists(cfg_path):
         return {}
     try:
@@ -66,6 +68,47 @@ def _load_mvs_yaml(project_root: str):
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _get_mvs_yaml_path(project_root: str) -> str:
+    return os.getenv("APP_MVS_CONFIG", os.path.join(project_root, "app", "mvs.yaml"))
+
+
+def _write_prepass_mvs_yaml(project_root: str, out_path: str) -> str:
+    """
+    Create a temporary MVS YAML for a fast prepass:
+      - PREVIEW_ONLY: true (stop after selection/csv/plots)
+      - EXPORT_GT_PER_VIEW_ENABLE: false (avoid expensive GT export)
+    Other settings (especially frame selection) are inherited from the current mvs.yaml.
+    Returns the written path (or empty string on failure).
+    """
+    try:
+        import yaml  # type: ignore
+    except Exception:
+        return ""
+
+    base_path = _get_mvs_yaml_path(project_root)
+    if not os.path.exists(base_path):
+        return ""
+    try:
+        with open(base_path, "r") as f:
+            cfg = yaml.safe_load(f) or {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+    except Exception:
+        cfg = {}
+
+    cfg["PREVIEW_ONLY"] = True
+    cfg["EXPORT_GT_PER_VIEW_ENABLE"] = False
+    cfg["EXPORT_GT_PER_VIEW_ONLY_TARGET"] = True
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    try:
+        with open(out_path, "w") as f:
+            yaml.safe_dump(cfg, f, sort_keys=False)
+        return out_path
+    except Exception:
+        return ""
 
 
 def _merge_point_clouds(ply_paths: List[str], out_path: str) -> bool:
@@ -97,7 +140,9 @@ def _merge_point_clouds(ply_paths: List[str], out_path: str) -> bool:
     return bool(ok)
 
 
-def _merge_selected_frames_csv(session_csvs: List[str], session_names: List[str], out_csv: str) -> bool:
+def _merge_selected_frames_csv(
+    session_csvs: List[str], session_names: List[str], out_csv: str
+) -> bool:
     import csv
 
     os.makedirs(os.path.dirname(out_csv), exist_ok=True)
@@ -192,6 +237,7 @@ def _save_merged_pose_plot(
 
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except Exception:
@@ -231,7 +277,9 @@ def _save_merged_pose_plot(
 
             if arrow_stride >= 1 and (k % arrow_stride == 0):
                 try:
-                    rot = Rotation.from_quat(np.array([rx, ry, rz, rw], dtype=np.float64))
+                    rot = Rotation.from_quat(
+                        np.array([rx, ry, rz, rw], dtype=np.float64)
+                    )
                     forward = rot.apply(np.array([0.0, 0.0, 1.0], dtype=np.float64))
                     d = np.array([forward[ax_i], forward[ax_j]], dtype=np.float64)
                     n = float(np.linalg.norm(d))
@@ -445,7 +493,9 @@ def _save_global_pose_plot_from_rows(
             ys.append(float(p[ax_j]))
             if arrow_stride >= 1 and (k % arrow_stride == 0):
                 try:
-                    rot = Rotation.from_quat(np.array([rx, ry, rz, rw], dtype=np.float64))
+                    rot = Rotation.from_quat(
+                        np.array([rx, ry, rz, rw], dtype=np.float64)
+                    )
                     forward = rot.apply(np.array([0.0, 0.0, 1.0], dtype=np.float64))
                     d = np.array([forward[ax_i], forward[ax_j]], dtype=np.float64)
                     n = float(np.linalg.norm(d))
@@ -573,9 +623,20 @@ def main():
         group_name = "_".join(selected)  # keep selection order
         home_dir = _get_home_dir(project_root)
         group_output_dir = os.path.join(home_dir, "output", group_name)
-        rc = 0
-        for ds in selected:
+        mvs_cfg = _load_mvs_yaml(project_root)
+        pool_mode = str(mvs_cfg.get("NEIGHBOR_POOL_MODE", "local")).strip().lower()
+        need_global_pool = pool_mode in ("global_csv", "auto")
+
+        # We keep the user's MVS YAML (if any) for the full run.
+        base_mvs_yaml = _get_mvs_yaml_path(project_root)
+        prepass_yaml = ""
+        global_pose_csv = os.path.join(
+            group_output_dir, "csv", "global_selected_poses.csv"
+        )
+
+        def _run_one(ds: str, env_overrides: dict, title: str):
             env = os.environ.copy()
+            env.update(env_overrides)
             env["DATA_TYPE"] = ds
             env["OUTPUT_GROUP_NAME"] = group_name
             env["OUTPUT_SESSION_NAME"] = ds
@@ -583,10 +644,76 @@ def main():
             if args.config:
                 cmd += ["--config", args.config]
             cmd += ["--dataset", ds]
-            print(f"\n--- Running dataset: {ds} ---")
-            p = subprocess.run(cmd, env=env)
-            if p.returncode != 0:
-                rc = p.returncode
+            print(f"\n--- {title}: {ds} ---")
+            return subprocess.run(cmd, env=env).returncode
+
+        # Stage A: prepass to generate per-session selected_frames.csv quickly,
+        # then generate global_selected_poses.csv so the first full MVS run can use it.
+        if need_global_pool:
+            prepass_yaml = _write_prepass_mvs_yaml(
+                project_root,
+                os.path.join(group_output_dir, "csv", "mvs_prepass.yaml"),
+            )
+            if not prepass_yaml:
+                print(
+                    "Failed to create prepass MVS YAML; cannot build global neighbor pool early."
+                )
+                need_global_pool = False
+            else:
+                rc = 0
+                for ds in selected:
+                    rc = _run_one(
+                        ds,
+                        {"APP_MVS_CONFIG": prepass_yaml},
+                        "Prepass (selection/csv/plots)",
+                    )
+                    if rc != 0:
+                        break
+                if rc != 0:
+                    print("Prepass failed; abort.")
+                    sys.exit(rc)
+
+                # Build global CSV/plot now (before full runs)
+                try:
+                    rows = _build_global_selected_pose_rows(
+                        project_root=project_root,
+                        home_dir=home_dir,
+                        group_output_dir=group_output_dir,
+                        session_names=selected,
+                    )
+                    if _write_global_pose_csv(rows, global_pose_csv):
+                        print(
+                            f"Global re-indexed pose CSV saved (pre-run): {global_pose_csv} (count={len(rows)})"
+                        )
+                    plane = str(mvs_cfg.get("POSE_PLOT_PLANE", "xz") or "xz")
+                    arrow_stride = int(mvs_cfg.get("POSE_PLOT_ARROW_STRIDE", 10) or 10)
+                    arrow_scale = float(
+                        mvs_cfg.get("POSE_PLOT_ARROW_SCALE", 0.25) or 0.25
+                    )
+                    global_plot = os.path.join(
+                        group_output_dir, "plots", "global_selected_camera_poses.png"
+                    )
+                    _save_global_pose_plot_from_rows(
+                        rows=rows,
+                        out_path=global_plot,
+                        plane=plane,
+                        arrow_stride=arrow_stride,
+                        arrow_scale=arrow_scale,
+                        title=f"Group={group_name} global_idx=0..{max(0, len(rows)-1)}",
+                    )
+                    print(f"Global re-indexed pose plot saved (pre-run): {global_plot}")
+                except Exception as e:
+                    print(f"Global re-index outputs (pre-run) failed: {e}")
+
+        # Stage B: full runs (may use global neighbor pool from Stage A)
+        rc = 0
+        for ds in selected:
+            env_over = {"APP_MVS_CONFIG": base_mvs_yaml}
+            if need_global_pool and os.path.exists(global_pose_csv):
+                env_over["GLOBAL_NEIGHBOR_POOL_CSV"] = global_pose_csv
+            rc = _run_one(ds, env_over, "Run dataset")
+            if rc != 0:
+                break
 
         if rc != 0:
             print("Some sessions failed; skip merging outputs.")
@@ -595,7 +722,8 @@ def main():
         # --- Merge outputs into group folder ---
         # 1) Merge point clouds
         session_plys = [
-            os.path.join(group_output_dir, ds, "point_cloud", "output.ply") for ds in selected
+            os.path.join(group_output_dir, ds, "point_cloud", "output.ply")
+            for ds in selected
         ]
         merged_ply = os.path.join(group_output_dir, "point_cloud", "output.ply")
         if _merge_point_clouds(session_plys, merged_ply):
@@ -605,7 +733,8 @@ def main():
 
         # 2) Merge selected frames CSV
         session_selected_csvs = [
-            os.path.join(group_output_dir, ds, "csv", "selected_frames.csv") for ds in selected
+            os.path.join(group_output_dir, ds, "csv", "selected_frames.csv")
+            for ds in selected
         ]
         merged_csv = os.path.join(group_output_dir, "csv", "selected_frames_merged.csv")
         if _merge_selected_frames_csv(session_selected_csvs, selected, merged_csv):
@@ -613,15 +742,17 @@ def main():
         else:
             print("No selected_frames.csv found to merge.")
 
-        # 3) Merged pose plot
-        mvs_cfg = _load_mvs_yaml(project_root)
+        # 3) Merged pose plot (per-session selections)
         plane = str(mvs_cfg.get("POSE_PLOT_PLANE", "xz") or "xz")
         arrow_stride = int(mvs_cfg.get("POSE_PLOT_ARROW_STRIDE", 10) or 10)
         arrow_scale = float(mvs_cfg.get("POSE_PLOT_ARROW_SCALE", 0.25) or 0.25)
         pose_csvs = [
-            os.path.join(home_dir, "data", ds, "txt", "left_camera_poses.csv") for ds in selected
+            os.path.join(home_dir, "data", ds, "txt", "left_camera_poses.csv")
+            for ds in selected
         ]
-        merged_plot = os.path.join(group_output_dir, "plots", "selected_camera_poses_merged.png")
+        merged_plot = os.path.join(
+            group_output_dir, "plots", "selected_camera_poses_merged.png"
+        )
         if _save_merged_pose_plot(
             session_names=selected,
             session_pose_csvs=pose_csvs,
@@ -636,7 +767,7 @@ def main():
         else:
             print("Merged pose plot skipped (missing data or dependencies).")
 
-        # 4) Global re-index (integrated load) CSV + plot
+        # 4) Global re-index (integrated load) CSV + plot (post-run refresh)
         try:
             rows = _build_global_selected_pose_rows(
                 project_root=project_root,
@@ -644,10 +775,13 @@ def main():
                 group_output_dir=group_output_dir,
                 session_names=selected,
             )
-            global_pose_csv = os.path.join(group_output_dir, "csv", "global_selected_poses.csv")
             if _write_global_pose_csv(rows, global_pose_csv):
-                print(f"Global re-indexed pose CSV saved: {global_pose_csv} (count={len(rows)})")
-            global_plot = os.path.join(group_output_dir, "plots", "global_selected_camera_poses.png")
+                print(
+                    f"Global re-indexed pose CSV saved: {global_pose_csv} (count={len(rows)})"
+                )
+            global_plot = os.path.join(
+                group_output_dir, "plots", "global_selected_camera_poses.png"
+            )
             if _save_global_pose_plot_from_rows(
                 rows=rows,
                 out_path=global_plot,
