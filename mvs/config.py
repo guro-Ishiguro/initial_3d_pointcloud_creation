@@ -31,10 +31,25 @@ if not directories:
     raise FileNotFoundError(f"No directories found in {DATA_DIR}")
 directories.sort()
 
-if len(directories) == 1:
+_env_data_type = os.getenv("DATA_TYPE", "").strip()
+_env_data_type_index = os.getenv("DATA_TYPE_INDEX", "").strip()
+
+def _is_valid_dataset_name(name: str) -> bool:
+    return bool(name) and os.path.isdir(os.path.join(DATA_DIR, name))
+
+if _is_valid_dataset_name(_env_data_type):
+    DATA_TYPE = _env_data_type
+elif _env_data_type_index:
+    try:
+        _i = int(_env_data_type_index) - 1
+        assert 0 <= _i < len(directories)
+        DATA_TYPE = directories[_i]
+    except Exception:
+        DATA_TYPE = directories[0]
+elif len(directories) == 1:
     DATA_TYPE = directories[0]
 else:
-    # 対話選択
+    # 対話選択（単一データセット）
     print("Select dataset:")
     for i, d in enumerate(directories, 1):
         print(f"{i}) {d}")
