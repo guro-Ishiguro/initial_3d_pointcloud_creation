@@ -581,9 +581,11 @@ def run():
 
     # --- Neighbor selection (mode-switchable, optionally cross-dataset via global CSV) ---
     neighbor_selection_mode = str(
-        getattr(config, "NEIGHBOR_SELECTION_MODE", "adjacent")
+        os.getenv("NEIGHBOR_SELECTION_MODE", getattr(config, "NEIGHBOR_SELECTION_MODE", "adjacent"))
     ).strip().lower()
-    neighbor_pool_mode = str(getattr(config, "NEIGHBOR_POOL_MODE", "local")).strip().lower()
+    neighbor_pool_mode = str(
+        os.getenv("NEIGHBOR_POOL_MODE", getattr(config, "NEIGHBOR_POOL_MODE", "local"))
+    ).strip().lower()
 
     # local pool pose cache (for concentric selection)
     local_pose = {}
