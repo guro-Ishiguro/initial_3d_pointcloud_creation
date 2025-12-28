@@ -45,6 +45,24 @@ KEYFRAME_END_INDEX: null
 # This controls how many neighbors to take on each side of the reference view.
 NEIGHBOR_KEYFRAMES_EACH_SIDE: 3
 
+# --- Neighbor selection ---
+# adjacent: (existing) pick neighbors adjacent in the selected-frame order
+# concentric: pick neighbors "concentrically" around the reference pose on a plane
+NEIGHBOR_SELECTION_MODE: adjacent
+
+# Neighbor pool source:
+# local: only frames from the current dataset
+# global_csv: use a global pool CSV (e.g. output/<group>/csv/global_selected_poses.csv) to allow cross-dataset neighbors
+NEIGHBOR_POOL_MODE: local
+GLOBAL_NEIGHBOR_POOL_CSV: null
+
+# concentric mode parameters (units follow left_camera_poses.csv; typically meters)
+NEIGHBOR_CONCENTRIC_COUNT: 10
+NEIGHBOR_CONCENTRIC_RINGS: 5
+NEIGHBOR_CONCENTRIC_PLANE: xz
+NEIGHBOR_CONCENTRIC_MIN_RADIUS_M: 0.0
+NEIGHBOR_CONCENTRIC_MAX_RADIUS_M: 1000000000.0
+
 # Write out which frames (and file paths) are actually used after subsampling.
 SAVE_SELECTED_FRAMES_CSV: true
 SELECTED_FRAMES_CSV_NAME: selected_frames.csv

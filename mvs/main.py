@@ -41,6 +41,201 @@ import mvs.config as config
 from app.data_loader import DataLoader
 
 
+def _pose_unity_to_cv_RT(pos_unity, quat_unity):
+    """
+    Convert Unity-like pose (pos, quat) to CV extrinsics used in this pipeline.
+    Matches the logic in app/data_loader.py.
+    Returns (R_cv, T_cv) as np.float32.
+    """
+    pos_cv = np.array([pos_unity[0], -pos_unity[1], pos_unity[2]], dtype=np.float32)
+    quat_cv = np.array(
+        [-quat_unity[0], quat_unity[1], -quat_unity[2], quat_unity[3]],
+        dtype=np.float32,
+    )
+    r = Rotation.from_quat(quat_cv)
+    R_cv = r.as_matrix().astype(np.float32).T
+    T_cv = (-R_cv @ pos_cv).astype(np.float32)
+    return R_cv, T_cv
+
+
+def _load_global_neighbor_pool(csv_path: str):
+    """
+    Load a global neighbor pool from CSV (e.g. output/<group>/csv/global_selected_poses.csv).
+    Expected columns (at least):
+      dataset, local_idx, left_path, pos_x,pos_y,pos_z, rot_x,rot_y,rot_z,rot_w
+    Optional:
+      global_idx, right_path
+    Returns:
+      frames: list[dict]
+      by_key: dict[(dataset, local_idx)] -> dict
+      order_key: list of frames in CSV order (or global_idx order if present)
+    """
+    frames = []
+    if not csv_path or not os.path.exists(csv_path):
+        return frames, {}, []
+    try:
+        with open(csv_path, newline="") as f:
+            r = csv.DictReader(f)
+            for row in r:
+                if not row:
+                    continue
+                try:
+                    ds = str(row.get("dataset", "")).strip()
+                    li = int(row.get("local_idx"))
+                    left_path = str(row.get("left_path", "")).strip()
+                    right_path = str(row.get("right_path", "")).strip()
+                    px = float(row.get("pos_x"))
+                    py = float(row.get("pos_y"))
+                    pz = float(row.get("pos_z"))
+                    rx = float(row.get("rot_x"))
+                    ry = float(row.get("rot_y"))
+                    rz = float(row.get("rot_z"))
+                    rw = float(row.get("rot_w"))
+                    gidx = row.get("global_idx", None)
+                    gidx = int(gidx) if gidx is not None and str(gidx).strip() != "" else None
+                except Exception:
+                    continue
+                if not left_path or not os.path.exists(left_path):
+                    # If absolute paths weren't stored, skip (can't be used as neighbor image)
+                    continue
+                frames.append(
+                    {
+                        "dataset": ds,
+                        "local_idx": li,
+                        "global_idx": gidx,
+                        "left_path": left_path,
+                        "right_path": right_path,
+                        "pos": (px, py, pz),
+                        "quat": (rx, ry, rz, rw),
+                    }
+                )
+    except Exception:
+        return [], {}, []
+
+    by_key = {(fr["dataset"], fr["local_idx"]): fr for fr in frames}
+
+    # Build ordered list: prefer global_idx if available for all/most frames
+    if frames and all(fr.get("global_idx") is not None for fr in frames):
+        ordered = sorted(frames, key=lambda d: int(d["global_idx"]))
+    else:
+        ordered = frames[:]
+    return frames, by_key, ordered
+
+
+def _circular_angle_diff(a: float, b: float) -> float:
+    """Smallest absolute difference between angles a,b in radians."""
+    d = abs(a - b) % (2.0 * np.pi)
+    return float(min(d, 2.0 * np.pi - d))
+
+
+def _select_concentric_neighbors(
+    *,
+    ref_pos: tuple,
+    candidates: list,
+    plane: str,
+    count: int,
+    rings: int,
+    r_min: float,
+    r_max: float,
+):
+    """
+    Select neighbors in a concentric manner around ref_pos on a 2D plane.
+    - candidates: list of dicts with at least {"pos": (x,y,z), ...}
+    Returns a list of candidate dicts (length <= count).
+    """
+    plane = (plane or "xz").strip().lower()
+    axes_map = {"xy": (0, 1), "xz": (0, 2), "yz": (1, 2)}
+    ax_i, ax_j = axes_map.get(plane, (0, 2))
+
+    rx, ry, rz = ref_pos
+    ref2 = np.array([ref_pos[ax_i], ref_pos[ax_j]], dtype=np.float64)
+
+    items = []
+    for fr in candidates:
+        p = fr.get("pos", None)
+        if not p:
+            continue
+        v = np.array([p[ax_i], p[ax_j]], dtype=np.float64) - ref2
+        r = float(np.linalg.norm(v))
+        if r < max(0.0, r_min) or r > max(r_min, r_max):
+            continue
+        ang = float(np.arctan2(v[1], v[0]))
+        items.append((r, ang, fr))
+
+    if not items:
+        return []
+
+    items.sort(key=lambda t: t[0])  # by radius
+    count = max(0, int(count))
+    if count <= 0:
+        return []
+
+    rings = max(1, int(rings))
+    r_min_eff = max(0.0, float(r_min))
+    r_max_eff = max(r_min_eff + 1e-6, float(r_max))
+    edges = np.linspace(r_min_eff, r_max_eff, rings + 1)
+
+    selected = []
+    selected_angles = []
+
+    # allocate picks per ring (roughly uniform)
+    picks_per_ring = int(np.ceil(count / float(rings)))
+
+    for ri in range(rings):
+        lo, hi = float(edges[ri]), float(edges[ri + 1])
+        ring_items = [it for it in items if (lo <= it[0] <= hi)]
+        if not ring_items:
+            continue
+
+        # greedy: pick points maximizing angular diversity (and closer radius first as tie-break)
+        used = set()
+        for _ in range(picks_per_ring):
+            if len(selected) >= count:
+                break
+            best = None
+            best_score = None
+            for (r, ang, fr) in ring_items:
+                key = (fr.get("dataset"), fr.get("local_idx"), fr.get("global_idx"), fr.get("left_path"))
+                if key in used:
+                    continue
+                if not selected_angles:
+                    score = 1e9 - r  # first pick: smallest radius
+                else:
+                    mind = min(_circular_angle_diff(ang, a) for a in selected_angles)
+                    score = mind * 1000.0 - r  # prioritize angle diversity, then slightly prefer closer
+                if best is None or score > best_score:
+                    best = (r, ang, fr, key)
+                    best_score = score
+            if best is None:
+                break
+            _, ang, fr, key = best
+            used.add(key)
+            selected.append(fr)
+            selected_angles.append(float(ang))
+
+    # fill remaining from all items with angular diversity
+    if len(selected) < count:
+        used = set((fr.get("dataset"), fr.get("local_idx"), fr.get("global_idx"), fr.get("left_path")) for fr in selected)
+        for (r, ang, fr) in items:
+            if len(selected) >= count:
+                break
+            key = (fr.get("dataset"), fr.get("local_idx"), fr.get("global_idx"), fr.get("left_path"))
+            if key in used:
+                continue
+            if not selected_angles:
+                selected.append(fr)
+                selected_angles.append(float(ang))
+                used.add(key)
+                continue
+            mind = min(_circular_angle_diff(ang, a) for a in selected_angles)
+            if mind >= (np.pi / max(3.0, float(count))):
+                selected.append(fr)
+                selected_angles.append(float(ang))
+                used.add(key)
+
+    return selected[:count]
+
+
 def _save_selected_pose_plot(
     *,
     data_loader: DataLoader,
@@ -384,40 +579,193 @@ def run():
     except Exception as e:
         logging.warning(f"GT per-view export skipped: {e}")
 
-    # --- パフォーマンス向上のため、必要な画像を事前に一括ロード ---
-    image_indices_to_load = set()
-    # Neighbor selection must work even after subsampling (FRAME_SELECTION_MODE),
-    # so we select neighbors as "adjacent selected keyframes" around the current idx.
+    # --- Neighbor selection (mode-switchable, optionally cross-dataset via global CSV) ---
+    neighbor_selection_mode = str(
+        getattr(config, "NEIGHBOR_SELECTION_MODE", "adjacent")
+    ).strip().lower()
+    neighbor_pool_mode = str(getattr(config, "NEIGHBOR_POOL_MODE", "local")).strip().lower()
+
+    # local pool pose cache (for concentric selection)
+    local_pose = {}
+    for i in available_indices:
+        _, p, q = data_loader.get_camera_pose(i)
+        if p is not None and q is not None:
+            local_pose[i] = {"pos": tuple(p), "quat": tuple(q), "dataset": getattr(config, "DATA_TYPE", ""), "local_idx": i}
+
+    # optional global pool
+    global_pool_csv = str(getattr(config, "GLOBAL_NEIGHBOR_POOL_CSV", "") or os.getenv("GLOBAL_NEIGHBOR_POOL_CSV", "")).strip()
+    global_frames, global_by_key, global_ordered = _load_global_neighbor_pool(global_pool_csv) if (neighbor_pool_mode == "global_csv") else ([], {}, [])
+
+    if neighbor_pool_mode == "global_csv" and not global_frames:
+        logging.warning(
+            f"NEIGHBOR_POOL_MODE=global_csv but GLOBAL_NEIGHBOR_POOL_CSV not available/readable: {global_pool_csv!r}. Falling back to local pool."
+        )
+        neighbor_pool_mode = "local"
+
+    # parameters for adjacent (existing behavior)
     neighbor_each_side = int(getattr(config, "NEIGHBOR_KEYFRAMES_EACH_SIDE", 3) or 3)
     neighbor_each_side = max(0, neighbor_each_side)
 
-    def _neighbor_indices(center_idx: int):
-        if neighbor_each_side <= 0:
-            return []
-        pos = bisect.bisect_left(available_indices, center_idx)
-        out = []
-        for k in range(1, neighbor_each_side + 1):
-            j = pos - k
-            if j >= 0:
-                out.append(available_indices[j])
-        for k in range(1, neighbor_each_side + 1):
-            j = pos + k
-            if j < len(available_indices):
-                out.append(available_indices[j])
-        return out
+    # parameters for concentric selection
+    concentric_count = int(getattr(config, "NEIGHBOR_CONCENTRIC_COUNT", 10) or 10)
+    concentric_rings = int(getattr(config, "NEIGHBOR_CONCENTRIC_RINGS", 5) or 5)
+    concentric_plane = str(getattr(config, "NEIGHBOR_CONCENTRIC_PLANE", "xz") or "xz")
+    concentric_r_min = float(getattr(config, "NEIGHBOR_CONCENTRIC_MIN_RADIUS_M", 0.0) or 0.0)
+    concentric_r_max = float(getattr(config, "NEIGHBOR_CONCENTRIC_MAX_RADIUS_M", 1e9) or 1e9)
 
+    # image caches
+    logging.info("Pre-loading reference images...")
+    loaded_images = {}  # local idx -> RGB image
+    loaded_images_by_path = {}  # path -> RGB image (for global neighbors)
     for idx in target_indices:
-        image_indices_to_load.add(idx)
-        for neighbor_idx in _neighbor_indices(idx):
-            if neighbor_idx in all_pairs_data:
-                image_indices_to_load.add(neighbor_idx)
-    logging.info("Pre-loading images...")
-    loaded_images = {}
-    for idx in sorted(list(image_indices_to_load)):
-        left_path, right_path = data_loader.get_image_paths(idx)
+        left_path, _ = data_loader.get_image_paths(idx)
         img = cv2.imread(left_path)
         if img is not None:
             loaded_images[idx] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    def _neighbors_for_ref(ref_idx: int):
+        # returns list of frame dicts with keys: pos, quat, left_path, id, dataset, local_idx
+        ref_ds = str(getattr(config, "DATA_TYPE", "")).strip()
+
+        if neighbor_selection_mode == "adjacent":
+            if neighbor_each_side <= 0:
+                return []
+            if neighbor_pool_mode == "local":
+                pos = bisect.bisect_left(available_indices, ref_idx)
+                out = []
+                for k in range(1, neighbor_each_side + 1):
+                    j = pos - k
+                    if j >= 0:
+                        ni = available_indices[j]
+                        if ni != ref_idx and ni in local_pose:
+                            fr = dict(local_pose[ni])
+                            fr["left_path"] = data_loader.get_image_paths(ni)[0]
+                            fr["id"] = ni
+                            out.append(fr)
+                for k in range(1, neighbor_each_side + 1):
+                    j = pos + k
+                    if j < len(available_indices):
+                        ni = available_indices[j]
+                        if ni != ref_idx and ni in local_pose:
+                            fr = dict(local_pose[ni])
+                            fr["left_path"] = data_loader.get_image_paths(ni)[0]
+                            fr["id"] = ni
+                            out.append(fr)
+                return out
+            else:
+                # global_csv pool: adjacent in global_idx (CSV order if no global_idx)
+                key = (ref_ds, int(ref_idx))
+                ref_fr = global_by_key.get(key, None)
+                if ref_fr is None:
+                    return []
+                # find position in ordered list
+                try:
+                    if ref_fr.get("global_idx") is not None:
+                        pos = bisect.bisect_left(
+                            [int(fr["global_idx"]) for fr in global_ordered],
+                            int(ref_fr["global_idx"]),
+                        )
+                    else:
+                        pos = global_ordered.index(ref_fr)
+                except Exception:
+                    return []
+                out = []
+                for k in range(1, neighbor_each_side + 1):
+                    j = pos - k
+                    if j >= 0:
+                        fr = dict(global_ordered[j])
+                        fr["id"] = int(fr.get("global_idx")) if fr.get("global_idx") is not None else j
+                        out.append(fr)
+                for k in range(1, neighbor_each_side + 1):
+                    j = pos + k
+                    if j < len(global_ordered):
+                        fr = dict(global_ordered[j])
+                        fr["id"] = int(fr.get("global_idx")) if fr.get("global_idx") is not None else j
+                        out.append(fr)
+                return out
+
+        # concentric (cross-dataset capable)
+        if neighbor_pool_mode == "global_csv":
+            ref_fr = global_by_key.get((ref_ds, int(ref_idx)), None)
+            if ref_fr is None:
+                return []
+            candidates = [
+                fr
+                for fr in global_frames
+                if not (fr.get("dataset") == ref_ds and int(fr.get("local_idx")) == int(ref_idx))
+            ]
+            picked = _select_concentric_neighbors(
+                ref_pos=tuple(ref_fr["pos"]),
+                candidates=candidates,
+                plane=concentric_plane,
+                count=concentric_count,
+                rings=concentric_rings,
+                r_min=concentric_r_min,
+                r_max=concentric_r_max,
+            )
+            out = []
+            for fr in picked:
+                d = dict(fr)
+                d["id"] = int(d.get("global_idx")) if d.get("global_idx") is not None else int(d.get("local_idx", -1))
+                out.append(d)
+            return out
+        else:
+            ref = local_pose.get(ref_idx, None)
+            if ref is None:
+                return []
+            candidates = [
+                {"pos": local_pose[i]["pos"], "quat": local_pose[i]["quat"], "dataset": ref_ds, "local_idx": i, "left_path": data_loader.get_image_paths(i)[0], "id": i}
+                for i in available_indices
+                if i != ref_idx and i in local_pose
+            ]
+            picked = _select_concentric_neighbors(
+                ref_pos=tuple(ref["pos"]),
+                candidates=candidates,
+                plane=concentric_plane,
+                count=concentric_count,
+                rings=concentric_rings,
+                r_min=concentric_r_min,
+                r_max=concentric_r_max,
+            )
+            return picked
+
+    def _get_neighbor_view(ref_idx: int, fr: dict):
+        # load neighbor image & pose (R,T)
+        left_path = str(fr.get("left_path", "")).strip()
+        if not left_path:
+            return None
+
+        if neighbor_pool_mode == "local":
+            # prefer already loaded local images
+            ni = int(fr.get("local_idx", fr.get("id", -1)))
+            img = loaded_images.get(ni, None)
+            if img is None:
+                bgr = cv2.imread(left_path)
+                if bgr is None:
+                    return None
+                img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                loaded_images[ni] = img
+        else:
+            img = loaded_images_by_path.get(left_path, None)
+            if img is None:
+                bgr = cv2.imread(left_path)
+                if bgr is None:
+                    return None
+                img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                loaded_images_by_path[left_path] = img
+
+        pos = fr.get("pos", None)
+        quat = fr.get("quat", None)
+        if pos is None or quat is None:
+            return None
+        R_n, T_n = _pose_unity_to_cv_RT(pos, quat)
+        return {
+            "image": img,
+            "image_idx": int(fr.get("id", -1)),
+            "R": R_n,
+            "T": T_n,
+            "K": config.K,
+        }
 
     # --- ステップ1: 各ビューの深度マップを最適化 & 光度フィルタリング ---
     logging.info(
@@ -601,21 +949,10 @@ def run():
 
             # PatchMatchによる深度マップの最適化
             neighbor_views_data = []
-            for neighbor_idx in _neighbor_indices(idx):
-                if (
-                    neighbor_idx in all_pairs_data
-                    and neighbor_idx in loaded_images
-                ):
-                    _, T_n, _, _, R_n = all_pairs_data[neighbor_idx]
-                    neighbor_views_data.append(
-                        {
-                            "image": loaded_images[neighbor_idx],
-                            "image_idx": neighbor_idx,
-                            "R": R_n,
-                            "T": T_n,
-                            "K": config.K,
-                        }
-                    )
+            for fr in _neighbors_for_ref(idx):
+                nv = _get_neighbor_view(idx, fr)
+                if nv is not None:
+                    neighbor_views_data.append(nv)
 
             # PatchMatchを実行（全体計測とイテレーション内計測は関数側で行う）
             refine_start = time.time()
@@ -955,22 +1292,15 @@ def run():
 
         # 近傍ビューのデータを準備
         neighbor_views_data = []
-        for neighbor_idx in _neighbor_indices(idx):
-            if (
-                neighbor_idx in all_pairs_data
-                and neighbor_idx in loaded_images
-                and neighbor_idx in all_optimized_depths
-            ):
-                _, T_n, _, _, R_n = all_pairs_data[neighbor_idx]
-                neighbor_views_data.append(
-                    {
-                        "image": loaded_images[neighbor_idx],
-                        "image_idx": neighbor_idx,
-                        "R": R_n,
-                        "T": T_n,
-                        "K": config.K,
-                    }
-                )
+        for fr in _neighbors_for_ref(idx):
+            # For Step 2, require that neighbor has an optimized depth if it's a local frame.
+            if neighbor_pool_mode == "local":
+                ni = int(fr.get("local_idx", fr.get("id", -1)))
+                if ni not in all_optimized_depths:
+                    continue
+            nv = _get_neighbor_view(idx, fr)
+            if nv is not None:
+                neighbor_views_data.append(nv)
 
         # 幾何学的一貫性フィルタリングを実行
         try:
