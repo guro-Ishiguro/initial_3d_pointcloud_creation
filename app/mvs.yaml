@@ -9,7 +9,7 @@ PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE: 50.0
 DEBUG_VISUALIZATION: true
 DEBUG_SAVE_DEPTH_MAPS: true
 DEBUG_SAVE_NORMAL_MAPS: false
-TARGET_INDICES: [15]
+TARGET_INDICES: []
 MAX_NEIGHBORS: 8
 STREAMING_VIEWER: false
 VIEWER_TOPDOWN_FRONT: [0.0, -1.0, 0.0]
@@ -22,7 +22,7 @@ DEPTH_FUSION_ENABLE: false
 # none: use all frames
 # stride: use every N-th frame (FRAME_STRIDE)
 # pose: keyframe selection based on camera pose change thresholds
-FRAME_SELECTION_MODE: none
+FRAME_SELECTION_MODE: pose
 
 # stride mode
 FRAME_STRIDE: 1
@@ -32,8 +32,8 @@ FRAME_STRIDE: 1
 # - KEYFRAME_MIN_ROTATION_DEG: select when camera rotated this much (degrees)
 # - KEYFRAME_MAX_FRAME_GAP: force-select at least every N frames (0 disables)
 # - KEYFRAME_MIN_FRAME_GAP: don't select frames closer than this gap unless forced
-KEYFRAME_MIN_TRANSLATION_M: 0.05
-KEYFRAME_MIN_ROTATION_DEG: 2.0
+KEYFRAME_MIN_TRANSLATION_M: 0.75
+KEYFRAME_MIN_ROTATION_DEG: 5.0
 KEYFRAME_MAX_FRAME_GAP: 30
 KEYFRAME_MIN_FRAME_GAP: 1
 
