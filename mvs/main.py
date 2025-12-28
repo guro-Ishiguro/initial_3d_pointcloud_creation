@@ -173,6 +173,55 @@ def _compute_normals_from_depth(depth_map: np.ndarray, K: np.ndarray) -> np.ndar
     return normals
 
 
+def _export_gt_depth_pngs_per_view(
+    *,
+    indices: list,
+    label_depth_dir: str,
+    out_depth_dir: str,
+):
+    """
+    Export GT depth EXR files to per-view folders as PNG visualizations.
+    This can be expensive if run for all frames, so we allow passing only selected indices.
+    """
+    if not label_depth_dir or not os.path.isdir(label_depth_dir):
+        return 0
+
+    exported = 0
+    for idx in indices:
+        try:
+            idx_int = int(idx)
+        except Exception:
+            continue
+
+        # depth_######.exr と ######.exr の両方に対応
+        src_path = os.path.join(label_depth_dir, f"depth_{idx_int:06d}.exr")
+        if not os.path.exists(src_path):
+            alt = os.path.join(label_depth_dir, f"{idx_int:06d}.exr")
+            src_path = alt if os.path.exists(alt) else ""
+        if not src_path:
+            continue
+
+        gt = read_exr_depth(src_path)
+        if gt is None:
+            continue
+
+        h_vis, w_vis = int(getattr(config, "height", gt.shape[0])), int(
+            getattr(config, "width", gt.shape[1])
+        )
+        if gt.shape != (h_vis, w_vis):
+            gt_resized = cv2.resize(gt, (w_vis, h_vis), interpolation=cv2.INTER_NEAREST)
+        else:
+            gt_resized = gt
+
+        save_each_depth_dir = os.path.join(out_depth_dir, f"depth_{idx_int:04d}")
+        os.makedirs(save_each_depth_dir, exist_ok=True)
+        save_depth_map_as_image(
+            gt_resized, os.path.join(save_each_depth_dir, f"gt_depth_{idx_int:04d}.png")
+        )
+        exported += 1
+    return exported
+
+
 def run():
     args = parse_arguments()
     start_time = time.time()
@@ -230,50 +279,6 @@ def run():
 
     if config.DEBUG_SAVE_NORMAL_MAPS:
         os.makedirs(config.NORMAL_IMAGE_DIR, exist_ok=True)
-
-    # --- 追加: GT深度(EXR)の一括保存を各 depth/depth_XXXX 配下に作成 ---
-    try:
-        exr_files = [
-            f
-            for f in os.listdir(getattr(config, "LABEL_DEPTH_IMAGE_DIR", ""))
-            if f.lower().endswith(".exr")
-        ]
-        for f in sorted(exr_files):
-            # depth_000007.exr または 000007.exr のどちらにも対応
-            m = re.match(r"^(?:depth_)?(\d+)\.exr$", f)
-            if not m:
-                continue
-            idx = int(m.group(1))
-            save_each_depth_dir = os.path.join(
-                config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}"
-            )
-            os.makedirs(save_each_depth_dir, exist_ok=True)
-
-            src_path = os.path.join(config.LABEL_DEPTH_IMAGE_DIR, f)
-            gt = read_exr_depth(src_path)
-            if gt is None:
-                continue
-
-            h_vis, w_vis = int(getattr(config, "height", gt.shape[0])), int(
-                getattr(config, "width", gt.shape[1])
-            )
-            if gt.shape != (h_vis, w_vis):
-                gt_resized = cv2.resize(
-                    gt, (w_vis, h_vis), interpolation=cv2.INTER_NEAREST
-                )
-            else:
-                gt_resized = gt
-
-            # 可視化PNGのみを保存
-            save_depth_map_as_image(
-                gt_resized,
-                os.path.join(save_each_depth_dir, f"gt_depth_{idx:04d}.png"),
-            )
-        logging.info(
-            f"Exported {len(exr_files)} GT depth files into per-view folders under {config.DEPTH_IMAGE_DIR}"
-        )
-    except Exception as e:
-        logging.warning(f"GT per-view export skipped: {e}")
 
     # NOTE: all_pairs_data is a mapping from original frame index -> pair data.
     # Keeping original indices is important because many artifacts (depth_XXXX, GT exr names, etc.)
@@ -337,6 +342,11 @@ def run():
     except Exception as e:
         logging.warning(f"Failed to save selected pose plot: {e}")
 
+    # If you only want to run subsampling + logs/plots quickly, enable PREVIEW_ONLY.
+    if bool(getattr(config, "PREVIEW_ONLY", False)):
+        logging.info("PREVIEW_ONLY enabled: stopping after frame selection and plots.")
+        return 0
+
     if hasattr(config, "TARGET_INDICES") and config.TARGET_INDICES:
         # Filter to actually available indices (after frame selection / missing file skips)
         requested = list(config.TARGET_INDICES)
@@ -357,6 +367,22 @@ def run():
     evaluation_results = []
 
     logging.info(f"Targeting specific image indices for processing: {target_indices}")
+
+    # --- Optional: Export GT depth PNGs per selected view (expensive; run after selection) ---
+    try:
+        if bool(getattr(config, "EXPORT_GT_PER_VIEW_ENABLE", True)):
+            only_target = bool(getattr(config, "EXPORT_GT_PER_VIEW_ONLY_TARGET", True))
+            idxs = target_indices if only_target else available_indices
+            exported = _export_gt_depth_pngs_per_view(
+                indices=idxs,
+                label_depth_dir=getattr(config, "LABEL_DEPTH_IMAGE_DIR", ""),
+                out_depth_dir=config.DEPTH_IMAGE_DIR,
+            )
+            logging.info(
+                f"Exported {exported} GT depth views into per-view folders under {config.DEPTH_IMAGE_DIR}"
+            )
+    except Exception as e:
+        logging.warning(f"GT per-view export skipped: {e}")
 
     # --- パフォーマンス向上のため、必要な画像を事前に一括ロード ---
     image_indices_to_load = set()

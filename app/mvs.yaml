@@ -59,6 +59,16 @@ POSE_PLOT_PLANE: xz
 POSE_PLOT_ARROW_STRIDE: 5
 # Arrow length (plot units; increase if arrows look too small)
 POSE_PLOT_ARROW_SCALE: 0.25
+
+# --- Execution control / preview ---
+# If true, stop after frame selection + CSV + plots (skip heavy MVS computation).
+PREVIEW_ONLY: false
+
+# --- GT per-view export (can be expensive) ---
+# Export GT depth EXR -> per-view PNGs, but do it after selection.
+EXPORT_GT_PER_VIEW_ENABLE: true
+# If true, export only for target_indices (selected/subsampled) instead of all frames.
+EXPORT_GT_PER_VIEW_ONLY_TARGET: true
 CHOICED_PROPAGATION_METHOD: checkerboard
 PATCHMATCH_DECAY_RATE: 0.90
 PATCHMATCH_NORMAL_SEARCH_ANGLE: 20.0
