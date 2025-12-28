@@ -1,21 +1,20 @@
 import argparse
 import os
-import sys
 import subprocess
+import sys
+from typing import List
 
 
 def _list_datasets(project_root: str):
     data_dir = os.path.join(project_root, "data")
     if not os.path.isdir(data_dir):
         return []
-    dirs = [
-        d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))
-    ]
+    dirs = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
     dirs.sort()
     return dirs
 
 
-def _parse_dataset_selection(inp: str, datasets: list[str]) -> list[str]:
+def _parse_dataset_selection(inp: str, datasets: List[str]) -> List[str]:
     """
     Accept:
       - "1" / "2,3" / "1 2 3" (1-based indices)
@@ -31,7 +30,7 @@ def _parse_dataset_selection(inp: str, datasets: list[str]) -> list[str]:
 
     # split by comma or whitespace
     parts = [p for p in s.replace(",", " ").split() if p]
-    out: list[str] = []
+    out: List[str] = []
     seen = set()
     for p in parts:
         name = None
@@ -93,7 +92,7 @@ def main():
 
     # dataset selection (support batch)
     datasets = _list_datasets(project_root)
-    selected: list[str] = []
+    selected: List[str] = []
     if args.dataset:
         selected = [args.dataset.strip()]
     elif args.datasets:
@@ -106,7 +105,9 @@ def main():
         print("\nSelect dataset(s):")
         for i, d in enumerate(datasets, 1):
             print(f"{i}) {d}")
-        raw = input(f'Enter choice(s) [1-{len(datasets)}] (e.g. "1" or "1,2" or "all"): ').strip()
+        raw = input(
+            f'Enter choice(s) [1-{len(datasets)}] (e.g. "1" or "1,2" or "all"): '
+        ).strip()
         selected = _parse_dataset_selection(raw, datasets)
         if not selected:
             print("No valid selection. Aborting.")
