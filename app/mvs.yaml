@@ -48,7 +48,7 @@ NEIGHBOR_KEYFRAMES_EACH_SIDE: 3
 # --- Neighbor selection ---
 # adjacent: (existing) pick neighbors adjacent in the selected-frame order
 # concentric: pick neighbors "concentrically" around the reference pose on a plane
-NEIGHBOR_SELECTION_MODE: adjacent
+NEIGHBOR_SELECTION_MODE: concentric
 
 # Neighbor pool source:
 # local: only frames from the current dataset
@@ -80,7 +80,7 @@ POSE_PLOT_ARROW_SCALE: 0.25
 
 # --- Execution control / preview ---
 # If true, stop after frame selection + CSV + plots (skip heavy MVS computation).
-PREVIEW_ONLY: true
+PREVIEW_ONLY: false
 
 # --- GT per-view export (can be expensive) ---
 # Export GT depth EXR -> per-view PNGs, but do it after selection.

@@ -53,8 +53,19 @@ def _get_home_dir(project_root: str) -> str:
 
 
 def _load_mvs_yaml(project_root: str):
+    """Load MVS YAML configuration file and return as dict."""
     try:
         import yaml  # type: ignore
+    except Exception:
+        return {}
+
+    cfg_path = _get_mvs_yaml_path(project_root)
+    if not os.path.exists(cfg_path):
+        return {}
+    try:
+        with open(cfg_path, "r") as f:
+            data = yaml.safe_load(f) or {}
+        return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
@@ -98,15 +109,6 @@ def _write_prepass_mvs_yaml(project_root: str, out_path: str) -> str:
         return out_path
     except Exception:
         return ""
-    cfg_path = os.getenv("APP_MVS_CONFIG", os.path.join(project_root, "app", "mvs.yaml"))
-    if not os.path.exists(cfg_path):
-        return {}
-    try:
-        with open(cfg_path, "r") as f:
-            data = yaml.safe_load(f) or {}
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
 
 
 def _merge_point_clouds(ply_paths: List[str], out_path: str) -> bool:
@@ -138,7 +140,9 @@ def _merge_point_clouds(ply_paths: List[str], out_path: str) -> bool:
     return bool(ok)
 
 
-def _merge_selected_frames_csv(session_csvs: List[str], session_names: List[str], out_csv: str) -> bool:
+def _merge_selected_frames_csv(
+    session_csvs: List[str], session_names: List[str], out_csv: str
+) -> bool:
     import csv
 
     os.makedirs(os.path.dirname(out_csv), exist_ok=True)
@@ -233,6 +237,7 @@ def _save_merged_pose_plot(
 
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except Exception:
@@ -272,7 +277,9 @@ def _save_merged_pose_plot(
 
             if arrow_stride >= 1 and (k % arrow_stride == 0):
                 try:
-                    rot = Rotation.from_quat(np.array([rx, ry, rz, rw], dtype=np.float64))
+                    rot = Rotation.from_quat(
+                        np.array([rx, ry, rz, rw], dtype=np.float64)
+                    )
                     forward = rot.apply(np.array([0.0, 0.0, 1.0], dtype=np.float64))
                     d = np.array([forward[ax_i], forward[ax_j]], dtype=np.float64)
                     n = float(np.linalg.norm(d))
@@ -486,7 +493,9 @@ def _save_global_pose_plot_from_rows(
             ys.append(float(p[ax_j]))
             if arrow_stride >= 1 and (k % arrow_stride == 0):
                 try:
-                    rot = Rotation.from_quat(np.array([rx, ry, rz, rw], dtype=np.float64))
+                    rot = Rotation.from_quat(
+                        np.array([rx, ry, rz, rw], dtype=np.float64)
+                    )
                     forward = rot.apply(np.array([0.0, 0.0, 1.0], dtype=np.float64))
                     d = np.array([forward[ax_i], forward[ax_j]], dtype=np.float64)
                     n = float(np.linalg.norm(d))
@@ -621,7 +630,9 @@ def main():
         # We keep the user's MVS YAML (if any) for the full run.
         base_mvs_yaml = _get_mvs_yaml_path(project_root)
         prepass_yaml = ""
-        global_pose_csv = os.path.join(group_output_dir, "csv", "global_selected_poses.csv")
+        global_pose_csv = os.path.join(
+            group_output_dir, "csv", "global_selected_poses.csv"
+        )
 
         def _run_one(ds: str, env_overrides: dict, title: str):
             env = os.environ.copy()
@@ -644,7 +655,9 @@ def main():
                 os.path.join(group_output_dir, "csv", "mvs_prepass.yaml"),
             )
             if not prepass_yaml:
-                print("Failed to create prepass MVS YAML; cannot build global neighbor pool early.")
+                print(
+                    "Failed to create prepass MVS YAML; cannot build global neighbor pool early."
+                )
                 need_global_pool = False
             else:
                 rc = 0
@@ -674,7 +687,9 @@ def main():
                         )
                     plane = str(mvs_cfg.get("POSE_PLOT_PLANE", "xz") or "xz")
                     arrow_stride = int(mvs_cfg.get("POSE_PLOT_ARROW_STRIDE", 10) or 10)
-                    arrow_scale = float(mvs_cfg.get("POSE_PLOT_ARROW_SCALE", 0.25) or 0.25)
+                    arrow_scale = float(
+                        mvs_cfg.get("POSE_PLOT_ARROW_SCALE", 0.25) or 0.25
+                    )
                     global_plot = os.path.join(
                         group_output_dir, "plots", "global_selected_camera_poses.png"
                     )
@@ -707,7 +722,8 @@ def main():
         # --- Merge outputs into group folder ---
         # 1) Merge point clouds
         session_plys = [
-            os.path.join(group_output_dir, ds, "point_cloud", "output.ply") for ds in selected
+            os.path.join(group_output_dir, ds, "point_cloud", "output.ply")
+            for ds in selected
         ]
         merged_ply = os.path.join(group_output_dir, "point_cloud", "output.ply")
         if _merge_point_clouds(session_plys, merged_ply):
@@ -717,7 +733,8 @@ def main():
 
         # 2) Merge selected frames CSV
         session_selected_csvs = [
-            os.path.join(group_output_dir, ds, "csv", "selected_frames.csv") for ds in selected
+            os.path.join(group_output_dir, ds, "csv", "selected_frames.csv")
+            for ds in selected
         ]
         merged_csv = os.path.join(group_output_dir, "csv", "selected_frames_merged.csv")
         if _merge_selected_frames_csv(session_selected_csvs, selected, merged_csv):
@@ -730,9 +747,12 @@ def main():
         arrow_stride = int(mvs_cfg.get("POSE_PLOT_ARROW_STRIDE", 10) or 10)
         arrow_scale = float(mvs_cfg.get("POSE_PLOT_ARROW_SCALE", 0.25) or 0.25)
         pose_csvs = [
-            os.path.join(home_dir, "data", ds, "txt", "left_camera_poses.csv") for ds in selected
+            os.path.join(home_dir, "data", ds, "txt", "left_camera_poses.csv")
+            for ds in selected
         ]
-        merged_plot = os.path.join(group_output_dir, "plots", "selected_camera_poses_merged.png")
+        merged_plot = os.path.join(
+            group_output_dir, "plots", "selected_camera_poses_merged.png"
+        )
         if _save_merged_pose_plot(
             session_names=selected,
             session_pose_csvs=pose_csvs,
@@ -756,8 +776,12 @@ def main():
                 session_names=selected,
             )
             if _write_global_pose_csv(rows, global_pose_csv):
-                print(f"Global re-indexed pose CSV saved: {global_pose_csv} (count={len(rows)})")
-            global_plot = os.path.join(group_output_dir, "plots", "global_selected_camera_poses.png")
+                print(
+                    f"Global re-indexed pose CSV saved: {global_pose_csv} (count={len(rows)})"
+                )
+            global_plot = os.path.join(
+                group_output_dir, "plots", "global_selected_camera_poses.png"
+            )
             if _save_global_pose_plot_from_rows(
                 rows=rows,
                 out_path=global_plot,
