@@ -236,6 +236,52 @@ def _select_concentric_neighbors(
     return selected[:count]
 
 
+def _log_selected_neighbors(ref_idx: int, frames: list):
+    """
+    Log selected neighbor frames for a reference view.
+    Controlled via YAML/env:
+      - LOG_SELECTED_NEIGHBORS (bool)
+      - LOG_SELECTED_NEIGHBORS_MAX_PER_REF (int)
+      - LOG_SELECTED_NEIGHBORS_MAX_REFS (int)
+      - LOG_SELECTED_NEIGHBORS_SHOW_PATHS (bool)
+    """
+    # Defaults:
+    # - enabled
+    # - log 10 neighbors per reference
+    # - log for all reference views
+    # - do not show paths
+    if not bool(getattr(config, "LOG_SELECTED_NEIGHBORS", True)):
+        return
+
+    max_refs = int(getattr(config, "LOG_SELECTED_NEIGHBORS_MAX_REFS", 0) or 0)
+    if max_refs > 0:
+        c = getattr(_log_selected_neighbors, "_count", 0)
+        if c >= max_refs:
+            return
+        setattr(_log_selected_neighbors, "_count", c + 1)
+
+    max_per = int(getattr(config, "LOG_SELECTED_NEIGHBORS_MAX_PER_REF", 10) or 10)
+    max_per = max(0, max_per)
+    show_paths = bool(getattr(config, "LOG_SELECTED_NEIGHBORS_SHOW_PATHS", False))
+
+    items = []
+    for fr in (frames or [])[:max_per]:
+        ds = fr.get("dataset", "")
+        li = fr.get("local_idx", fr.get("id", None))
+        gi = fr.get("global_idx", None)
+        if show_paths:
+            lp = fr.get("left_path", "")
+            items.append(f"{ds}:{li} (g={gi}) path={lp}")
+        else:
+            items.append(f"{ds}:{li} (g={gi})")
+
+    mode = str(getattr(config, "NEIGHBOR_SELECTION_MODE", "")).strip()
+    pool = str(getattr(config, "NEIGHBOR_POOL_MODE", "")).strip()
+    logging.info(
+        f"[Neighbors] ref={ref_idx} mode={mode} pool={pool} count={len(frames or [])} -> {items}"
+    )
+
+
 def _save_selected_pose_plot(
     *,
     data_loader: DataLoader,
@@ -958,7 +1004,9 @@ def run():
 
             # PatchMatchによる深度マップの最適化
             neighbor_views_data = []
-            for fr in _neighbors_for_ref(idx):
+            neighbor_frames = _neighbors_for_ref(idx)
+            _log_selected_neighbors(idx, neighbor_frames)
+            for fr in neighbor_frames:
                 nv = _get_neighbor_view(idx, fr)
                 if nv is not None:
                     neighbor_views_data.append(nv)
@@ -1301,7 +1349,9 @@ def run():
 
         # 近傍ビューのデータを準備
         neighbor_views_data = []
-        for fr in _neighbors_for_ref(idx):
+        neighbor_frames = _neighbors_for_ref(idx)
+        _log_selected_neighbors(idx, neighbor_frames)
+        for fr in neighbor_frames:
             # For Step 2, require that neighbor has an optimized depth if it's a local frame.
             if neighbor_pool_mode == "local":
                 ni = int(fr.get("local_idx", fr.get("id", -1)))
