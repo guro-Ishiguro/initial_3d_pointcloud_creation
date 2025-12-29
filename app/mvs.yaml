@@ -9,7 +9,13 @@ PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE: 50.0
 DEBUG_VISUALIZATION: true
 DEBUG_SAVE_DEPTH_MAPS: true
 DEBUG_SAVE_NORMAL_MAPS: false
+# Optional: process only these (local) indices for the current dataset.
 TARGET_INDICES: []
+
+# Optional (name-free): apply TARGET_INDICES only to the N-th selected dataset in multi-dataset runs.
+# - 1 means "first selected dataset", 2 means "second", ...
+# - null disables this behavior (TARGET_INDICES applies to all datasets as before).
+TARGET_DATASET_ORDINAL: null
 MAX_NEIGHBORS: 8
 STREAMING_VIEWER: false
 VIEWER_TOPDOWN_FRONT: [0.0, -1.0, 0.0]

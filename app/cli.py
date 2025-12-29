@@ -634,10 +634,11 @@ def main():
             group_output_dir, "csv", "global_selected_poses.csv"
         )
 
-        def _run_one(ds: str, env_overrides: dict, title: str):
+        def _run_one(ds: str, ordinal: int, env_overrides: dict, title: str):
             env = os.environ.copy()
             env.update(env_overrides)
             env["DATA_TYPE"] = ds
+            env["DATASET_ORDINAL"] = str(int(ordinal))
             env["OUTPUT_GROUP_NAME"] = group_name
             env["OUTPUT_SESSION_NAME"] = ds
             cmd = [sys.executable, os.path.join(project_root, "app", "cli.py")]
@@ -661,9 +662,10 @@ def main():
                 need_global_pool = False
             else:
                 rc = 0
-                for ds in selected:
+                for ord_i, ds in enumerate(selected, 1):
                     rc = _run_one(
                         ds,
+                        ord_i,
                         {"APP_MVS_CONFIG": prepass_yaml},
                         "Prepass (selection/csv/plots)",
                     )
@@ -707,11 +709,11 @@ def main():
 
         # Stage B: full runs (may use global neighbor pool from Stage A)
         rc = 0
-        for ds in selected:
+        for ord_i, ds in enumerate(selected, 1):
             env_over = {"APP_MVS_CONFIG": base_mvs_yaml}
             if need_global_pool and os.path.exists(global_pose_csv):
                 env_over["GLOBAL_NEIGHBOR_POOL_CSV"] = global_pose_csv
-            rc = _run_one(ds, env_over, "Run dataset")
+            rc = _run_one(ds, ord_i, env_over, "Run dataset")
             if rc != 0:
                 break
 

@@ -510,9 +510,40 @@ def run():
         logging.info("PREVIEW_ONLY enabled: stopping after frame selection and plots.")
         return 0
 
+    # --- Target selection (name-free, supports "selected order" dataset ordinal) ---
+    # DATASET_ORDINAL is 1-based and injected by app/cli.py in multi-dataset runs.
+    requested = None
+    target_dataset_ordinal = getattr(config, "TARGET_DATASET_ORDINAL", None)
+    if target_dataset_ordinal is not None:
+        try:
+            target_dataset_ordinal = int(target_dataset_ordinal)
+        except Exception:
+            target_dataset_ordinal = None
+
+    if target_dataset_ordinal is not None:
+        try:
+            current_ordinal = int(os.getenv("DATASET_ORDINAL", "1"))
+        except Exception:
+            current_ordinal = 1
+        if current_ordinal != target_dataset_ordinal:
+            # Skip datasets not matching the requested ordinal (exit 0).
+            logging.info(
+                f"Skipping this dataset (DATASET_ORDINAL={current_ordinal}) because TARGET_DATASET_ORDINAL={target_dataset_ordinal}"
+            )
+            return 0
+
     if hasattr(config, "TARGET_INDICES") and config.TARGET_INDICES:
-        # Filter to actually available indices (after frame selection / missing file skips)
         requested = list(config.TARGET_INDICES)
+
+    if requested is not None:
+        # Explicit request:
+        # - [] means "skip this dataset" (useful for verification runs in multi-dataset mode)
+        if len(requested) == 0:
+        logging.info(
+                "TARGET_INDICES specified as empty for this dataset; skipping processing."
+            )
+            return 0
+
         target_indices = [i for i in requested if i in all_pairs_data]
         missing = [i for i in requested if i not in all_pairs_data]
         if missing:
@@ -520,10 +551,10 @@ def run():
                 f"Some TARGET_INDICES are not available (skipped/missing/filtered): {missing}"
             )
         if not target_indices:
-            logging.error(
+        logging.error(
                 "No TARGET_INDICES are available after filtering. Check FRAME_SELECTION_MODE or dataset integrity."
-            )
-            return 1
+        )
+        return 1
     else:
         target_indices = available_indices
 
