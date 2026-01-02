@@ -1,30 +1,30 @@
 # mvs/main.py
 
+import bisect
 import csv
 import logging
 import os
-import re
 import time
-import bisect
 
 import cv2
+import matplotlib
 import numpy as np
 import open3d as o3d
-import matplotlib
+
 matplotlib.use("Agg")  # headless save
-import matplotlib.pyplot as plt
-from depth_estimation import DepthEstimator
-from depth_fusion import (
+import matplotlib.pyplot as plt  # noqa: E402
+from depth_estimation import DepthEstimator  # noqa: E402
+from depth_fusion import (  # noqa: E402
     CameraPlaneMedianFuser,
     OrthoDepthMedianFuser,
     WorldOrthoMedianFuser,
 )
-from depth_optimization import DepthOptimization, is_gpu_enabled
-from disparity_estimation import ImageProcessor
-from logging_setup import setup_logging
-from point_cloud_integrator import PointCloudIntegrator
-from scipy.spatial.transform import Rotation
-from utils import (
+from depth_optimization import DepthOptimization, is_gpu_enabled  # noqa: E402
+from disparity_estimation import ImageProcessor  # noqa: E402
+from logging_setup import setup_logging  # noqa: E402
+from point_cloud_integrator import PointCloudIntegrator  # noqa: E402
+from scipy.spatial.transform import Rotation  # noqa: E402
+from utils import (  # noqa: E402
     append_to_csv,
     clear_folder,
     compute_depth_metrics,
@@ -37,8 +37,8 @@ from utils import (
     save_normal_map_as_image,
 )
 
-import mvs.config as config
-from app.data_loader import DataLoader
+import mvs.config as config  # noqa: E402
+from app.data_loader import DataLoader  # noqa: E402
 
 
 def _pose_unity_to_cv_RT(pos_unity, quat_unity):
@@ -92,7 +92,11 @@ def _load_global_neighbor_pool(csv_path: str):
                     rz = float(row.get("rot_z"))
                     rw = float(row.get("rot_w"))
                     gidx = row.get("global_idx", None)
-                    gidx = int(gidx) if gidx is not None and str(gidx).strip() != "" else None
+                    gidx = (
+                        int(gidx)
+                        if gidx is not None and str(gidx).strip() != ""
+                        else None
+                    )
                 except Exception:
                     continue
                 if not left_path or not os.path.exists(left_path):
@@ -180,7 +184,7 @@ def _log_selected_neighbors(ref_idx: int, frames: list):
         c = getattr(_log_selected_neighbors, "_count", 0)
         if c >= max_refs:
             return
-        setattr(_log_selected_neighbors, "_count", c + 1)
+        setattr(_log_selected_neighbors, "_count", c + 1)  # noqa: B010
 
     max_per = int(getattr(config, "LOG_SELECTED_NEIGHBORS_MAX_PER_REF", 10) or 10)
     max_per = max(0, max_per)
@@ -416,24 +420,24 @@ def run():
     os.makedirs(config.POINT_CLOUD_DIR, exist_ok=True)
 
     os.makedirs(config.CSV_DIR, exist_ok=True)
-    # CSV 初期化（存在しない場合のみヘッダー作成）
+    # CSV 初期化（実行のたびに新規作成、既存のものは上書き）
     results_csv_path = os.path.join(config.CSV_DIR, "results.csv")
-    if not os.path.exists(results_csv_path):
-        initialize_csv(
-            results_csv_path,
-            [
-                "index",
-                "stage",
-                "mae",
-                "abs_rel",
-                "sq_rel",
-                "rmse",
-                "rmse_log",
-                "delta1",
-                "delta2",
-                "delta3",
-            ],
-        )
+    initialize_csv(
+        results_csv_path,
+        [
+            "index",
+            "stage",
+            "valid_pixels",
+            "mae",
+            "abs_rel",
+            "sq_rel",
+            "rmse",
+            "rmse_log",
+            "delta1",
+            "delta2",
+            "delta3",
+        ],
+    )
 
     os.makedirs(config.DISPARITY_IMAGE_DIR, exist_ok=True)
 
@@ -459,9 +463,12 @@ def run():
     try:
         save_selected_csv = bool(getattr(config, "SAVE_SELECTED_FRAMES_CSV", True))
         if save_selected_csv:
-            selected_csv_name = str(
-                getattr(config, "SELECTED_FRAMES_CSV_NAME", "selected_frames.csv")
-            ).strip() or "selected_frames.csv"
+            selected_csv_name = (
+                str(
+                    getattr(config, "SELECTED_FRAMES_CSV_NAME", "selected_frames.csv")
+                ).strip()
+                or "selected_frames.csv"
+            )
             selected_frames_csv_path = os.path.join(config.CSV_DIR, selected_csv_name)
             with open(selected_frames_csv_path, "w", newline="") as f:
                 w = csv.writer(f)
@@ -476,7 +483,9 @@ def run():
             max_print = max(0, max_print)
             if max_print > 0:
                 preview = available_indices[:max_print]
-                logging.info(f"Selected frame indices (first {len(preview)}): {preview}")
+                logging.info(
+                    f"Selected frame indices (first {len(preview)}): {preview}"
+                )
     except Exception as e:
         logging.warning(f"Failed to write selected frames CSV: {e}")
 
@@ -484,9 +493,14 @@ def run():
     try:
         if bool(getattr(config, "SAVE_SELECTED_POSE_PLOT", True)):
             plots_dir = os.path.join(config.OUTPUT_TYPE_DIR, "plots")
-            plot_name = str(
-                getattr(config, "SELECTED_POSE_PLOT_NAME", "selected_camera_poses.png")
-            ).strip() or "selected_camera_poses.png"
+            plot_name = (
+                str(
+                    getattr(
+                        config, "SELECTED_POSE_PLOT_NAME", "selected_camera_poses.png"
+                    )
+                ).strip()
+                or "selected_camera_poses.png"
+            )
             plot_path = os.path.join(plots_dir, plot_name)
             plane = str(getattr(config, "POSE_PLOT_PLANE", "xz") or "xz")
             arrow_stride = int(getattr(config, "POSE_PLOT_ARROW_STRIDE", 5) or 5)
@@ -539,7 +553,7 @@ def run():
         # Explicit request:
         # - [] means "skip this dataset" (useful for verification runs in multi-dataset mode)
         if len(requested) == 0:
-        logging.info(
+            logging.info(
                 "TARGET_INDICES specified as empty for this dataset; skipping processing."
             )
             return 0
@@ -551,10 +565,10 @@ def run():
                 f"Some TARGET_INDICES are not available (skipped/missing/filtered): {missing}"
             )
         if not target_indices:
-        logging.error(
+            logging.error(
                 "No TARGET_INDICES are available after filtering. Check FRAME_SELECTION_MODE or dataset integrity."
-        )
-        return 1
+            )
+            return 1
     else:
         target_indices = available_indices
 
@@ -579,19 +593,37 @@ def run():
         logging.warning(f"GT per-view export skipped: {e}")
 
     # --- Neighbor selection (mode-switchable, optionally cross-dataset via global CSV) ---
-    neighbor_selection_mode = str(
-        os.getenv("NEIGHBOR_SELECTION_MODE", getattr(config, "NEIGHBOR_SELECTION_MODE", "adjacent"))
-    ).strip().lower()
-    neighbor_pool_mode = str(
-        os.getenv("NEIGHBOR_POOL_MODE", getattr(config, "NEIGHBOR_POOL_MODE", "local"))
-    ).strip().lower()
+    neighbor_selection_mode = (
+        str(
+            os.getenv(
+                "NEIGHBOR_SELECTION_MODE",
+                getattr(config, "NEIGHBOR_SELECTION_MODE", "adjacent"),
+            )
+        )
+        .strip()
+        .lower()
+    )
+    neighbor_pool_mode = (
+        str(
+            os.getenv(
+                "NEIGHBOR_POOL_MODE", getattr(config, "NEIGHBOR_POOL_MODE", "local")
+            )
+        )
+        .strip()
+        .lower()
+    )
 
     # local pool pose cache (for neighbor selection)
     local_pose = {}
     for i in available_indices:
         _, p, q = data_loader.get_camera_pose(i)
         if p is not None and q is not None:
-            local_pose[i] = {"pos": tuple(p), "quat": tuple(q), "dataset": getattr(config, "DATA_TYPE", ""), "local_idx": i}
+            local_pose[i] = {
+                "pos": tuple(p),
+                "quat": tuple(q),
+                "dataset": getattr(config, "DATA_TYPE", ""),
+                "local_idx": i,
+            }
 
     # optional global pool (cross-dataset)
     # Global neighbor pool CSV is provided via environment variable by app/cli.py in multi-dataset runs.
@@ -684,13 +716,21 @@ def run():
                     j = pos - k
                     if j >= 0:
                         fr = dict(global_ordered[j])
-                        fr["id"] = int(fr.get("global_idx")) if fr.get("global_idx") is not None else j
+                        fr["id"] = (
+                            int(fr.get("global_idx"))
+                            if fr.get("global_idx") is not None
+                            else j
+                        )
                         out.append(fr)
                 for k in range(1, neighbor_each_side + 1):
                     j = pos + k
                     if j < len(global_ordered):
                         fr = dict(global_ordered[j])
-                        fr["id"] = int(fr.get("global_idx")) if fr.get("global_idx") is not None else j
+                        fr["id"] = (
+                            int(fr.get("global_idx"))
+                            if fr.get("global_idx") is not None
+                            else j
+                        )
                         out.append(fr)
                 return out
 
@@ -702,7 +742,10 @@ def run():
             candidates = [
                 fr
                 for fr in global_frames
-                if not (fr.get("dataset") == ref_ds and int(fr.get("local_idx")) == int(ref_idx))
+                if not (
+                    fr.get("dataset") == ref_ds
+                    and int(fr.get("local_idx")) == int(ref_idx)
+                )
             ]
             picked = _select_nearest_neighbors(
                 ref_pos=tuple(ref_fr["pos"]),
@@ -714,7 +757,11 @@ def run():
             out = []
             for fr in picked:
                 d = dict(fr)
-                d["id"] = int(d.get("global_idx")) if d.get("global_idx") is not None else int(d.get("local_idx", -1))
+                d["id"] = (
+                    int(d.get("global_idx"))
+                    if d.get("global_idx") is not None
+                    else int(d.get("local_idx", -1))
+                )
                 out.append(d)
             return out
         else:
@@ -722,7 +769,14 @@ def run():
             if ref is None:
                 return []
             candidates = [
-                {"pos": local_pose[i]["pos"], "quat": local_pose[i]["quat"], "dataset": ref_ds, "local_idx": i, "left_path": data_loader.get_image_paths(i)[0], "id": i}
+                {
+                    "pos": local_pose[i]["pos"],
+                    "quat": local_pose[i]["quat"],
+                    "dataset": ref_ds,
+                    "local_idx": i,
+                    "left_path": data_loader.get_image_paths(i)[0],
+                    "id": i,
+                }
                 for i in available_indices
                 if i != ref_idx and i in local_pose
             ]
@@ -765,9 +819,12 @@ def run():
         if pos is None or quat is None:
             return None
         R_n, T_n = _pose_unity_to_cv_RT(pos, quat)
+        # local_idxが存在する場合はそれを使用、そうでない場合はidを使用
+        # これにより、all_optimized_depthsのキーと一致する
+        image_idx = int(fr.get("local_idx", fr.get("id", -1)))
         return {
             "image": img,
-            "image_idx": int(fr.get("id", -1)),
+            "image_idx": image_idx,
             "R": R_n,
             "T": T_n,
             "K": config.K,
@@ -937,11 +994,13 @@ def run():
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
                 # エラーマップは後で統一スケールで保存するため、ここでは保存しない
+                valid_pixels_initial = np.sum(np.isfinite(initial_depth))
                 append_to_csv(
                     results_csv_path,
                     [
                         idx,
                         "initial",
+                        valid_pixels_initial,
                         metrics["mae"],
                         metrics["abs_rel"],
                         metrics["sq_rel"],
@@ -999,6 +1058,7 @@ def run():
                     [
                         idx,
                         "optimized",
+                        valid_pixels_before_photo,
                         metrics["mae"],
                         metrics["abs_rel"],
                         metrics["sq_rel"],
@@ -1056,6 +1116,7 @@ def run():
                     [
                         idx,
                         "photometric",
+                        valid_pixels_after_photo,
                         metrics["mae"],
                         metrics["abs_rel"],
                         metrics["sq_rel"],
@@ -1353,6 +1414,7 @@ def run():
                     [
                         idx,
                         "geometric",
+                        valid_pixels_after_geo,
                         metrics["mae"],
                         metrics["abs_rel"],
                         metrics["sq_rel"],
@@ -1589,6 +1651,10 @@ def run():
             geometric_error_threshold = getattr(
                 config, "MULTI_VIEW_GEOMETRIC_ERROR_THRESHOLD", 0.05
             )
+            # フィルタリング前の点群をバックアップ
+            original_pts = merged_pts.copy()
+            original_cols = merged_cols.copy()
+
             merged_pts, merged_cols = (
                 point_cloud_integrator.filter_points_by_multi_view_visibility(
                     merged_pts,
@@ -1600,11 +1666,21 @@ def run():
                 )
             )
 
+            # フィルタリング後にポイントが0になった場合、フィルタリング前の点群を使用
+            if len(merged_pts) == 0:
+                logging.warning(
+                    "Multi-view visibility filtering removed all points. Using unfiltered point cloud."
+                )
+                merged_pts = original_pts
+                merged_cols = original_cols
+
         final_pcd = point_cloud_integrator.process_and_save_final_point_cloud(
             merged_pts, merged_cols, config.POINT_CLOUD_FILE_PATH
         )
         if final_pcd and len(final_pcd.points) > 0:
-            if getattr(config, "STREAMING_VIEWER", False):
+            # 点群表示の制御（デフォルトは表示しない）
+            show_point_cloud = getattr(config, "SHOW_POINT_CLOUD", False)
+            if getattr(config, "STREAMING_VIEWER", False) and show_point_cloud:
                 try:
                     live_pcd.points = o3d.utility.Vector3dVector(
                         np.asarray(final_pcd.points)
@@ -1620,11 +1696,15 @@ def run():
                     vis.destroy_window()
                 except Exception as e:
                     logging.warning(f"Could not finalize streaming window: {e}")
-            else:
+            elif show_point_cloud:
                 logging.info(
                     "Showing final integrated point cloud. Close the window to exit."
                 )
                 o3d.visualization.draw_geometries([final_pcd])
+            else:
+                logging.info(
+                    f"Point cloud saved to {config.POINT_CLOUD_FILE_PATH} (display disabled)"
+                )
     else:
         logging.warning("No point clouds were generated.")
 
