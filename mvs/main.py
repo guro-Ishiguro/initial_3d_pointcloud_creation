@@ -1469,7 +1469,7 @@ def run():
             if save_each_depth_dir is None:
                 continue
 
-            # すべてのステージの誤差を収集してパーセンタイルを計算（外れ値に引っ張られないように）
+            # すべてのステージの誤差を収集して最大誤差を計算
             all_errors = []
             for stage_name, depth in stage_depths.items():
                 if stage_name == "save_dir":
@@ -1480,24 +1480,16 @@ def run():
                     all_errors.extend(errors.tolist())
 
             if all_errors:
-                # 95パーセンタイルを使用（外れ値に引っ張られない）
-                error_percentile = getattr(config, "ERROR_MAP_PERCENTILE", 95.0)
-                max_error_all = float(np.percentile(all_errors, error_percentile))
-                # マージンを追加（5%）
-                max_error_all = max_error_all * 1.05
-                # 最大誤差も記録（参考用）
-                max_error_actual = float(np.max(all_errors))
+                max_error_all = float(np.max(all_errors))
             else:
                 max_error_all = 1.0
-                max_error_actual = 1.0
 
             if max_error_all < 0.01:  # 最小値の設定
                 max_error_all = 1.0
 
             logging.info(
                 f"Re-saving error maps for image {idx} with unified scale "
-                f"(percentile={getattr(config, 'ERROR_MAP_PERCENTILE', 95.0):.1f}%: {max_error_all:.4f} m, "
-                f"max: {max_error_actual:.4f} m)"
+                f"(max_error: {max_error_all:.4f} m)"
             )
 
             # 各ステージのエラーマップを統一スケールで保存
