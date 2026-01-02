@@ -180,6 +180,36 @@ def read_exr_depth(file_path):
         return None
 
 
+def save_depth_map_as_exr(depth_map, file_path):
+    """
+    深度マップをEXR形式で保存する（絶対的な深度値が読み取れる形式）。
+    """
+    try:
+        h, w = depth_map.shape
+        # NaNや無限大を0に変換（EXRではNaNを直接保存できないため）
+        depth_clean = depth_map.copy()
+        depth_clean[~np.isfinite(depth_clean)] = 0.0
+        
+        # float32に変換
+        depth_float = depth_clean.astype(np.float32)
+        
+        # EXRヘッダーを設定
+        header = OpenEXR.Header(w, h)
+        header["channels"] = {"R": Imath.Channel(Imath.PixelType(Imath.PixelType.FLOAT))}
+        
+        # データをバイト列に変換
+        depth_bytes = depth_float.tobytes()
+        
+        # EXRファイルを書き込み
+        exr_file = OpenEXR.OutputFile(file_path, header)
+        exr_file.writePixels({"R": depth_bytes})
+        exr_file.close()
+        
+        logging.info(f"Saved depth map as EXR to {file_path}")
+    except Exception as e:
+        logging.error(f"Failed to save depth map as EXR to {file_path}: {e}")
+
+
 def compute_depth_metrics(pred_depth, gt_depth):
     """
     予測深度と正解深度を比較し、評価指標を計算する。

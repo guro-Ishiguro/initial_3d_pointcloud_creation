@@ -32,8 +32,8 @@ from utils import (  # noqa: E402
     parse_arguments,
     read_exr_depth,
     save_depth_map_as_image,
+    save_depth_map_as_exr,
     save_disparity_map_with_colorbar,
-    save_error_map_as_image,
     save_normal_map_as_image,
 )
 
@@ -1450,64 +1450,35 @@ def run():
             logging.warning(f"Geometric consistency filtering skipped for {idx}: {e}")
             all_geometrically_filtered_depths[idx] = photometrically_filtered_depth
 
-    # --- ステップ2.5: すべてのエラーマップを統一スケールで再保存 ---
-    # 各画像ごとに、その画像のすべてのステージ/イテレーションの誤差を集めて統一スケールを計算
+    # --- ステップ2.5: 深度マップをEXR形式で保存（絶対的な深度値が読み取れる形式） ---
     if all_stage_depths:
         logging.info(
-            "\n--- Step 2.5: Re-saving all error maps with unified scale (per image) ---"
+            "\n--- Step 2.5: Saving depth maps as EXR (absolute depth values) ---"
         )
         for idx in target_indices:
             if idx not in all_stage_depths:
                 continue
-            if idx not in all_gt_depths:
-                continue
 
             stage_depths = all_stage_depths[idx]
-            gt_depth = all_gt_depths[idx]
             save_each_depth_dir = stage_depths.get("save_dir")
 
             if save_each_depth_dir is None:
                 continue
 
-            # すべてのステージの誤差を収集して最大誤差を計算
-            all_errors = []
-            for stage_name, depth in stage_depths.items():
-                if stage_name == "save_dir":
-                    continue
-                valid_mask = np.isfinite(depth) & np.isfinite(gt_depth) & (gt_depth > 0)
-                if np.any(valid_mask):
-                    errors = np.abs(depth[valid_mask] - gt_depth[valid_mask])
-                    all_errors.extend(errors.tolist())
-
-            if all_errors:
-                max_error_all = float(np.max(all_errors))
-            else:
-                max_error_all = 1.0
-
-            if max_error_all < 0.01:  # 最小値の設定
-                max_error_all = 1.0
-
-            logging.info(
-                f"Re-saving error maps for image {idx} with unified scale "
-                f"(max_error: {max_error_all:.4f} m)"
-            )
-
-            # 各ステージのエラーマップを統一スケールで保存
+            # 各ステージの深度マップをEXR形式で保存
             stage_map = {
-                "initial": "error_map_initial.png",
-                "optimized": "error_map_optimized.png",
-                "photometric": "error_map_photometric.png",
-                "geometric": "error_map_geometric.png",
+                "initial": "depth_initial.exr",
+                "optimized": "depth_optimized.exr",
+                "photometric": "depth_photometric.exr",
+                "geometric": "depth_geometric.exr",
             }
             for stage_name, depth in stage_depths.items():
                 if stage_name == "save_dir":
                     continue
                 if stage_name in stage_map:
-                    save_error_map_as_image(
+                    save_depth_map_as_exr(
                         depth,
-                        gt_depth,
                         os.path.join(save_each_depth_dir, stage_map[stage_name]),
-                        max_error=max_error_all,
                     )
 
     # --- ステップ3: 点群への変換と統合 ---

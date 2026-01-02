@@ -17,7 +17,7 @@ from utils import (
     compute_depth_metrics,
     initialize_csv,
     save_depth_map_as_image,
-    save_error_map_as_image,
+    save_depth_map_as_exr,
     save_normal_map_as_image,
 )
 
@@ -2078,46 +2078,21 @@ class DepthOptimization:
         if gt_depth is not None and iteration_depths:
             all_iteration_depths.extend(iteration_depths)
 
-        # すべてのイテレーションの誤差を収集して最大誤差を計算
+        # 深度マップをEXR形式で保存（絶対的な深度値が読み取れる形式）
         if (
-            gt_depth is not None
-            and all_iteration_depths
+            all_iteration_depths
             and save_each_depth_dir is not None
         ):
-            all_errors = []
-            for depth in all_iteration_depths:
-                valid_mask = np.isfinite(depth) & np.isfinite(gt_depth) & (gt_depth > 0)
-                if np.any(valid_mask):
-                    errors = np.abs(depth[valid_mask] - gt_depth[valid_mask])
-                    all_errors.extend(errors.tolist())
-
-            if all_errors:
-                max_error_all = float(np.max(all_errors))
-            else:
-                max_error_all = 1.0
-
-            if max_error_all < 0.01:  # 最小値の設定
-                max_error_all = 1.0
-
-            logging.info(
-                f"Re-saving all error maps with unified scale "
-                f"(max_error: {max_error_all:.4f} m)"
-            )
-
-            # 初期深度のエラーマップを再保存
-            save_error_map_as_image(
+            # 初期深度をEXR形式で保存
+            save_depth_map_as_exr(
                 initial_depth,
-                gt_depth,
-                os.path.join(save_each_depth_dir, "error_map_initial.png"),
-                max_error=max_error_all,
+                os.path.join(save_each_depth_dir, "depth_initial.exr"),
             )
 
-            # 各イテレーションのエラーマップを再保存
+            # 各イテレーションの深度マップをEXR形式で保存
             for i, depth in enumerate(iteration_depths, start=1):
-                err_path = os.path.join(save_each_depth_dir, f"error_iter_{i:02d}.png")
-                save_error_map_as_image(
-                    depth, gt_depth, err_path, max_error=max_error_all
-                )
+                exr_path = os.path.join(save_each_depth_dir, f"depth_iter_{i:02d}.exr")
+                save_depth_map_as_exr(depth, exr_path)
 
         # --- Debug: cost_map statistics and CPU/GPU cost consistency check on samples ---
         try:
