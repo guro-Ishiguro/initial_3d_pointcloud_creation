@@ -5,6 +5,7 @@ import csv
 import logging
 import os
 import time
+from pathlib import Path
 
 import cv2
 import matplotlib
@@ -31,8 +32,8 @@ from utils import (  # noqa: E402
     initialize_csv,
     parse_arguments,
     read_exr_depth,
-    save_depth_map_as_image,
     save_depth_map_as_exr,
+    save_depth_map_as_image,
     save_disparity_map_with_colorbar,
     save_normal_map_as_image,
 )
@@ -893,13 +894,13 @@ def run():
 
         view_metrics = {"image_index": idx}
 
-        save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}")
+        # ファイル名（拡張子なし）を取得してフォルダ名に使用
+        filename_stem = Path(left_path).stem
+        save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, filename_stem)
         os.makedirs(save_each_depth_dir, exist_ok=True)
         clear_folder(save_each_depth_dir)
 
-        save_each_normal_dir = os.path.join(
-            config.NORMAL_IMAGE_DIR, f"normal_{idx:04d}"
-        )
+        save_each_normal_dir = os.path.join(config.NORMAL_IMAGE_DIR, filename_stem)
         os.makedirs(save_each_normal_dir, exist_ok=True)
         clear_folder(save_each_normal_dir)
 
@@ -1031,6 +1032,7 @@ def run():
                 neighbor_views_data=neighbor_views_data,
                 gt_depth=gt_depth,
                 ref_idx=idx,
+                filename_stem=filename_stem,
             )
             refine_elapsed = time.time() - refine_start
             logging.info(
@@ -1351,10 +1353,14 @@ def run():
         if idx not in all_optimized_depths:
             continue
 
-        save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}")
-        save_each_normal_dir = os.path.join(
-            config.NORMAL_IMAGE_DIR, f"normal_{idx:04d}"
-        )
+        # ファイル名ベースのフォルダ名を取得（all_pairs_dataから）
+        if idx in all_pairs_data:
+            _, _, left_path, _, _ = all_pairs_data[idx]
+            filename_stem = Path(left_path).stem
+        else:
+            filename_stem = f"depth_{idx:04d}"
+        save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, filename_stem)
+        save_each_normal_dir = os.path.join(config.NORMAL_IMAGE_DIR, filename_stem)
         gt_depth = all_gt_depths.get(idx, None)
         photometrically_filtered_depth = all_optimized_depths[idx]
         ref_pose = all_poses[idx]
@@ -1514,8 +1520,14 @@ def run():
         if world_ortho_fuser is not None:
             fused_world_ortho = world_ortho_fuser.add_world_points(world_points)
             if config.DEBUG_SAVE_DEPTH_MAPS and fused_world_ortho is not None:
+                # ファイル名ベースのフォルダ名を取得（all_pairs_dataから）
+                if idx in all_pairs_data:
+                    _, _, left_path, _, _ = all_pairs_data[idx]
+                    filename_stem = Path(left_path).stem
+                else:
+                    filename_stem = f"depth_{idx:04d}"
                 save_each_depth_dir = os.path.join(
-                    config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}"
+                    config.DEPTH_IMAGE_DIR, filename_stem
                 )
                 world_ortho_fuser.save_fused_depth(
                     os.path.join(
