@@ -5,11 +5,34 @@ import os
 import shutil
 
 import cv2
-import Imath
 import numpy as np
-import OpenEXR
 
-import mvs.config as config
+# ImathとOpenEXRのインポート（条件付き）
+try:
+    import Imath
+    import OpenEXR
+    EXR_AVAILABLE = True
+except ImportError as e:
+    EXR_AVAILABLE = False
+    logging.warning(
+        f"OpenEXR/Imath not available: {e}. "
+        "EXR depth reading/writing functions will not work. "
+        "Please install: pip install OpenEXR"
+    )
+
+# mvs.configのインポート（条件付き）
+try:
+    import mvs.config as config
+    CONFIG_AVAILABLE = True
+except ImportError:
+    CONFIG_AVAILABLE = False
+    # ダミーのconfigオブジェクトを作成
+    class DummyConfig:
+        VIZ_DEPTH_MIN = 0.0
+        VIZ_DEPTH_MAX = 50.0
+        VIZ_CMAP = "jet"
+        camera_height = 50.0
+    config = DummyConfig()
 
 # ここでの basicConfig は削除（共通初期化は mvs.logging_setup.setup_logging 側に統一）
 
@@ -143,6 +166,12 @@ def read_exr_depth(file_path):
     """
     OpenEXRライブラリを使用して、単一チャンネルのEXR深度ファイルを読み込む。
     """
+    if not EXR_AVAILABLE:
+        logging.error(
+            "OpenEXR/Imath is not available. Cannot read EXR files. "
+            "Please install: pip install OpenEXR"
+        )
+        return None
     try:
         exr_file = OpenEXR.InputFile(file_path)
         header = exr_file.header()
@@ -184,6 +213,12 @@ def save_depth_map_as_exr(depth_map, file_path):
     """
     深度マップをEXR形式で保存する（絶対的な深度値が読み取れる形式）。
     """
+    if not EXR_AVAILABLE:
+        logging.error(
+            "OpenEXR/Imath is not available. Cannot save EXR files. "
+            "Please install: pip install OpenEXR"
+        )
+        return
     try:
         h, w = depth_map.shape
         # NaNや無限大を0に変換（EXRではNaNを直接保存できないため）
@@ -373,3 +408,66 @@ def append_to_csv(file_path, data_row):
             writer.writerow(data_row)
     except IOError as e:
         logging.error(f"Could not write to CSV file {file_path}: {e}")
+
+
+def write_stage_metrics_to_csv(
+    csv_path: str,
+    image_idx: int,
+    stage: str,
+    valid_pixels: int,
+    metrics: dict,
+):
+    """
+    ステージごとの評価指標をresults.csvに書き込む。
+    
+    Args:
+        csv_path: results.csvのパス
+        image_idx: 画像インデックス
+        stage: ステージ名（initial, optimized, photometric, geometric）
+        valid_pixels: 有効ピクセル数
+        metrics: 評価指標の辞書
+    """
+    append_to_csv(
+        csv_path,
+        [
+            image_idx,
+            stage,
+            valid_pixels,
+            metrics.get("mae", np.nan),
+            metrics.get("abs_rel", np.nan),
+            metrics.get("sq_rel", np.nan),
+            metrics.get("rmse", np.nan),
+            metrics.get("rmse_log", np.nan),
+            metrics.get("delta1", np.nan),
+            metrics.get("delta2", np.nan),
+            metrics.get("delta3", np.nan),
+        ],
+    )
+
+
+def write_iteration_metrics_to_csv(
+    csv_files: dict,
+    image_idx: int,
+    iteration: int,
+    elapsed_time: float,
+    metrics: dict,
+    valid_pixels: int = 0,
+):
+    """
+    イテレーションごとの評価指標を各メトリクスごとのCSVに書き込む。
+    時間列は含めない（image_idx, iter, valid_pixels, metric）。
+    
+    Args:
+        csv_files: メトリクスごとのCSVファイルパスの辞書
+        image_idx: 画像インデックス
+        iteration: イテレーション番号
+        elapsed_time: 経過時間（秒）（使用しないが、互換性のため保持）
+        metrics: 評価指標の辞書
+        valid_pixels: 有効ピクセル数
+    """
+    for metric_key, csv_path in csv_files.items():
+        if metric_key in metrics:
+            append_to_csv(
+                csv_path,
+                [image_idx, iteration, valid_pixels, metrics[metric_key]],
+            )

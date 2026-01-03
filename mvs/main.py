@@ -28,7 +28,6 @@ from scipy.spatial.transform import Rotation  # noqa: E402
 from utils import (  # noqa: E402
     append_to_csv,
     clear_folder,
-    compute_depth_metrics,
     initialize_csv,
     parse_arguments,
     read_exr_depth,
@@ -421,24 +420,6 @@ def run():
     os.makedirs(config.POINT_CLOUD_DIR, exist_ok=True)
 
     os.makedirs(config.CSV_DIR, exist_ok=True)
-    # CSV 初期化（実行のたびに新規作成、既存のものは上書き）
-    results_csv_path = os.path.join(config.CSV_DIR, "results.csv")
-    initialize_csv(
-        results_csv_path,
-        [
-            "index",
-            "stage",
-            "valid_pixels",
-            "mae",
-            "abs_rel",
-            "sq_rel",
-            "rmse",
-            "rmse_log",
-            "delta1",
-            "delta2",
-            "delta3",
-        ],
-    )
 
     os.makedirs(config.DISPARITY_IMAGE_DIR, exist_ok=True)
 
@@ -904,6 +885,15 @@ def run():
         os.makedirs(save_each_normal_dir, exist_ok=True)
         clear_folder(save_each_normal_dir)
 
+        # time.csvを初期化
+        csv_subdir = os.path.join(config.CSV_DIR, filename_stem)
+        os.makedirs(csv_subdir, exist_ok=True)
+        time_csv_path = os.path.join(csv_subdir, "time.csv")
+        if os.path.exists(time_csv_path):
+            os.remove(time_csv_path)
+        initialize_csv(time_csv_path, ["stage", "time"])
+        logging.info(f"Initialized time.csv at {time_csv_path}")
+
         # --- Ground Truth Depthの読み込み ---
         # depth_######.exr と ######.exr の両方に対応
         gt_depth_path = os.path.join(
@@ -987,31 +977,9 @@ def run():
                 logging.info(f"Saving initial normal map to {save_initial_normal_path}")
                 save_normal_map_as_image(init_normals, save_initial_normal_path)
 
-            # 初期深度を評価（エラーマップは後で統一スケールで保存）
-            if gt_depth is not None:
-                metrics = compute_depth_metrics(initial_depth, gt_depth)
-                logging.info(
-                    f"[Initial Depth] MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
-                    f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
-                )
-                # エラーマップは後で統一スケールで保存するため、ここでは保存しない
-                valid_pixels_initial = np.sum(np.isfinite(initial_depth))
-                append_to_csv(
-                    results_csv_path,
-                    [
-                        idx,
-                        "initial",
-                        valid_pixels_initial,
-                        metrics["mae"],
-                        metrics["abs_rel"],
-                        metrics["sq_rel"],
-                        metrics["rmse"],
-                        metrics["rmse_log"],
-                        metrics["delta1"],
-                        metrics["delta2"],
-                        metrics["delta3"],
-                    ],
-                )
+            # 初期深度の有効ピクセル数をログ出力
+            valid_pixels_initial = np.sum(np.isfinite(initial_depth))
+            logging.info(f"[Initial Depth] Valid pixels: {valid_pixels_initial}")
 
             # PatchMatchによる深度マップの最適化
             neighbor_views_data = []
@@ -1024,20 +992,35 @@ def run():
 
             # PatchMatchを実行（全体計測とイテレーション内計測は関数側で行う）
             refine_start = time.time()
-            optimized_depth = depth_optimization.refine_depth_with_patchmatch(
-                initial_depth=initial_depth,
-                initial_depth_error=d_cost,
-                ref_image=li_rgb,
-                ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
-                neighbor_views_data=neighbor_views_data,
-                gt_depth=gt_depth,
-                ref_idx=idx,
-                filename_stem=filename_stem,
+            optimized_depth, iter_times_gpu = (
+                depth_optimization.refine_depth_with_patchmatch(
+                    initial_depth=initial_depth,
+                    initial_depth_error=d_cost,
+                    ref_image=li_rgb,
+                    ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
+                    neighbor_views_data=neighbor_views_data,
+                    gt_depth=gt_depth,
+                    ref_idx=idx,
+                    filename_stem=filename_stem,
+                )
             )
             refine_elapsed = time.time() - refine_start
             logging.info(
                 f"[Timing] refine_depth_with_patchmatch total time: {refine_elapsed:.2f}s for index {idx}"
             )
+            # 各イテレーションの時間をtime.csvに記録
+            if iter_times_gpu is not None and len(iter_times_gpu) > 0:
+                for iter_num, iter_time in enumerate(iter_times_gpu, 1):
+                    append_to_csv(
+                        time_csv_path, [f"iter_{iter_num}", f"{iter_time:.6f}"]
+                    )
+                logging.info(
+                    f"Saved {len(iter_times_gpu)} iteration times to {time_csv_path}"
+                )
+            else:
+                logging.warning(
+                    f"iter_times_gpu is None or empty for index {idx}, skipping iteration time recording"
+                )
             # optimized_depth = depth_optimization.refine_depth_with_patchmatch_vanilla(
             #     ref_image=li_rgb,
             #     ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
@@ -1045,34 +1028,12 @@ def run():
             #     ref_idx=idx,
             # )
 
-            # 最適化後の深度を評価（エラーマップは後で統一スケールで保存）
-            if gt_depth is not None:
-                valid_pixels_before_photo = np.sum(np.isfinite(optimized_depth))
-                metrics = compute_depth_metrics(optimized_depth, gt_depth)
-                logging.info(
-                    f"[Optimized Depth] Valid pixels: {valid_pixels_before_photo}, "
-                    f"MAE: {metrics['mae']:.4f}, AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
-                    f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
-                )
-                # エラーマップは後で統一スケールで保存するため、ここでは保存しない
-                append_to_csv(
-                    results_csv_path,
-                    [
-                        idx,
-                        "optimized",
-                        valid_pixels_before_photo,
-                        metrics["mae"],
-                        metrics["abs_rel"],
-                        metrics["sq_rel"],
-                        metrics["rmse"],
-                        metrics["rmse_log"],
-                        metrics["delta1"],
-                        metrics["delta2"],
-                        metrics["delta3"],
-                    ],
-                )
+            # 最適化後の深度の有効ピクセル数をログ出力
+            valid_pixels_before_photo = np.sum(np.isfinite(optimized_depth))
+            logging.info(f"[Optimized Depth] Valid pixels: {valid_pixels_before_photo}")
 
             # 光度一貫性フィルタリング
+            photo_start = time.time()
             photometrically_filtered_depth = (
                 depth_optimization.filter_depth_map_by_photometric_consistency(
                     optimized_depth,
@@ -1080,6 +1041,11 @@ def run():
                     {"R": R_mat, "T": T_pos, "K": config.K},
                     neighbor_views_data,
                 )
+            )
+            photo_elapsed = time.time() - photo_start
+            append_to_csv(time_csv_path, ["photometric", f"{photo_elapsed:.6f}"])
+            logging.debug(
+                f"Saved photometric time ({photo_elapsed:.6f}s) to {time_csv_path}"
             )
             if getattr(config, "DEBUG_SAVE_NORMAL_MAPS", False):
                 normals_photo = _compute_normals_from_depth(
@@ -1092,43 +1058,15 @@ def run():
                     ),
                 )
 
-            # 光度フィルタリング後の深度を評価
-            if gt_depth is not None:
-                valid_pixels_after_photo = np.sum(
-                    np.isfinite(photometrically_filtered_depth)
-                )
-                pixels_filtered_photo = (
-                    valid_pixels_before_photo - valid_pixels_after_photo
-                )
-                metrics = compute_depth_metrics(
-                    photometrically_filtered_depth, gt_depth
-                )
-                logging.info(
-                    f"  [Photometric Filtered] Valid pixels: {valid_pixels_after_photo} "
-                    f"({pixels_filtered_photo} filtered, {pixels_filtered_photo/valid_pixels_before_photo*100:.2f}%), "
-                    f"MAE: {metrics['mae']:.4f}, "
-                    f"AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, "
-                    f"RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
-                    f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, "
-                    f"d3: {metrics['delta3']:.4f}"
-                )
-                # エラーマップは後で統一スケールで保存するため、ここでは保存しない
-                append_to_csv(
-                    results_csv_path,
-                    [
-                        idx,
-                        "photometric",
-                        valid_pixels_after_photo,
-                        metrics["mae"],
-                        metrics["abs_rel"],
-                        metrics["sq_rel"],
-                        metrics["rmse"],
-                        metrics["rmse_log"],
-                        metrics["delta1"],
-                        metrics["delta2"],
-                        metrics["delta3"],
-                    ],
-                )
+            # 光度フィルタリング後の深度の有効ピクセル数をログ出力
+            valid_pixels_after_photo = np.sum(
+                np.isfinite(photometrically_filtered_depth)
+            )
+            pixels_filtered_photo = valid_pixels_before_photo - valid_pixels_after_photo
+            logging.info(
+                f"  [Photometric Filtered] Valid pixels: {valid_pixels_after_photo} "
+                f"({pixels_filtered_photo} filtered, {pixels_filtered_photo/valid_pixels_before_photo*100:.2f}%)"
+            )
 
             if config.DEBUG_SAVE_DEPTH_MAPS:
                 save_photometric_filtered_depth_path = os.path.join(
@@ -1384,6 +1322,15 @@ def run():
             valid_pixels_after_photo = np.sum(
                 np.isfinite(photometrically_filtered_depth)
             )
+            # time.csvのパスを取得
+            if idx in all_pairs_data:
+                _, _, left_path, _, _ = all_pairs_data[idx]
+                filename_stem = Path(left_path).stem
+            else:
+                filename_stem = f"depth_{idx:04d}"
+            csv_subdir = os.path.join(config.CSV_DIR, filename_stem)
+            time_csv_path = os.path.join(csv_subdir, "time.csv")
+            geo_start = time.time()
             geometrically_filtered_depth = (
                 depth_optimization.filter_depth_map_by_geometric_consistency(
                     ref_depth_map=photometrically_filtered_depth,
@@ -1392,45 +1339,23 @@ def run():
                     all_optimized_depths=all_optimized_depths,
                 )
             )
+            geo_elapsed = time.time() - geo_start
+            append_to_csv(time_csv_path, ["geometric", f"{geo_elapsed:.6f}"])
+            logging.debug(
+                f"Saved geometric time ({geo_elapsed:.6f}s) to {time_csv_path}"
+            )
             all_geometrically_filtered_depths[idx] = geometrically_filtered_depth
 
-            if gt_depth is not None:
-                valid_pixels_after_geo = np.sum(
-                    np.isfinite(geometrically_filtered_depth)
-                )
-                pixels_filtered_geo = valid_pixels_after_photo - valid_pixels_after_geo
-                metrics = compute_depth_metrics(geometrically_filtered_depth, gt_depth)
-                logging.info(
-                    f"[Geometric Filtered {idx}] Valid pixels: {valid_pixels_after_geo} "
-                    f"({pixels_filtered_geo} filtered, {pixels_filtered_geo/valid_pixels_after_photo*100:.2f}%), "
-                    f"MAE: {metrics['mae']:.4f}, "
-                    f"AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, "
-                    f"RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
-                    f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, "
-                    f"d3: {metrics['delta3']:.4f}"
-                )
-                # エラーマップは後で統一スケールで保存するため、ここでは保存しない
-                # 幾何学フィルタリング後の深度マップも保存
-                if idx in all_stage_depths:
-                    all_stage_depths[idx][
-                        "geometric"
-                    ] = geometrically_filtered_depth.copy()
-                append_to_csv(
-                    results_csv_path,
-                    [
-                        idx,
-                        "geometric",
-                        valid_pixels_after_geo,
-                        metrics["mae"],
-                        metrics["abs_rel"],
-                        metrics["sq_rel"],
-                        metrics["rmse"],
-                        metrics["rmse_log"],
-                        metrics["delta1"],
-                        metrics["delta2"],
-                        metrics["delta3"],
-                    ],
-                )
+            # 幾何学フィルタリング後の深度の有効ピクセル数をログ出力
+            valid_pixels_after_geo = np.sum(np.isfinite(geometrically_filtered_depth))
+            pixels_filtered_geo = valid_pixels_after_photo - valid_pixels_after_geo
+            logging.info(
+                f"[Geometric Filtered {idx}] Valid pixels: {valid_pixels_after_geo} "
+                f"({pixels_filtered_geo} filtered, {pixels_filtered_geo/valid_pixels_after_photo*100:.2f}%)"
+            )
+            # 幾何学フィルタリング後の深度マップも保存
+            if idx in all_stage_depths:
+                all_stage_depths[idx]["geometric"] = geometrically_filtered_depth.copy()
             if config.DEBUG_SAVE_DEPTH_MAPS:
                 save_geometrically_filtered_depth_path = os.path.join(
                     save_each_depth_dir, f"geometrically_filtered_depth.png"
@@ -1509,12 +1434,27 @@ def run():
         R_mat = ref_pose["R"]
         T_pos = ref_pose["T"]
 
+        # time.csvのパスを取得
+        if idx in all_pairs_data:
+            _, _, left_path, _, _ = all_pairs_data[idx]
+            filename_stem = Path(left_path).stem
+        else:
+            filename_stem = f"depth_{idx:04d}"
+        csv_subdir = os.path.join(config.CSV_DIR, filename_stem)
+        time_csv_path = os.path.join(csv_subdir, "time.csv")
+
         # 透視投影深度マップから直接ワールド座標の点群に変換（オルソ投影をスキップ）
+        pointcloud_start = time.time()
         world_points, world_colors = depth_estimator.depth_to_world(
             geometrically_filtered_depth, li_rgb, config.K, R_mat, T_pos
         )
         merged_pts_list.append(world_points)
         merged_cols_list.append(world_colors)
+        pointcloud_elapsed = time.time() - pointcloud_start
+        append_to_csv(time_csv_path, ["pointcloud", f"{pointcloud_elapsed:.6f}"])
+        logging.debug(
+            f"Saved pointcloud time ({pointcloud_elapsed:.6f}s) to {time_csv_path}"
+        )
 
         # 逐次深度融合
         if world_ortho_fuser is not None:

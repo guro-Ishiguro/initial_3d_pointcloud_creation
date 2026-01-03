@@ -12,10 +12,7 @@ from logging_setup import log_ndarray_stats, time_block
 from numba import cuda, njit, prange
 from numba.cuda.random import create_xoroshiro128p_states
 from utils import (
-    append_to_csv,
-    clear_folder,
     compute_depth_metrics,
-    initialize_csv,
     save_depth_map_as_exr,
     save_depth_map_as_image,
     save_normal_map_as_image,
@@ -1966,62 +1963,7 @@ class DepthOptimization:
 
         # Early-stop state will be managed on-the-fly without predeclared thresholds
 
-        # ファイル名ベースのフォルダ名を使用（フォールバック: ref_idx）
-        folder_name = (
-            filename_stem if filename_stem is not None else f"csv_{ref_idx:04d}"
-        )
-
-        if gt_depth is not None:
-            save_each_csv_dir = os.path.join(config.CSV_DIR, folder_name)
-            os.makedirs(save_each_csv_dir, exist_ok=True)
-            clear_folder(save_each_csv_dir)
-            csv_files = {
-                "rmse": os.path.join(
-                    save_each_csv_dir,
-                    f"rmse_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "mae": os.path.join(
-                    save_each_csv_dir,
-                    f"mae_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "abs_rel": os.path.join(
-                    save_each_csv_dir,
-                    f"abs_rel_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "sq_rel": os.path.join(
-                    save_each_csv_dir,
-                    f"sq_rel_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "rmse_log": os.path.join(
-                    save_each_csv_dir,
-                    f"rmse_log_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "delta1": os.path.join(
-                    save_each_csv_dir,
-                    f"delta1_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "delta2": os.path.join(
-                    save_each_csv_dir,
-                    f"delta2_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "delta3": os.path.join(
-                    save_each_csv_dir,
-                    f"delta3_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-            }
-            for metric, path in csv_files.items():
-                initialize_csv(path, ["image_idx", "iter", "time", metric])
-            # 追加: 初期深度の指標を iter=0 として保存
-            try:
-                init_metrics = compute_depth_metrics(initial_depth, gt_depth)
-                for metric_key, value in init_metrics.items():
-                    if metric_key in csv_files:
-                        append_to_csv(
-                            csv_files[metric_key],
-                            [int(ref_idx), 0, 0.0, float(value)],
-                        )
-            except Exception as e:
-                logging.warning(f"Could not write initial metrics (iter=0) CSV: {e}")
+        # CSV書き込み処理は削除（評価は別スクリプトで実行）
 
         # start_refinement_time removed (unused)
 
@@ -2080,7 +2022,7 @@ class DepthOptimization:
                 ),
                 gt_depth=gt_depth,
                 iter_times=iter_times_gpu,
-                csv_files=csv_files if gt_depth is not None else None,
+                csv_files=None,  # CSV書き込み処理は削除（評価は別スクリプトで実行）
             )
         )
 
@@ -2174,7 +2116,7 @@ class DepthOptimization:
         except Exception as e:
             logging.debug(f"Skip plotting GPU iteration time: {e}")
 
-        return final_depth_map
+        return final_depth_map, iter_times_gpu
 
     def refine_depth_with_patchmatch_vanilla(
         self, ref_image, ref_pose, neighbor_views_data, ref_idx=0, filename_stem=None
@@ -2465,8 +2407,15 @@ class DepthOptimization:
         )
 
         # depth_prev_for_conv = depth_map.copy()  # early stopping disabled
+        # 最初のイテレーション開始時点を記録（累積時間の基準）
+        first_iter_start_time = None
         for i in range(self.config.PATCHMATCH_ITERATIONS):
+            # イテレーション全体の開始時間（ログ表示用）
             iter_start_time = time.time()
+            # 最初のイテレーション開始時点を記録
+            if first_iter_start_time is None:
+                first_iter_start_time = iter_start_time
+
             logging.info(
                 f"PatchMatch GPU Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
             )
@@ -2640,9 +2589,11 @@ class DepthOptimization:
                 )
                 logging.info(f"Saving normal map at iteration {i+1} to {save_path_n}")
                 save_normal_map_as_image(normal_tmp, save_path_n)
-            # Record iteration duration
+            # Record cumulative time from first iteration start
+            # 各イテレーションの開始時点での経過時間を記録
             if iter_times is not None:
-                iter_times.append(time.time() - iter_start_time)
+                cumulative_time = iter_start_time - first_iter_start_time
+                iter_times.append(cumulative_time)
                 if gt_depth is not None and save_per_iter and (save_dir is not None):
                     # depth_tmp が未作成（保存オフ）ならホストへコピー
                     if depth_tmp is None:
@@ -2650,11 +2601,14 @@ class DepthOptimization:
                     # エラーマップは後で統一スケールで再保存するため、ここでは保存しない
                     # 代わりに深度マップをリストに保存
                     iteration_depths.append(depth_tmp.copy())
-            # Log per-iteration metrics and elapsed time (and cumulative since after JIT)
+            # Log per-iteration metrics and elapsed time (and cumulative from first iteration)
+            # iter_durationはイテレーション全体の時間（ログ表示用）
             iter_duration = time.time() - iter_start_time
+            # cumは最初のイテレーション開始からの累積時間（time.csvと同じ基準）
             cum_txt = ""
-            if self._gpu_cum_start_nojit is not None:
-                cum_txt = f" | cum={time.time() - self._gpu_cum_start_nojit:.2f}s"
+            if first_iter_start_time is not None:
+                cum_time = time.time() - first_iter_start_time
+                cum_txt = f" | cum={cum_time:.2f}s"
             if gt_depth is not None:
                 if depth_tmp is None:
                     depth_host = d_depth_map.copy_to_host()
@@ -2668,24 +2622,7 @@ class DepthOptimization:
                         f"RMSE={metrics['rmse']:.4f}, RMSElog={metrics['rmse_log']:.4f}, "
                         f"d1={metrics['delta1']:.4f}, d2={metrics['delta2']:.4f}, d3={metrics['delta3']:.4f}"
                     )
-                    # CSV 出力
-                    if csv_files is not None:
-                        current_time = (
-                            float(np.sum(iter_times))
-                            if iter_times is not None
-                            else float(i + 1)
-                        )
-                        for metric_key, value in metrics.items():
-                            if metric_key in csv_files:
-                                append_to_csv(
-                                    csv_files[metric_key],
-                                    [
-                                        int(ref_idx),
-                                        int(i + 1),
-                                        float(current_time),
-                                        float(value),
-                                    ],
-                                )
+                    # CSV書き込み処理は削除（評価は別スクリプトで実行）
                 except Exception as e:
                     logging.warning(
                         f"[GPU] Could not compute metrics at iter {i+1}: {e}"
