@@ -1971,57 +1971,7 @@ class DepthOptimization:
             filename_stem if filename_stem is not None else f"csv_{ref_idx:04d}"
         )
 
-        if gt_depth is not None:
-            save_each_csv_dir = os.path.join(config.CSV_DIR, folder_name)
-            os.makedirs(save_each_csv_dir, exist_ok=True)
-            clear_folder(save_each_csv_dir)
-            csv_files = {
-                "rmse": os.path.join(
-                    save_each_csv_dir,
-                    f"rmse_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "mae": os.path.join(
-                    save_each_csv_dir,
-                    f"mae_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "abs_rel": os.path.join(
-                    save_each_csv_dir,
-                    f"abs_rel_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "sq_rel": os.path.join(
-                    save_each_csv_dir,
-                    f"sq_rel_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "rmse_log": os.path.join(
-                    save_each_csv_dir,
-                    f"rmse_log_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "delta1": os.path.join(
-                    save_each_csv_dir,
-                    f"delta1_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "delta2": os.path.join(
-                    save_each_csv_dir,
-                    f"delta2_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "delta3": os.path.join(
-                    save_each_csv_dir,
-                    f"delta3_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-            }
-            for metric, path in csv_files.items():
-                initialize_csv(path, ["image_idx", "iter", "time", metric])
-            # 追加: 初期深度の指標を iter=0 として保存
-            try:
-                init_metrics = compute_depth_metrics(initial_depth, gt_depth)
-                for metric_key, value in init_metrics.items():
-                    if metric_key in csv_files:
-                        append_to_csv(
-                            csv_files[metric_key],
-                            [int(ref_idx), 0, 0.0, float(value)],
-                        )
-            except Exception as e:
-                logging.warning(f"Could not write initial metrics (iter=0) CSV: {e}")
+        # CSV書き込み処理は削除（評価は別スクリプトで実行）
 
         # start_refinement_time removed (unused)
 
@@ -2080,7 +2030,7 @@ class DepthOptimization:
                 ),
                 gt_depth=gt_depth,
                 iter_times=iter_times_gpu,
-                csv_files=csv_files if gt_depth is not None else None,
+                csv_files=None,  # CSV書き込み処理は削除（評価は別スクリプトで実行）
             )
         )
 
@@ -2668,24 +2618,7 @@ class DepthOptimization:
                         f"RMSE={metrics['rmse']:.4f}, RMSElog={metrics['rmse_log']:.4f}, "
                         f"d1={metrics['delta1']:.4f}, d2={metrics['delta2']:.4f}, d3={metrics['delta3']:.4f}"
                     )
-                    # CSV 出力
-                    if csv_files is not None:
-                        current_time = (
-                            float(np.sum(iter_times))
-                            if iter_times is not None
-                            else float(i + 1)
-                        )
-                        for metric_key, value in metrics.items():
-                            if metric_key in csv_files:
-                                append_to_csv(
-                                    csv_files[metric_key],
-                                    [
-                                        int(ref_idx),
-                                        int(i + 1),
-                                        float(current_time),
-                                        float(value),
-                                    ],
-                                )
+                    # CSV書き込み処理は削除（評価は別スクリプトで実行）
                 except Exception as e:
                     logging.warning(
                         f"[GPU] Could not compute metrics at iter {i+1}: {e}"
