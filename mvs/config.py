@@ -1,5 +1,6 @@
 import csv
 import os
+import sys
 
 import numpy as np
 from dotenv import load_dotenv
@@ -33,9 +34,16 @@ directories.sort()
 
 _env_data_type = os.getenv("DATA_TYPE", "").strip()
 _env_data_type_index = os.getenv("DATA_TYPE_INDEX", "").strip()
+_skip_interactive = os.getenv("SKIP_DATASET_SELECTION", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 
 def _is_valid_dataset_name(name: str) -> bool:
     return bool(name) and os.path.isdir(os.path.join(DATA_DIR, name))
+
 
 if _is_valid_dataset_name(_env_data_type):
     DATA_TYPE = _env_data_type
@@ -50,17 +58,23 @@ elif len(directories) == 1:
     DATA_TYPE = directories[0]
 else:
     # 対話選択（単一データセット）
-    print("Select dataset:")
-    for i, d in enumerate(directories, 1):
-        print(f"{i}) {d}")
-    choice = input(f"Enter choice [1-{len(directories)}]: ").strip()
-    try:
-        idx = int(choice) - 1
-        assert 0 <= idx < len(directories)
-        DATA_TYPE = directories[idx]
-    except Exception:
-        # フォールバック: 先頭を採用
+    # 非対話モードの場合は自動選択（環境変数または標準入力が端末に接続されていない場合）
+    if _skip_interactive or not sys.stdin.isatty():
+        # 非対話モード: 最初のデータセットを自動選択
         DATA_TYPE = directories[0]
+    else:
+        # 対話モード: ユーザーに選択を求める
+        print("Select dataset:")
+        for i, d in enumerate(directories, 1):
+            print(f"{i}) {d}")
+        choice = input(f"Enter choice [1-{len(directories)}]: ").strip()
+        try:
+            idx = int(choice) - 1
+            assert 0 <= idx < len(directories)
+            DATA_TYPE = directories[idx]
+        except Exception:
+            # フォールバック: 先頭を採用
+            DATA_TYPE = directories[0]
 
 print(f"Selected data type: {DATA_TYPE}")
 
