@@ -12,10 +12,7 @@ from logging_setup import log_ndarray_stats, time_block
 from numba import cuda, njit, prange
 from numba.cuda.random import create_xoroshiro128p_states
 from utils import (
-    append_to_csv,
-    clear_folder,
     compute_depth_metrics,
-    initialize_csv,
     save_depth_map_as_exr,
     save_depth_map_as_image,
     save_normal_map_as_image,
@@ -1966,11 +1963,6 @@ class DepthOptimization:
 
         # Early-stop state will be managed on-the-fly without predeclared thresholds
 
-        # ファイル名ベースのフォルダ名を使用（フォールバック: ref_idx）
-        folder_name = (
-            filename_stem if filename_stem is not None else f"csv_{ref_idx:04d}"
-        )
-
         # CSV書き込み処理は削除（評価は別スクリプトで実行）
 
         # start_refinement_time removed (unused)
@@ -2415,8 +2407,15 @@ class DepthOptimization:
         )
 
         # depth_prev_for_conv = depth_map.copy()  # early stopping disabled
+        # 最初のイテレーション開始時点を記録（累積時間の基準）
+        first_iter_start_time = None
         for i in range(self.config.PATCHMATCH_ITERATIONS):
+            # イテレーション全体の開始時間（ログ表示用）
             iter_start_time = time.time()
+            # 最初のイテレーション開始時点を記録
+            if first_iter_start_time is None:
+                first_iter_start_time = iter_start_time
+
             logging.info(
                 f"PatchMatch GPU Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
             )
@@ -2590,9 +2589,11 @@ class DepthOptimization:
                 )
                 logging.info(f"Saving normal map at iteration {i+1} to {save_path_n}")
                 save_normal_map_as_image(normal_tmp, save_path_n)
-            # Record iteration duration
+            # Record cumulative time from first iteration start
+            # 各イテレーションの開始時点での経過時間を記録
             if iter_times is not None:
-                iter_times.append(time.time() - iter_start_time)
+                cumulative_time = iter_start_time - first_iter_start_time
+                iter_times.append(cumulative_time)
                 if gt_depth is not None and save_per_iter and (save_dir is not None):
                     # depth_tmp が未作成（保存オフ）ならホストへコピー
                     if depth_tmp is None:
@@ -2600,11 +2601,14 @@ class DepthOptimization:
                     # エラーマップは後で統一スケールで再保存するため、ここでは保存しない
                     # 代わりに深度マップをリストに保存
                     iteration_depths.append(depth_tmp.copy())
-            # Log per-iteration metrics and elapsed time (and cumulative since after JIT)
+            # Log per-iteration metrics and elapsed time (and cumulative from first iteration)
+            # iter_durationはイテレーション全体の時間（ログ表示用）
             iter_duration = time.time() - iter_start_time
+            # cumは最初のイテレーション開始からの累積時間（time.csvと同じ基準）
             cum_txt = ""
-            if self._gpu_cum_start_nojit is not None:
-                cum_txt = f" | cum={time.time() - self._gpu_cum_start_nojit:.2f}s"
+            if first_iter_start_time is not None:
+                cum_time = time.time() - first_iter_start_time
+                cum_txt = f" | cum={cum_time:.2f}s"
             if gt_depth is not None:
                 if depth_tmp is None:
                     depth_host = d_depth_map.copy_to_host()

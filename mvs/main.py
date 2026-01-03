@@ -892,6 +892,7 @@ def run():
         if os.path.exists(time_csv_path):
             os.remove(time_csv_path)
         initialize_csv(time_csv_path, ["stage", "time"])
+        logging.info(f"Initialized time.csv at {time_csv_path}")
 
         # --- Ground Truth Depthの読み込み ---
         # depth_######.exr と ######.exr の両方に対応
@@ -978,9 +979,7 @@ def run():
 
             # 初期深度の有効ピクセル数をログ出力
             valid_pixels_initial = np.sum(np.isfinite(initial_depth))
-            logging.info(
-                f"[Initial Depth] Valid pixels: {valid_pixels_initial}"
-            )
+            logging.info(f"[Initial Depth] Valid pixels: {valid_pixels_initial}")
 
             # PatchMatchによる深度マップの最適化
             neighbor_views_data = []
@@ -993,23 +992,35 @@ def run():
 
             # PatchMatchを実行（全体計測とイテレーション内計測は関数側で行う）
             refine_start = time.time()
-            optimized_depth, iter_times_gpu = depth_optimization.refine_depth_with_patchmatch(
-                initial_depth=initial_depth,
-                initial_depth_error=d_cost,
-                ref_image=li_rgb,
-                ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
-                neighbor_views_data=neighbor_views_data,
-                gt_depth=gt_depth,
-                ref_idx=idx,
-                filename_stem=filename_stem,
+            optimized_depth, iter_times_gpu = (
+                depth_optimization.refine_depth_with_patchmatch(
+                    initial_depth=initial_depth,
+                    initial_depth_error=d_cost,
+                    ref_image=li_rgb,
+                    ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
+                    neighbor_views_data=neighbor_views_data,
+                    gt_depth=gt_depth,
+                    ref_idx=idx,
+                    filename_stem=filename_stem,
+                )
             )
             refine_elapsed = time.time() - refine_start
             logging.info(
                 f"[Timing] refine_depth_with_patchmatch total time: {refine_elapsed:.2f}s for index {idx}"
             )
             # 各イテレーションの時間をtime.csvに記録
-            for iter_num, iter_time in enumerate(iter_times_gpu, 1):
-                append_to_csv(time_csv_path, [f"iter_{iter_num}", f"{iter_time:.6f}"])
+            if iter_times_gpu is not None and len(iter_times_gpu) > 0:
+                for iter_num, iter_time in enumerate(iter_times_gpu, 1):
+                    append_to_csv(
+                        time_csv_path, [f"iter_{iter_num}", f"{iter_time:.6f}"]
+                    )
+                logging.info(
+                    f"Saved {len(iter_times_gpu)} iteration times to {time_csv_path}"
+                )
+            else:
+                logging.warning(
+                    f"iter_times_gpu is None or empty for index {idx}, skipping iteration time recording"
+                )
             # optimized_depth = depth_optimization.refine_depth_with_patchmatch_vanilla(
             #     ref_image=li_rgb,
             #     ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
@@ -1019,9 +1030,7 @@ def run():
 
             # 最適化後の深度の有効ピクセル数をログ出力
             valid_pixels_before_photo = np.sum(np.isfinite(optimized_depth))
-            logging.info(
-                f"[Optimized Depth] Valid pixels: {valid_pixels_before_photo}"
-            )
+            logging.info(f"[Optimized Depth] Valid pixels: {valid_pixels_before_photo}")
 
             # 光度一貫性フィルタリング
             photo_start = time.time()
@@ -1035,6 +1044,9 @@ def run():
             )
             photo_elapsed = time.time() - photo_start
             append_to_csv(time_csv_path, ["photometric", f"{photo_elapsed:.6f}"])
+            logging.debug(
+                f"Saved photometric time ({photo_elapsed:.6f}s) to {time_csv_path}"
+            )
             if getattr(config, "DEBUG_SAVE_NORMAL_MAPS", False):
                 normals_photo = _compute_normals_from_depth(
                     photometrically_filtered_depth, config.K
@@ -1050,9 +1062,7 @@ def run():
             valid_pixels_after_photo = np.sum(
                 np.isfinite(photometrically_filtered_depth)
             )
-            pixels_filtered_photo = (
-                valid_pixels_before_photo - valid_pixels_after_photo
-            )
+            pixels_filtered_photo = valid_pixels_before_photo - valid_pixels_after_photo
             logging.info(
                 f"  [Photometric Filtered] Valid pixels: {valid_pixels_after_photo} "
                 f"({pixels_filtered_photo} filtered, {pixels_filtered_photo/valid_pixels_before_photo*100:.2f}%)"
@@ -1331,12 +1341,13 @@ def run():
             )
             geo_elapsed = time.time() - geo_start
             append_to_csv(time_csv_path, ["geometric", f"{geo_elapsed:.6f}"])
+            logging.debug(
+                f"Saved geometric time ({geo_elapsed:.6f}s) to {time_csv_path}"
+            )
             all_geometrically_filtered_depths[idx] = geometrically_filtered_depth
 
             # 幾何学フィルタリング後の深度の有効ピクセル数をログ出力
-            valid_pixels_after_geo = np.sum(
-                np.isfinite(geometrically_filtered_depth)
-            )
+            valid_pixels_after_geo = np.sum(np.isfinite(geometrically_filtered_depth))
             pixels_filtered_geo = valid_pixels_after_photo - valid_pixels_after_geo
             logging.info(
                 f"[Geometric Filtered {idx}] Valid pixels: {valid_pixels_after_geo} "
@@ -1344,9 +1355,7 @@ def run():
             )
             # 幾何学フィルタリング後の深度マップも保存
             if idx in all_stage_depths:
-                all_stage_depths[idx][
-                    "geometric"
-                ] = geometrically_filtered_depth.copy()
+                all_stage_depths[idx]["geometric"] = geometrically_filtered_depth.copy()
             if config.DEBUG_SAVE_DEPTH_MAPS:
                 save_geometrically_filtered_depth_path = os.path.join(
                     save_each_depth_dir, f"geometrically_filtered_depth.png"
@@ -1443,6 +1452,9 @@ def run():
         merged_cols_list.append(world_colors)
         pointcloud_elapsed = time.time() - pointcloud_start
         append_to_csv(time_csv_path, ["pointcloud", f"{pointcloud_elapsed:.6f}"])
+        logging.debug(
+            f"Saved pointcloud time ({pointcloud_elapsed:.6f}s) to {time_csv_path}"
+        )
 
         # 逐次深度融合
         if world_ortho_fuser is not None:
