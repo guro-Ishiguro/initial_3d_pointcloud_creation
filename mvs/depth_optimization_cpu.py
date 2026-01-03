@@ -831,6 +831,7 @@ class DepthOptimization:
         neighbor_views_data,
         gt_depth,
         ref_idx=0,
+        filename_stem=None,
     ):
         logging.info(
             f"Starting PatchMatch MVS depth refinement using '{self.config.CHOICED_PROPAGATION_METHOD}' method..."
@@ -897,8 +898,13 @@ class DepthOptimization:
         depth_map_prev = np.zeros_like(depth_map)
         convergence_threshold = 0.001
 
+        # ファイル名ベースのフォルダ名を使用（フォールバック: ref_idx）
+        folder_name = (
+            filename_stem if filename_stem is not None else f"csv_{ref_idx:04d}"
+        )
+
         if gt_depth is not None:
-            save_each_csv_dir = os.path.join(config.CSV_DIR, f"csv_{ref_idx:04d}")
+            save_each_csv_dir = os.path.join(config.CSV_DIR, folder_name)
             os.makedirs(save_each_csv_dir, exist_ok=True)
             clear_folder(save_each_csv_dir)
             csv_files = {
@@ -1063,9 +1069,13 @@ class DepthOptimization:
                 )
                 cv2.waitKey(0)
 
+            # ファイル名ベースのフォルダ名を使用（フォールバック: ref_idx）
+            depth_folder_name = (
+                filename_stem if filename_stem is not None else f"depth_{ref_idx:04d}"
+            )
             if self.config.DEBUG_SAVE_DEPTH_MAPS:
                 save_each_depth_dir = os.path.join(
-                    config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}"
+                    config.DEPTH_IMAGE_DIR, depth_folder_name
                 )
                 save_path = os.path.join(
                     save_each_depth_dir, f"depth_iter_{i+1:02d}.png"
@@ -1074,7 +1084,7 @@ class DepthOptimization:
                 save_depth_map_as_image(depth_map.copy(), save_path)
             if self.config.DEBUG_SAVE_NORMAL_MAPS:
                 save_each_normal_dir = os.path.join(
-                    config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}"
+                    config.NORMAL_IMAGE_DIR, depth_folder_name
                 )
                 save_path_normal = os.path.join(
                     save_each_normal_dir, f"normal_iter_{i+1:02d}.png"
@@ -1138,8 +1148,12 @@ class DepthOptimization:
         final_depth_map = depth_map.copy()
         # Save per-iteration timing plot
         try:
+            # ファイル名ベースのフォルダ名を使用（フォールバック: ref_idx）
+            depth_folder_name = (
+                filename_stem if filename_stem is not None else f"depth_{ref_idx:04d}"
+            )
             save_each_depth_dir = os.path.join(
-                config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}"
+                config.DEPTH_IMAGE_DIR, depth_folder_name
             )
             os.makedirs(save_each_depth_dir, exist_ok=True)
             fig_path = os.path.join(save_each_depth_dir, f"iter_times_cpu.png")
@@ -1158,7 +1172,7 @@ class DepthOptimization:
         return final_depth_map
 
     def refine_depth_with_patchmatch_vanilla(
-        self, ref_image, ref_pose, neighbor_views_data, ref_idx=0
+        self, ref_image, ref_pose, neighbor_views_data, ref_idx=0, filename_stem=None
     ):
         """
         通常のPatchMatch MVSを実行。深度は一様乱数で初期化し、探索範囲は固定値から減衰させる。
@@ -1173,10 +1187,12 @@ class DepthOptimization:
         max_depth = self.config.PATCHMATCH_VANILLA_MAX_DEPTH
         depth_map = np.random.uniform(min_depth, max_depth, (h, w)).astype(np.float32)
 
+        # ファイル名ベースのフォルダ名を使用（フォールバック: ref_idx）
+        folder_name = (
+            filename_stem if filename_stem is not None else f"depth_{ref_idx:04d}"
+        )
         if config.DEBUG_SAVE_DEPTH_MAPS:
-            save_each_depth_dir = os.path.join(
-                config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}"
-            )
+            save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, folder_name)
             save_depth_path = os.path.join(save_each_depth_dir, f"depth_iter_00.png")
             logging.info(f"Saving initial depth map to {save_depth_path}")
             save_depth_map_as_image(depth_map, save_depth_path)
@@ -1187,9 +1203,7 @@ class DepthOptimization:
         )
 
         if self.config.DEBUG_SAVE_NORMAL_MAPS:
-            save_each_normal_dir = os.path.join(
-                config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}"
-            )
+            save_each_normal_dir = os.path.join(config.NORMAL_IMAGE_DIR, folder_name)
             save_path_normal = os.path.join(save_each_normal_dir, f"normal_iter_00.png")
             logging.info(f"Saving initial normal map to {save_path_normal}")
             save_normal_map_as_image(normal_map.copy(), save_path_normal)
@@ -1301,9 +1315,7 @@ class DepthOptimization:
 
             # イテレーションごとのデプスマップ保存
             if self.config.DEBUG_SAVE_DEPTH_MAPS:
-                save_each_depth_dir = os.path.join(
-                    config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}"
-                )
+                save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, folder_name)
                 save_path = os.path.join(
                     save_each_depth_dir, f"depth_iter_{i+1:02d}.png"
                 )
@@ -1312,7 +1324,7 @@ class DepthOptimization:
 
             if self.config.DEBUG_SAVE_NORMAL_MAPS:
                 save_each_normal_dir = os.path.join(
-                    config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}"
+                    config.NORMAL_IMAGE_DIR, folder_name
                 )
                 save_path_normal = os.path.join(
                     save_each_normal_dir, f"normal_iter_{i+1:02d}.png"

@@ -16,8 +16,8 @@ from utils import (
     clear_folder,
     compute_depth_metrics,
     initialize_csv,
+    save_depth_map_as_exr,
     save_depth_map_as_image,
-    save_error_map_as_image,
     save_normal_map_as_image,
 )
 
@@ -1897,6 +1897,7 @@ class DepthOptimization:
         neighbor_views_data,
         gt_depth,
         ref_idx=0,
+        filename_stem=None,
     ):
         logging.info(
             f"Starting PatchMatch MVS depth refinement using '{self.config.CHOICED_PROPAGATION_METHOD}' method..."
@@ -1965,8 +1966,13 @@ class DepthOptimization:
 
         # Early-stop state will be managed on-the-fly without predeclared thresholds
 
+        # ファイル名ベースのフォルダ名を使用（フォールバック: ref_idx）
+        folder_name = (
+            filename_stem if filename_stem is not None else f"csv_{ref_idx:04d}"
+        )
+
         if gt_depth is not None:
-            save_each_csv_dir = os.path.join(config.CSV_DIR, f"csv_{ref_idx:04d}")
+            save_each_csv_dir = os.path.join(config.CSV_DIR, folder_name)
             os.makedirs(save_each_csv_dir, exist_ok=True)
             clear_folder(save_each_csv_dir)
             csv_files = {
@@ -2021,9 +2027,13 @@ class DepthOptimization:
 
         # --- PatchMatch反復ループ (GPU) ---
         save_each_depth_dir = None
+        # ファイル名ベースのフォルダ名を使用（フォールバック: ref_idx）
+        depth_folder_name = (
+            filename_stem if filename_stem is not None else f"depth_{ref_idx:04d}"
+        )
         if config.DEBUG_SAVE_DEPTH_MAPS:
             save_each_depth_dir = os.path.join(
-                config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}"
+                config.DEPTH_IMAGE_DIR, depth_folder_name
             )
             os.makedirs(save_each_depth_dir, exist_ok=True)
             # 初期深度も保存（iter_00）
@@ -2032,7 +2042,7 @@ class DepthOptimization:
             save_depth_map_as_image(depth_map, save_path0)
         if self.config.DEBUG_SAVE_NORMAL_MAPS:
             save_each_normal_dir = os.path.join(
-                config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}"
+                config.NORMAL_IMAGE_DIR, depth_folder_name
             )
             os.makedirs(save_each_normal_dir, exist_ok=True)
             save_pathn0 = os.path.join(save_each_normal_dir, f"normal_iter_00.png")
@@ -2064,7 +2074,7 @@ class DepthOptimization:
                 save_dir=save_each_depth_dir,
                 save_normals_per_iter=self.config.DEBUG_SAVE_NORMAL_MAPS,
                 normal_save_dir=(
-                    os.path.join(config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}")
+                    os.path.join(config.NORMAL_IMAGE_DIR, depth_folder_name)
                     if self.config.DEBUG_SAVE_NORMAL_MAPS
                     else None
                 ),
@@ -2078,54 +2088,18 @@ class DepthOptimization:
         if gt_depth is not None and iteration_depths:
             all_iteration_depths.extend(iteration_depths)
 
-        # すべてのイテレーションの誤差を収集してパーセンタイルを計算（外れ値に引っ張られないように）
-        if (
-            gt_depth is not None
-            and all_iteration_depths
-            and save_each_depth_dir is not None
-        ):
-            all_errors = []
-            for depth in all_iteration_depths:
-                valid_mask = np.isfinite(depth) & np.isfinite(gt_depth) & (gt_depth > 0)
-                if np.any(valid_mask):
-                    errors = np.abs(depth[valid_mask] - gt_depth[valid_mask])
-                    all_errors.extend(errors.tolist())
-
-            if all_errors:
-                # 95パーセンタイルを使用（外れ値に引っ張られない）
-                error_percentile = getattr(config, "ERROR_MAP_PERCENTILE", 95.0)
-                max_error_all = float(np.percentile(all_errors, error_percentile))
-                # マージンを追加（5%）
-                max_error_all = max_error_all * 1.05
-                # 最大誤差も記録（参考用）
-                max_error_actual = float(np.max(all_errors))
-            else:
-                max_error_all = 1.0
-                max_error_actual = 1.0
-
-            if max_error_all < 0.01:  # 最小値の設定
-                max_error_all = 1.0
-
-            logging.info(
-                f"Re-saving all error maps with unified scale "
-                f"(percentile={getattr(config, 'ERROR_MAP_PERCENTILE', 95.0):.1f}%: {max_error_all:.4f} m, "
-                f"max: {max_error_actual:.4f} m)"
-            )
-
-            # 初期深度のエラーマップを再保存
-            save_error_map_as_image(
+        # 深度マップをEXR形式で保存（絶対的な深度値が読み取れる形式）
+        if all_iteration_depths and save_each_depth_dir is not None:
+            # 初期深度をEXR形式で保存
+            save_depth_map_as_exr(
                 initial_depth,
-                gt_depth,
-                os.path.join(save_each_depth_dir, "error_map_initial.png"),
-                max_error=max_error_all,
+                os.path.join(save_each_depth_dir, "depth_initial.exr"),
             )
 
-            # 各イテレーションのエラーマップを再保存
+            # 各イテレーションの深度マップをEXR形式で保存
             for i, depth in enumerate(iteration_depths, start=1):
-                err_path = os.path.join(save_each_depth_dir, f"error_iter_{i:02d}.png")
-                save_error_map_as_image(
-                    depth, gt_depth, err_path, max_error=max_error_all
-                )
+                exr_path = os.path.join(save_each_depth_dir, f"depth_iter_{i:02d}.exr")
+                save_depth_map_as_exr(depth, exr_path)
 
         # --- Debug: cost_map statistics and CPU/GPU cost consistency check on samples ---
         try:
@@ -2203,7 +2177,7 @@ class DepthOptimization:
         return final_depth_map
 
     def refine_depth_with_patchmatch_vanilla(
-        self, ref_image, ref_pose, neighbor_views_data, ref_idx=0
+        self, ref_image, ref_pose, neighbor_views_data, ref_idx=0, filename_stem=None
     ):
         """
         通常のPatchMatch MVSを実行。深度は一様乱数で初期化し、探索範囲は固定値から減衰させる。
@@ -2218,10 +2192,12 @@ class DepthOptimization:
         max_depth = self.config.PATCHMATCH_VANILLA_MAX_DEPTH
         depth_map = np.random.uniform(min_depth, max_depth, (h, w)).astype(np.float32)
 
+        # ファイル名ベースのフォルダ名を使用（フォールバック: ref_idx）
+        folder_name = (
+            filename_stem if filename_stem is not None else f"depth_{ref_idx:04d}"
+        )
         if config.DEBUG_SAVE_DEPTH_MAPS:
-            save_each_depth_dir = os.path.join(
-                config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}"
-            )
+            save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, folder_name)
             save_depth_path = os.path.join(save_each_depth_dir, f"depth_iter_00.png")
             logging.info(f"Saving initial depth map to {save_depth_path}")
             save_depth_map_as_image(depth_map, save_depth_path)
@@ -2232,9 +2208,7 @@ class DepthOptimization:
         )
 
         if self.config.DEBUG_SAVE_NORMAL_MAPS:
-            save_each_normal_dir = os.path.join(
-                config.NORMAL_IMAGE_DIR, f"normal_{ref_idx:04d}"
-            )
+            save_each_normal_dir = os.path.join(config.NORMAL_IMAGE_DIR, folder_name)
             save_path_normal = os.path.join(save_each_normal_dir, f"normal_iter_00.png")
             logging.info(f"Saving initial normal map to {save_path_normal}")
             save_normal_map_as_image(normal_map.copy(), save_path_normal)
@@ -2289,7 +2263,7 @@ class DepthOptimization:
             src_T,
             save_per_iter=config.DEBUG_SAVE_DEPTH_MAPS,
             save_dir=(
-                os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{ref_idx:04d}")
+                os.path.join(config.DEPTH_IMAGE_DIR, folder_name)
                 if config.DEBUG_SAVE_DEPTH_MAPS
                 else None
             ),

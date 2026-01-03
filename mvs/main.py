@@ -1,44 +1,45 @@
 # mvs/main.py
 
+import bisect
 import csv
 import logging
 import os
-import re
 import time
-import bisect
+from pathlib import Path
 
 import cv2
+import matplotlib
 import numpy as np
 import open3d as o3d
-import matplotlib
+
 matplotlib.use("Agg")  # headless save
-import matplotlib.pyplot as plt
-from depth_estimation import DepthEstimator
-from depth_fusion import (
+import matplotlib.pyplot as plt  # noqa: E402
+from depth_estimation import DepthEstimator  # noqa: E402
+from depth_fusion import (  # noqa: E402
     CameraPlaneMedianFuser,
     OrthoDepthMedianFuser,
     WorldOrthoMedianFuser,
 )
-from depth_optimization import DepthOptimization, is_gpu_enabled
-from disparity_estimation import ImageProcessor
-from logging_setup import setup_logging
-from point_cloud_integrator import PointCloudIntegrator
-from scipy.spatial.transform import Rotation
-from utils import (
+from depth_optimization import DepthOptimization, is_gpu_enabled  # noqa: E402
+from disparity_estimation import ImageProcessor  # noqa: E402
+from logging_setup import setup_logging  # noqa: E402
+from point_cloud_integrator import PointCloudIntegrator  # noqa: E402
+from scipy.spatial.transform import Rotation  # noqa: E402
+from utils import (  # noqa: E402
     append_to_csv,
     clear_folder,
     compute_depth_metrics,
     initialize_csv,
     parse_arguments,
     read_exr_depth,
+    save_depth_map_as_exr,
     save_depth_map_as_image,
     save_disparity_map_with_colorbar,
-    save_error_map_as_image,
     save_normal_map_as_image,
 )
 
-import mvs.config as config
-from app.data_loader import DataLoader
+import mvs.config as config  # noqa: E402
+from app.data_loader import DataLoader  # noqa: E402
 
 
 def _pose_unity_to_cv_RT(pos_unity, quat_unity):
@@ -92,7 +93,11 @@ def _load_global_neighbor_pool(csv_path: str):
                     rz = float(row.get("rot_z"))
                     rw = float(row.get("rot_w"))
                     gidx = row.get("global_idx", None)
-                    gidx = int(gidx) if gidx is not None and str(gidx).strip() != "" else None
+                    gidx = (
+                        int(gidx)
+                        if gidx is not None and str(gidx).strip() != ""
+                        else None
+                    )
                 except Exception:
                     continue
                 if not left_path or not os.path.exists(left_path):
@@ -180,7 +185,7 @@ def _log_selected_neighbors(ref_idx: int, frames: list):
         c = getattr(_log_selected_neighbors, "_count", 0)
         if c >= max_refs:
             return
-        setattr(_log_selected_neighbors, "_count", c + 1)
+        setattr(_log_selected_neighbors, "_count", c + 1)  # noqa: B010
 
     max_per = int(getattr(config, "LOG_SELECTED_NEIGHBORS_MAX_PER_REF", 10) or 10)
     max_per = max(0, max_per)
@@ -416,24 +421,24 @@ def run():
     os.makedirs(config.POINT_CLOUD_DIR, exist_ok=True)
 
     os.makedirs(config.CSV_DIR, exist_ok=True)
-    # CSV 初期化（存在しない場合のみヘッダー作成）
+    # CSV 初期化（実行のたびに新規作成、既存のものは上書き）
     results_csv_path = os.path.join(config.CSV_DIR, "results.csv")
-    if not os.path.exists(results_csv_path):
-        initialize_csv(
-            results_csv_path,
-            [
-                "index",
-                "stage",
-                "mae",
-                "abs_rel",
-                "sq_rel",
-                "rmse",
-                "rmse_log",
-                "delta1",
-                "delta2",
-                "delta3",
-            ],
-        )
+    initialize_csv(
+        results_csv_path,
+        [
+            "index",
+            "stage",
+            "valid_pixels",
+            "mae",
+            "abs_rel",
+            "sq_rel",
+            "rmse",
+            "rmse_log",
+            "delta1",
+            "delta2",
+            "delta3",
+        ],
+    )
 
     os.makedirs(config.DISPARITY_IMAGE_DIR, exist_ok=True)
 
@@ -459,9 +464,12 @@ def run():
     try:
         save_selected_csv = bool(getattr(config, "SAVE_SELECTED_FRAMES_CSV", True))
         if save_selected_csv:
-            selected_csv_name = str(
-                getattr(config, "SELECTED_FRAMES_CSV_NAME", "selected_frames.csv")
-            ).strip() or "selected_frames.csv"
+            selected_csv_name = (
+                str(
+                    getattr(config, "SELECTED_FRAMES_CSV_NAME", "selected_frames.csv")
+                ).strip()
+                or "selected_frames.csv"
+            )
             selected_frames_csv_path = os.path.join(config.CSV_DIR, selected_csv_name)
             with open(selected_frames_csv_path, "w", newline="") as f:
                 w = csv.writer(f)
@@ -476,7 +484,9 @@ def run():
             max_print = max(0, max_print)
             if max_print > 0:
                 preview = available_indices[:max_print]
-                logging.info(f"Selected frame indices (first {len(preview)}): {preview}")
+                logging.info(
+                    f"Selected frame indices (first {len(preview)}): {preview}"
+                )
     except Exception as e:
         logging.warning(f"Failed to write selected frames CSV: {e}")
 
@@ -484,9 +494,14 @@ def run():
     try:
         if bool(getattr(config, "SAVE_SELECTED_POSE_PLOT", True)):
             plots_dir = os.path.join(config.OUTPUT_TYPE_DIR, "plots")
-            plot_name = str(
-                getattr(config, "SELECTED_POSE_PLOT_NAME", "selected_camera_poses.png")
-            ).strip() or "selected_camera_poses.png"
+            plot_name = (
+                str(
+                    getattr(
+                        config, "SELECTED_POSE_PLOT_NAME", "selected_camera_poses.png"
+                    )
+                ).strip()
+                or "selected_camera_poses.png"
+            )
             plot_path = os.path.join(plots_dir, plot_name)
             plane = str(getattr(config, "POSE_PLOT_PLANE", "xz") or "xz")
             arrow_stride = int(getattr(config, "POSE_PLOT_ARROW_STRIDE", 5) or 5)
@@ -510,9 +525,40 @@ def run():
         logging.info("PREVIEW_ONLY enabled: stopping after frame selection and plots.")
         return 0
 
+    # --- Target selection (name-free, supports "selected order" dataset ordinal) ---
+    # DATASET_ORDINAL is 1-based and injected by app/cli.py in multi-dataset runs.
+    requested = None
+    target_dataset_ordinal = getattr(config, "TARGET_DATASET_ORDINAL", None)
+    if target_dataset_ordinal is not None:
+        try:
+            target_dataset_ordinal = int(target_dataset_ordinal)
+        except Exception:
+            target_dataset_ordinal = None
+
+    if target_dataset_ordinal is not None:
+        try:
+            current_ordinal = int(os.getenv("DATASET_ORDINAL", "1"))
+        except Exception:
+            current_ordinal = 1
+        if current_ordinal != target_dataset_ordinal:
+            # Skip datasets not matching the requested ordinal (exit 0).
+            logging.info(
+                f"Skipping this dataset (DATASET_ORDINAL={current_ordinal}) because TARGET_DATASET_ORDINAL={target_dataset_ordinal}"
+            )
+            return 0
+
     if hasattr(config, "TARGET_INDICES") and config.TARGET_INDICES:
-        # Filter to actually available indices (after frame selection / missing file skips)
         requested = list(config.TARGET_INDICES)
+
+    if requested is not None:
+        # Explicit request:
+        # - [] means "skip this dataset" (useful for verification runs in multi-dataset mode)
+        if len(requested) == 0:
+            logging.info(
+                "TARGET_INDICES specified as empty for this dataset; skipping processing."
+            )
+            return 0
+
         target_indices = [i for i in requested if i in all_pairs_data]
         missing = [i for i in requested if i not in all_pairs_data]
         if missing:
@@ -548,19 +594,37 @@ def run():
         logging.warning(f"GT per-view export skipped: {e}")
 
     # --- Neighbor selection (mode-switchable, optionally cross-dataset via global CSV) ---
-    neighbor_selection_mode = str(
-        os.getenv("NEIGHBOR_SELECTION_MODE", getattr(config, "NEIGHBOR_SELECTION_MODE", "adjacent"))
-    ).strip().lower()
-    neighbor_pool_mode = str(
-        os.getenv("NEIGHBOR_POOL_MODE", getattr(config, "NEIGHBOR_POOL_MODE", "local"))
-    ).strip().lower()
+    neighbor_selection_mode = (
+        str(
+            os.getenv(
+                "NEIGHBOR_SELECTION_MODE",
+                getattr(config, "NEIGHBOR_SELECTION_MODE", "adjacent"),
+            )
+        )
+        .strip()
+        .lower()
+    )
+    neighbor_pool_mode = (
+        str(
+            os.getenv(
+                "NEIGHBOR_POOL_MODE", getattr(config, "NEIGHBOR_POOL_MODE", "local")
+            )
+        )
+        .strip()
+        .lower()
+    )
 
     # local pool pose cache (for neighbor selection)
     local_pose = {}
     for i in available_indices:
         _, p, q = data_loader.get_camera_pose(i)
         if p is not None and q is not None:
-            local_pose[i] = {"pos": tuple(p), "quat": tuple(q), "dataset": getattr(config, "DATA_TYPE", ""), "local_idx": i}
+            local_pose[i] = {
+                "pos": tuple(p),
+                "quat": tuple(q),
+                "dataset": getattr(config, "DATA_TYPE", ""),
+                "local_idx": i,
+            }
 
     # optional global pool (cross-dataset)
     # Global neighbor pool CSV is provided via environment variable by app/cli.py in multi-dataset runs.
@@ -653,13 +717,21 @@ def run():
                     j = pos - k
                     if j >= 0:
                         fr = dict(global_ordered[j])
-                        fr["id"] = int(fr.get("global_idx")) if fr.get("global_idx") is not None else j
+                        fr["id"] = (
+                            int(fr.get("global_idx"))
+                            if fr.get("global_idx") is not None
+                            else j
+                        )
                         out.append(fr)
                 for k in range(1, neighbor_each_side + 1):
                     j = pos + k
                     if j < len(global_ordered):
                         fr = dict(global_ordered[j])
-                        fr["id"] = int(fr.get("global_idx")) if fr.get("global_idx") is not None else j
+                        fr["id"] = (
+                            int(fr.get("global_idx"))
+                            if fr.get("global_idx") is not None
+                            else j
+                        )
                         out.append(fr)
                 return out
 
@@ -671,7 +743,10 @@ def run():
             candidates = [
                 fr
                 for fr in global_frames
-                if not (fr.get("dataset") == ref_ds and int(fr.get("local_idx")) == int(ref_idx))
+                if not (
+                    fr.get("dataset") == ref_ds
+                    and int(fr.get("local_idx")) == int(ref_idx)
+                )
             ]
             picked = _select_nearest_neighbors(
                 ref_pos=tuple(ref_fr["pos"]),
@@ -683,7 +758,11 @@ def run():
             out = []
             for fr in picked:
                 d = dict(fr)
-                d["id"] = int(d.get("global_idx")) if d.get("global_idx") is not None else int(d.get("local_idx", -1))
+                d["id"] = (
+                    int(d.get("global_idx"))
+                    if d.get("global_idx") is not None
+                    else int(d.get("local_idx", -1))
+                )
                 out.append(d)
             return out
         else:
@@ -691,7 +770,14 @@ def run():
             if ref is None:
                 return []
             candidates = [
-                {"pos": local_pose[i]["pos"], "quat": local_pose[i]["quat"], "dataset": ref_ds, "local_idx": i, "left_path": data_loader.get_image_paths(i)[0], "id": i}
+                {
+                    "pos": local_pose[i]["pos"],
+                    "quat": local_pose[i]["quat"],
+                    "dataset": ref_ds,
+                    "local_idx": i,
+                    "left_path": data_loader.get_image_paths(i)[0],
+                    "id": i,
+                }
                 for i in available_indices
                 if i != ref_idx and i in local_pose
             ]
@@ -734,9 +820,12 @@ def run():
         if pos is None or quat is None:
             return None
         R_n, T_n = _pose_unity_to_cv_RT(pos, quat)
+        # local_idxが存在する場合はそれを使用、そうでない場合はidを使用
+        # これにより、all_optimized_depthsのキーと一致する
+        image_idx = int(fr.get("local_idx", fr.get("id", -1)))
         return {
             "image": img,
-            "image_idx": int(fr.get("id", -1)),
+            "image_idx": image_idx,
             "R": R_n,
             "T": T_n,
             "K": config.K,
@@ -805,13 +894,13 @@ def run():
 
         view_metrics = {"image_index": idx}
 
-        save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}")
+        # ファイル名（拡張子なし）を取得してフォルダ名に使用
+        filename_stem = Path(left_path).stem
+        save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, filename_stem)
         os.makedirs(save_each_depth_dir, exist_ok=True)
         clear_folder(save_each_depth_dir)
 
-        save_each_normal_dir = os.path.join(
-            config.NORMAL_IMAGE_DIR, f"normal_{idx:04d}"
-        )
+        save_each_normal_dir = os.path.join(config.NORMAL_IMAGE_DIR, filename_stem)
         os.makedirs(save_each_normal_dir, exist_ok=True)
         clear_folder(save_each_normal_dir)
 
@@ -906,11 +995,13 @@ def run():
                     f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, d3: {metrics['delta3']:.4f}"
                 )
                 # エラーマップは後で統一スケールで保存するため、ここでは保存しない
+                valid_pixels_initial = np.sum(np.isfinite(initial_depth))
                 append_to_csv(
                     results_csv_path,
                     [
                         idx,
                         "initial",
+                        valid_pixels_initial,
                         metrics["mae"],
                         metrics["abs_rel"],
                         metrics["sq_rel"],
@@ -941,6 +1032,7 @@ def run():
                 neighbor_views_data=neighbor_views_data,
                 gt_depth=gt_depth,
                 ref_idx=idx,
+                filename_stem=filename_stem,
             )
             refine_elapsed = time.time() - refine_start
             logging.info(
@@ -968,6 +1060,7 @@ def run():
                     [
                         idx,
                         "optimized",
+                        valid_pixels_before_photo,
                         metrics["mae"],
                         metrics["abs_rel"],
                         metrics["sq_rel"],
@@ -1025,6 +1118,7 @@ def run():
                     [
                         idx,
                         "photometric",
+                        valid_pixels_after_photo,
                         metrics["mae"],
                         metrics["abs_rel"],
                         metrics["sq_rel"],
@@ -1259,10 +1353,14 @@ def run():
         if idx not in all_optimized_depths:
             continue
 
-        save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}")
-        save_each_normal_dir = os.path.join(
-            config.NORMAL_IMAGE_DIR, f"normal_{idx:04d}"
-        )
+        # ファイル名ベースのフォルダ名を取得（all_pairs_dataから）
+        if idx in all_pairs_data:
+            _, _, left_path, _, _ = all_pairs_data[idx]
+            filename_stem = Path(left_path).stem
+        else:
+            filename_stem = f"depth_{idx:04d}"
+        save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, filename_stem)
+        save_each_normal_dir = os.path.join(config.NORMAL_IMAGE_DIR, filename_stem)
         gt_depth = all_gt_depths.get(idx, None)
         photometrically_filtered_depth = all_optimized_depths[idx]
         ref_pose = all_poses[idx]
@@ -1322,6 +1420,7 @@ def run():
                     [
                         idx,
                         "geometric",
+                        valid_pixels_after_geo,
                         metrics["mae"],
                         metrics["abs_rel"],
                         metrics["sq_rel"],
@@ -1357,72 +1456,35 @@ def run():
             logging.warning(f"Geometric consistency filtering skipped for {idx}: {e}")
             all_geometrically_filtered_depths[idx] = photometrically_filtered_depth
 
-    # --- ステップ2.5: すべてのエラーマップを統一スケールで再保存 ---
-    # 各画像ごとに、その画像のすべてのステージ/イテレーションの誤差を集めて統一スケールを計算
+    # --- ステップ2.5: 深度マップをEXR形式で保存（絶対的な深度値が読み取れる形式） ---
     if all_stage_depths:
         logging.info(
-            "\n--- Step 2.5: Re-saving all error maps with unified scale (per image) ---"
+            "\n--- Step 2.5: Saving depth maps as EXR (absolute depth values) ---"
         )
         for idx in target_indices:
             if idx not in all_stage_depths:
                 continue
-            if idx not in all_gt_depths:
-                continue
 
             stage_depths = all_stage_depths[idx]
-            gt_depth = all_gt_depths[idx]
             save_each_depth_dir = stage_depths.get("save_dir")
 
             if save_each_depth_dir is None:
                 continue
 
-            # すべてのステージの誤差を収集してパーセンタイルを計算（外れ値に引っ張られないように）
-            all_errors = []
-            for stage_name, depth in stage_depths.items():
-                if stage_name == "save_dir":
-                    continue
-                valid_mask = np.isfinite(depth) & np.isfinite(gt_depth) & (gt_depth > 0)
-                if np.any(valid_mask):
-                    errors = np.abs(depth[valid_mask] - gt_depth[valid_mask])
-                    all_errors.extend(errors.tolist())
-
-            if all_errors:
-                # 95パーセンタイルを使用（外れ値に引っ張られない）
-                error_percentile = getattr(config, "ERROR_MAP_PERCENTILE", 95.0)
-                max_error_all = float(np.percentile(all_errors, error_percentile))
-                # マージンを追加（5%）
-                max_error_all = max_error_all * 1.05
-                # 最大誤差も記録（参考用）
-                max_error_actual = float(np.max(all_errors))
-            else:
-                max_error_all = 1.0
-                max_error_actual = 1.0
-
-            if max_error_all < 0.01:  # 最小値の設定
-                max_error_all = 1.0
-
-            logging.info(
-                f"Re-saving error maps for image {idx} with unified scale "
-                f"(percentile={getattr(config, 'ERROR_MAP_PERCENTILE', 95.0):.1f}%: {max_error_all:.4f} m, "
-                f"max: {max_error_actual:.4f} m)"
-            )
-
-            # 各ステージのエラーマップを統一スケールで保存
+            # 各ステージの深度マップをEXR形式で保存
             stage_map = {
-                "initial": "error_map_initial.png",
-                "optimized": "error_map_optimized.png",
-                "photometric": "error_map_photometric.png",
-                "geometric": "error_map_geometric.png",
+                "initial": "depth_initial.exr",
+                "optimized": "depth_optimized.exr",
+                "photometric": "depth_photometric.exr",
+                "geometric": "depth_geometric.exr",
             }
             for stage_name, depth in stage_depths.items():
                 if stage_name == "save_dir":
                     continue
                 if stage_name in stage_map:
-                    save_error_map_as_image(
+                    save_depth_map_as_exr(
                         depth,
-                        gt_depth,
                         os.path.join(save_each_depth_dir, stage_map[stage_name]),
-                        max_error=max_error_all,
                     )
 
     # --- ステップ3: 点群への変換と統合 ---
@@ -1458,8 +1520,14 @@ def run():
         if world_ortho_fuser is not None:
             fused_world_ortho = world_ortho_fuser.add_world_points(world_points)
             if config.DEBUG_SAVE_DEPTH_MAPS and fused_world_ortho is not None:
+                # ファイル名ベースのフォルダ名を取得（all_pairs_dataから）
+                if idx in all_pairs_data:
+                    _, _, left_path, _, _ = all_pairs_data[idx]
+                    filename_stem = Path(left_path).stem
+                else:
+                    filename_stem = f"depth_{idx:04d}"
                 save_each_depth_dir = os.path.join(
-                    config.DEPTH_IMAGE_DIR, f"depth_{idx:04d}"
+                    config.DEPTH_IMAGE_DIR, filename_stem
                 )
                 world_ortho_fuser.save_fused_depth(
                     os.path.join(
@@ -1558,6 +1626,10 @@ def run():
             geometric_error_threshold = getattr(
                 config, "MULTI_VIEW_GEOMETRIC_ERROR_THRESHOLD", 0.05
             )
+            # フィルタリング前の点群をバックアップ
+            original_pts = merged_pts.copy()
+            original_cols = merged_cols.copy()
+
             merged_pts, merged_cols = (
                 point_cloud_integrator.filter_points_by_multi_view_visibility(
                     merged_pts,
@@ -1569,11 +1641,21 @@ def run():
                 )
             )
 
+            # フィルタリング後にポイントが0になった場合、フィルタリング前の点群を使用
+            if len(merged_pts) == 0:
+                logging.warning(
+                    "Multi-view visibility filtering removed all points. Using unfiltered point cloud."
+                )
+                merged_pts = original_pts
+                merged_cols = original_cols
+
         final_pcd = point_cloud_integrator.process_and_save_final_point_cloud(
             merged_pts, merged_cols, config.POINT_CLOUD_FILE_PATH
         )
         if final_pcd and len(final_pcd.points) > 0:
-            if getattr(config, "STREAMING_VIEWER", False):
+            # 点群表示の制御（デフォルトは表示しない）
+            show_point_cloud = getattr(config, "SHOW_POINT_CLOUD", False)
+            if getattr(config, "STREAMING_VIEWER", False) and show_point_cloud:
                 try:
                     live_pcd.points = o3d.utility.Vector3dVector(
                         np.asarray(final_pcd.points)
@@ -1589,11 +1671,15 @@ def run():
                     vis.destroy_window()
                 except Exception as e:
                     logging.warning(f"Could not finalize streaming window: {e}")
-            else:
+            elif show_point_cloud:
                 logging.info(
                     "Showing final integrated point cloud. Close the window to exit."
                 )
                 o3d.visualization.draw_geometries([final_pcd])
+            else:
+                logging.info(
+                    f"Point cloud saved to {config.POINT_CLOUD_FILE_PATH} (display disabled)"
+                )
     else:
         logging.warning("No point clouds were generated.")
 
