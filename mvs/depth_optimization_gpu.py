@@ -2124,7 +2124,7 @@ class DepthOptimization:
         except Exception as e:
             logging.debug(f"Skip plotting GPU iteration time: {e}")
 
-        return final_depth_map
+        return final_depth_map, iter_times_gpu
 
     def refine_depth_with_patchmatch_vanilla(
         self, ref_image, ref_pose, neighbor_views_data, ref_idx=0, filename_stem=None

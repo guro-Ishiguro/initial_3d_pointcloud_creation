@@ -26,7 +26,9 @@ from logging_setup import setup_logging  # noqa: E402
 from point_cloud_integrator import PointCloudIntegrator  # noqa: E402
 from scipy.spatial.transform import Rotation  # noqa: E402
 from utils import (  # noqa: E402
+    append_to_csv,
     clear_folder,
+    initialize_csv,
     parse_arguments,
     read_exr_depth,
     save_depth_map_as_exr,
@@ -883,6 +885,14 @@ def run():
         os.makedirs(save_each_normal_dir, exist_ok=True)
         clear_folder(save_each_normal_dir)
 
+        # time.csvを初期化
+        csv_subdir = os.path.join(config.CSV_DIR, filename_stem)
+        os.makedirs(csv_subdir, exist_ok=True)
+        time_csv_path = os.path.join(csv_subdir, "time.csv")
+        if os.path.exists(time_csv_path):
+            os.remove(time_csv_path)
+        initialize_csv(time_csv_path, ["stage", "time"])
+
         # --- Ground Truth Depthの読み込み ---
         # depth_######.exr と ######.exr の両方に対応
         gt_depth_path = os.path.join(
@@ -983,7 +993,7 @@ def run():
 
             # PatchMatchを実行（全体計測とイテレーション内計測は関数側で行う）
             refine_start = time.time()
-            optimized_depth = depth_optimization.refine_depth_with_patchmatch(
+            optimized_depth, iter_times_gpu = depth_optimization.refine_depth_with_patchmatch(
                 initial_depth=initial_depth,
                 initial_depth_error=d_cost,
                 ref_image=li_rgb,
@@ -997,6 +1007,9 @@ def run():
             logging.info(
                 f"[Timing] refine_depth_with_patchmatch total time: {refine_elapsed:.2f}s for index {idx}"
             )
+            # 各イテレーションの時間をtime.csvに記録
+            for iter_num, iter_time in enumerate(iter_times_gpu, 1):
+                append_to_csv(time_csv_path, [f"iter_{iter_num}", f"{iter_time:.6f}"])
             # optimized_depth = depth_optimization.refine_depth_with_patchmatch_vanilla(
             #     ref_image=li_rgb,
             #     ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
@@ -1011,6 +1024,7 @@ def run():
             )
 
             # 光度一貫性フィルタリング
+            photo_start = time.time()
             photometrically_filtered_depth = (
                 depth_optimization.filter_depth_map_by_photometric_consistency(
                     optimized_depth,
@@ -1019,6 +1033,8 @@ def run():
                     neighbor_views_data,
                 )
             )
+            photo_elapsed = time.time() - photo_start
+            append_to_csv(time_csv_path, ["photometric", f"{photo_elapsed:.6f}"])
             if getattr(config, "DEBUG_SAVE_NORMAL_MAPS", False):
                 normals_photo = _compute_normals_from_depth(
                     photometrically_filtered_depth, config.K
@@ -1296,6 +1312,15 @@ def run():
             valid_pixels_after_photo = np.sum(
                 np.isfinite(photometrically_filtered_depth)
             )
+            # time.csvのパスを取得
+            if idx in all_pairs_data:
+                _, _, left_path, _, _ = all_pairs_data[idx]
+                filename_stem = Path(left_path).stem
+            else:
+                filename_stem = f"depth_{idx:04d}"
+            csv_subdir = os.path.join(config.CSV_DIR, filename_stem)
+            time_csv_path = os.path.join(csv_subdir, "time.csv")
+            geo_start = time.time()
             geometrically_filtered_depth = (
                 depth_optimization.filter_depth_map_by_geometric_consistency(
                     ref_depth_map=photometrically_filtered_depth,
@@ -1304,6 +1329,8 @@ def run():
                     all_optimized_depths=all_optimized_depths,
                 )
             )
+            geo_elapsed = time.time() - geo_start
+            append_to_csv(time_csv_path, ["geometric", f"{geo_elapsed:.6f}"])
             all_geometrically_filtered_depths[idx] = geometrically_filtered_depth
 
             # 幾何学フィルタリング後の深度の有効ピクセル数をログ出力
@@ -1398,12 +1425,24 @@ def run():
         R_mat = ref_pose["R"]
         T_pos = ref_pose["T"]
 
+        # time.csvのパスを取得
+        if idx in all_pairs_data:
+            _, _, left_path, _, _ = all_pairs_data[idx]
+            filename_stem = Path(left_path).stem
+        else:
+            filename_stem = f"depth_{idx:04d}"
+        csv_subdir = os.path.join(config.CSV_DIR, filename_stem)
+        time_csv_path = os.path.join(csv_subdir, "time.csv")
+
         # 透視投影深度マップから直接ワールド座標の点群に変換（オルソ投影をスキップ）
+        pointcloud_start = time.time()
         world_points, world_colors = depth_estimator.depth_to_world(
             geometrically_filtered_depth, li_rgb, config.K, R_mat, T_pos
         )
         merged_pts_list.append(world_points)
         merged_cols_list.append(world_colors)
+        pointcloud_elapsed = time.time() - pointcloud_start
+        append_to_csv(time_csv_path, ["pointcloud", f"{pointcloud_elapsed:.6f}"])
 
         # 逐次深度融合
         if world_ortho_fuser is not None:

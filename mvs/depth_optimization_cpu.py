@@ -1169,7 +1169,7 @@ class DepthOptimization:
         except Exception as e:
             logging.warning(f"Could not save CPU iteration time plot: {e}")
         final_depth_map[~propagation_mask] = np.nan
-        return final_depth_map
+        return final_depth_map, iter_times
 
     def refine_depth_with_patchmatch_vanilla(
         self, ref_image, ref_pose, neighbor_views_data, ref_idx=0, filename_stem=None
