@@ -1232,11 +1232,14 @@ def run():
         neighbor_frames = _neighbors_for_ref(idx)
         _log_selected_neighbors(idx, neighbor_frames)
         for fr in neighbor_frames:
-            # For Step 2, require that neighbor has an optimized depth if it's a local frame.
-            if neighbor_pool_mode == "local":
-                ni = int(fr.get("local_idx", fr.get("id", -1)))
-                if ni not in all_optimized_depths:
-                    continue
+            # For Step 2, require that neighbor has an optimized depth.
+            # This check is necessary for both local and global_csv modes:
+            # - local: only neighbors from the same dataset
+            # - global_csv: may include neighbors from other datasets, but we can only use
+            #   those that have been processed (exist in all_optimized_depths)
+            ni = int(fr.get("local_idx", fr.get("id", -1)))
+            if ni not in all_optimized_depths:
+                continue
             nv = _get_neighbor_view(idx, fr)
             if nv is not None:
                 neighbor_views_data.append(nv)
