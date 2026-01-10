@@ -403,11 +403,18 @@ def append_to_csv(file_path, data_row):
     CSVファイルに新しい行を追記する。
     """
     try:
+        # ディレクトリが存在するか確認し、存在しない場合は作成
+        dir_path = os.path.dirname(file_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
         with open(file_path, "a", newline="") as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(data_row)
+        logging.debug(f"Appended to CSV: {file_path} - {data_row}")
     except IOError as e:
         logging.error(f"Could not write to CSV file {file_path}: {e}")
+    except Exception as e:
+        logging.error(f"Unexpected error writing to CSV file {file_path}: {e}")
 
 
 def write_stage_metrics_to_csv(

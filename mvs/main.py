@@ -733,11 +733,11 @@ def run():
                         time_csv_path, [f"iter_{iter_num}", f"{iter_time:.6f}"]
                     )
                 logging.info(
-                    f"Saved {len(iter_times_gpu)} iteration times to {time_csv_path}"
+                    f"[{filename_stem}] {len(iter_times_gpu)}個のイテレーション時間をtime.csvに保存しました: {time_csv_path}"
                 )
             else:
                 logging.warning(
-                    f"iter_times_gpu is None or empty for index {idx}, skipping iteration time recording"
+                    f"[{filename_stem}] iter_times_gpu is None or empty for index {idx}, skipping iteration time recording"
                 )
 
             # 最適化後の深度の有効ピクセル数をログ出力
@@ -761,7 +761,7 @@ def run():
             logging.info(f"[{filename_stem}] 光度フィルタリング完了 (経過時間: {photo_elapsed:.2f}秒)")
             append_to_csv(time_csv_path, ["photometric", f"{photo_elapsed:.6f}"])
             logging.debug(
-                f"Saved photometric time ({photo_elapsed:.6f}s) to {time_csv_path}"
+                f"[{filename_stem}] 光度フィルタリング時間をtime.csvに保存しました: {time_csv_path}"
             )
             if getattr(config, "DEBUG_SAVE_NORMAL_MAPS", False):
                 normals_photo = _compute_normals_from_depth(
