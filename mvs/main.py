@@ -555,9 +555,12 @@ def run():
         }
 
     # --- ステップ1: 各ビューの深度マップを最適化 & 光度フィルタリング ---
-    logging.info(
-        "\n--- Step 1: Optimizing depth maps and applying photometric filter ---"
-    )
+    logging.info("")
+    logging.info("=" * 80)
+    logging.info("ステップ1: 各ビューの深度マップを最適化 & 光度フィルタリング")
+    logging.info(f"処理対象: {len(target_indices)}個の画像ペア")
+    logging.info("=" * 80)
+    logging.info("")
     all_optimized_depths = {}
     # 各ステージの深度マップを保存（エラーマップの統一スケール用）
     all_stage_depths = {}
@@ -577,12 +580,18 @@ def run():
             )
             continue
         _, T_pos, left_path, right_path, R_mat = all_pairs_data[idx]
-        logging.info(f"Optimizing depth map for image pair {idx}...")
-
-        view_metrics = {"image_index": idx}
-
+        
         # ファイル名（拡張子なし）を取得してフォルダ名に使用
         filename_stem = Path(left_path).stem
+        
+        # 処理開始のログ（区切り線付き）
+        logging.info("=" * 80)
+        logging.info(f"処理開始: 画像ペア {idx} (ファイル: {filename_stem})")
+        logging.info(f"  左画像: {left_path}")
+        logging.info(f"  右画像: {right_path}")
+        logging.info("=" * 80)
+
+        view_metrics = {"image_index": idx}
         save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, filename_stem)
         os.makedirs(save_each_depth_dir, exist_ok=True)
         clear_folder(save_each_depth_dir)
@@ -635,12 +644,15 @@ def run():
             ri_gray = cv2.cvtColor(ri_bgr, cv2.COLOR_BGR2GRAY)
 
             # 初期深度マップと深度誤差コストを計算
+            logging.info("-" * 80)
+            logging.info(f"[{filename_stem}] ステップ1: 初期深度マップの計算")
+            logging.info("-" * 80)
             start_time_initial_depth = time.time()
             disp = image_processor.create_disparity(li_gray, ri_gray)
             initial_depth = depth_estimator.disparity_to_depth(disp)
             end_time_initial_depth = time.time()
             logging.info(
-                f"Initial depth calculation time for image {idx}: {end_time_initial_depth - start_time_initial_depth:.4f} seconds"
+                f"[{filename_stem}] 初期深度計算完了: {end_time_initial_depth - start_time_initial_depth:.4f}秒"
             )
 
             save_disparity_map_with_colorbar(
@@ -693,6 +705,9 @@ def run():
                     neighbor_views_data.append(nv)
 
             # PatchMatchを実行（全体計測とイテレーション内計測は関数側で行う）
+            logging.info("-" * 80)
+            logging.info(f"[{filename_stem}] ステップ2: PatchMatch MVS深度最適化")
+            logging.info("-" * 80)
             refine_start = time.time()
             optimized_depth, iter_times_gpu = (
                 depth_optimization.refine_depth_with_patchmatch(
@@ -708,7 +723,7 @@ def run():
             )
             refine_elapsed = time.time() - refine_start
             logging.info(
-                f"[Timing] refine_depth_with_patchmatch total time: {refine_elapsed:.2f}s for index {idx}"
+                f"[{filename_stem}] PatchMatch最適化完了: {refine_elapsed:.2f}秒"
             )
             # 各イテレーションの時間をtime.csvに記録
             if iter_times_gpu is not None and len(iter_times_gpu) > 0:
@@ -729,6 +744,9 @@ def run():
             logging.info(f"[Optimized Depth] Valid pixels: {valid_pixels_before_photo}")
 
             # 光度一貫性フィルタリング
+            logging.info("-" * 80)
+            logging.info(f"[{filename_stem}] ステップ3: 光度一貫性フィルタリング")
+            logging.info("-" * 80)
             photo_start = time.time()
             photometrically_filtered_depth = (
                 depth_optimization.filter_depth_map_by_photometric_consistency(
@@ -739,6 +757,7 @@ def run():
                 )
             )
             photo_elapsed = time.time() - photo_start
+            logging.info(f"[{filename_stem}] 光度フィルタリング完了: {photo_elapsed:.4f}秒")
             append_to_csv(time_csv_path, ["photometric", f"{photo_elapsed:.6f}"])
             logging.debug(
                 f"Saved photometric time ({photo_elapsed:.6f}s) to {time_csv_path}"
@@ -790,7 +809,11 @@ def run():
                     "photometric"
                 ] = photometrically_filtered_depth.copy()
                 all_stage_depths[idx]["save_dir"] = save_each_depth_dir
-            logging.info(f"Stored photometrically filtered depth map for index {idx}.")
+            logging.info(f"[{filename_stem}] 深度マップを保存しました。")
+            logging.info("=" * 80)
+            logging.info(f"処理完了: 画像ペア {idx} (ファイル: {filename_stem})")
+            logging.info("=" * 80)
+            logging.info("")
 
             # --- 幾何学的一貫性フィルタリングは全画像処理後に実行（コメントアウト） ---
             # try:
@@ -909,9 +932,12 @@ def run():
         evaluation_results.append(view_metrics)
 
     # --- ステップ2: 全画像の深度マップが揃った状態で幾何学的一貫性フィルタリングを実行 ---
-    logging.info(
-        "\n--- Step 2: Applying geometric consistency filtering to all depth maps ---"
-    )
+    logging.info("")
+    logging.info("=" * 80)
+    logging.info("ステップ2: 幾何学的一貫性フィルタリング")
+    logging.info(f"処理対象: {len(all_optimized_depths)}個の深度マップ")
+    logging.info("=" * 80)
+    logging.info("")
     all_geometrically_filtered_depths = {}
     for idx in target_indices:
         if idx not in all_optimized_depths:
@@ -955,6 +981,7 @@ def run():
                 filename_stem = f"depth_{idx:04d}"
             csv_subdir = os.path.join(config.CSV_DIR, filename_stem)
             time_csv_path = os.path.join(csv_subdir, "time.csv")
+            logging.info(f"[{filename_stem}] 幾何学的一貫性フィルタリングを実行中...")
             geo_start = time.time()
             geometrically_filtered_depth = (
                 depth_optimization.filter_depth_map_by_geometric_consistency(
@@ -966,6 +993,7 @@ def run():
             )
             geo_elapsed = time.time() - geo_start
             append_to_csv(time_csv_path, ["geometric", f"{geo_elapsed:.6f}"])
+            logging.info(f"[{filename_stem}] 幾何学的一貫性フィルタリング完了: {geo_elapsed:.4f}秒")
             logging.debug(
                 f"Saved geometric time ({geo_elapsed:.6f}s) to {time_csv_path}"
             )
@@ -975,8 +1003,8 @@ def run():
             valid_pixels_after_geo = np.sum(np.isfinite(geometrically_filtered_depth))
             pixels_filtered_geo = valid_pixels_after_photo - valid_pixels_after_geo
             logging.info(
-                f"[Geometric Filtered {idx}] Valid pixels: {valid_pixels_after_geo} "
-                f"({pixels_filtered_geo} filtered, {pixels_filtered_geo/valid_pixels_after_photo*100:.2f}%)"
+                f"[{filename_stem}] 幾何学フィルタリング後: 有効ピクセル数={valid_pixels_after_geo} "
+                f"(フィルタリング={pixels_filtered_geo}ピクセル, {pixels_filtered_geo/valid_pixels_after_photo*100:.2f}%)"
             )
             # 幾何学フィルタリング後の深度マップも保存
             if idx in all_stage_depths:
@@ -1008,9 +1036,12 @@ def run():
 
     # --- ステップ2.5: 深度マップをEXR形式で保存（絶対的な深度値が読み取れる形式） ---
     if all_stage_depths:
-        logging.info(
-            "\n--- Step 2.5: Saving depth maps as EXR (absolute depth values) ---"
-        )
+        logging.info("")
+        logging.info("=" * 80)
+        logging.info("ステップ2.5: 深度マップをEXR形式で保存")
+        logging.info(f"保存対象: {len(all_stage_depths)}個の深度マップ")
+        logging.info("=" * 80)
+        logging.info("")
         for idx in target_indices:
             if idx not in all_stage_depths:
                 continue
@@ -1038,9 +1069,12 @@ def run():
                     )
 
     # --- ステップ3: 点群への変換と統合 ---
-    logging.info(
-        "\n--- Step 3: Converting depth maps to point clouds and integrating ---"
-    )
+    logging.info("")
+    logging.info("=" * 80)
+    logging.info("ステップ3: 点群への変換と統合")
+    logging.info(f"統合対象: {len(all_optimized_depths)}個の深度マップ")
+    logging.info("=" * 80)
+    logging.info("")
     merged_pts_list, merged_cols_list = [], []
     last_integ_pts, last_integ_cols = None, None
 
@@ -1064,6 +1098,7 @@ def run():
         time_csv_path = os.path.join(csv_subdir, "time.csv")
 
         # 透視投影深度マップから直接ワールド座標の点群に変換（オルソ投影をスキップ）
+        logging.info(f"[{filename_stem}] 点群への変換中...")
         pointcloud_start = time.time()
         world_points, world_colors = depth_estimator.depth_to_world(
             geometrically_filtered_depth, li_rgb, config.K, R_mat, T_pos
@@ -1072,17 +1107,23 @@ def run():
         merged_cols_list.append(world_colors)
         pointcloud_elapsed = time.time() - pointcloud_start
         append_to_csv(time_csv_path, ["pointcloud", f"{pointcloud_elapsed:.6f}"])
-        logging.debug(
-            f"Saved pointcloud time ({pointcloud_elapsed:.6f}s) to {time_csv_path}"
-        )
+        logging.info(f"[{filename_stem}] 点群変換完了: {pointcloud_elapsed:.4f}秒")
 
+        logging.info(f"[{filename_stem}] 点群統合中...")
+        logging.info(f"[{filename_stem}] 点群統合中...")
         integ_pts, integ_cols = point_cloud_integrator.integrate_depth_maps_median(
             merged_pts_list, merged_cols_list, voxel_size=0.1
         )
         last_integ_pts, last_integ_cols = integ_pts, integ_cols
+        logging.info(f"[{filename_stem}] 点群統合完了: {len(integ_pts)}点")
+        logging.info(f"[{filename_stem}] 点群統合完了: {len(integ_pts)}点")
 
     # --- 最終保存 ---
-    logging.info("\n--- Final: Saving the last integrated point cloud ---")
+    logging.info("")
+    logging.info("=" * 80)
+    logging.info("最終ステップ: 統合された点群を保存")
+    logging.info("=" * 80)
+    logging.info("")
     if merged_pts_list:
         merged_pts = (
             last_integ_pts if last_integ_pts is not None else np.vstack(merged_pts_list)
@@ -1095,9 +1136,9 @@ def run():
 
         # 複数ビュー可視性フィルタリング（デフォルト: 有効）
         if getattr(config, "MULTI_VIEW_VISIBILITY_FILTER_ENABLED", True):
-            logging.info(
-                "\n--- Applying multi-view visibility filtering to point cloud ---"
-            )
+            logging.info("-" * 80)
+            logging.info("複数ビュー可視性フィルタリングを適用中...")
+            logging.info("-" * 80)
             visibility_threshold = getattr(config, "MULTI_VIEW_VISIBILITY_THRESHOLD", 2)
             geometric_error_threshold = getattr(
                 config, "MULTI_VIEW_GEOMETRIC_ERROR_THRESHOLD", 0.05

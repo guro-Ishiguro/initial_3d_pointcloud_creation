@@ -1368,7 +1368,7 @@ class DepthOptimization:
         filename_stem=None,
     ):
         logging.info(
-            "Starting PatchMatch MVS depth refinement using checkerboard propagation..."
+            f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] PatchMatch MVS深度最適化を開始..."
         )
 
         h, w = initial_depth.shape
@@ -1409,7 +1409,9 @@ class DepthOptimization:
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
         
         # 初期コストをGPUで計算（CPU版より高速）
-        logging.info("Computing initial cost map on GPU...")
+        logging.info("-" * 80)
+        logging.info(f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] 初期コストマップをGPUで計算中...")
+        logging.info("-" * 80)
         threadsperblock = (16, 16)
         blockspergrid_x = (w + threadsperblock[0] - 1) // threadsperblock[0]
         blockspergrid_y = (h + threadsperblock[1] - 1) // threadsperblock[1]
@@ -1452,7 +1454,7 @@ class DepthOptimization:
         
         # 結果をホストにコピー
         cost_map = d_cost_map.copy_to_host()
-        logging.info("Initial cost map computation completed on GPU.")
+        logging.info(f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] 初期コストマップ計算完了（GPU）")
 
         # Early-stop state will be managed on-the-fly without predeclared thresholds
 
@@ -1505,6 +1507,7 @@ class DepthOptimization:
                 src_R,
                 src_T,
                 ref_idx=ref_idx,
+                filename_stem=filename_stem,
                 save_per_iter=config.DEBUG_SAVE_DEPTH_MAPS,
                 save_dir=save_each_depth_dir,
                 save_normals_per_iter=self.config.DEBUG_SAVE_NORMAL_MAPS,
@@ -1742,6 +1745,7 @@ class DepthOptimization:
         src_R,
         src_T,
         ref_idx=0,
+        filename_stem=None,
         save_per_iter=False,
         save_dir=None,
         save_normals_per_iter=False,
@@ -1791,7 +1795,7 @@ class DepthOptimization:
                 first_iter_start_time = iter_start_time
 
             logging.info(
-                f"PatchMatch GPU Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
+                f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] PatchMatch GPU イテレーション {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
             )
 
             # Propagation (checkerboard)
