@@ -15,7 +15,7 @@ import open3d as o3d
 matplotlib.use("Agg")  # headless save
 import matplotlib.pyplot as plt  # noqa: E402
 from depth_estimation import DepthEstimator  # noqa: E402
-from depth_optimization import DepthOptimization, is_gpu_enabled  # noqa: E402
+from depth_optimization import DepthOptimization  # noqa: E402
 from disparity_estimation import ImageProcessor  # noqa: E402
 from logging_setup import setup_logging  # noqa: E402
 from point_cloud_integrator import PointCloudIntegrator  # noqa: E402
@@ -409,7 +409,6 @@ def run():
     image_processor = ImageProcessor(config)
     depth_estimator = DepthEstimator(config)
     depth_optimization = DepthOptimization(config)
-    logging.info(f"DepthOptimization backend: {'GPU' if is_gpu_enabled() else 'CPU'}")
     point_cloud_integrator = PointCloudIntegrator(config)
 
     os.makedirs(config.POINT_CLOUD_DIR, exist_ok=True)

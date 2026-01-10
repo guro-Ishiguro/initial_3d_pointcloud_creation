@@ -1,14 +1,7 @@
 env:
-  # logging
-  PM_LOG_LEVEL: "INFO"
-
-  # propagation neighbors (4 or 8)
-  PM_PROP_DIRS: "4"
-
-  # priority max sweeps per bin
-  PM_PRIORITY_SWEEPS: "4"
-
-  # gpu warmup (1/0)
+  # GPU warmup (1/0)
+  # 1: Enable GPU warmup to hide initial compile latency
+  # 0: Disable GPU warmup
   PM_GPU_WARMUP: "1"
 
 # NOTE: MVS の詳細設定は app/mvs.yaml を唯一の情報源とします

@@ -44,14 +44,6 @@ def apply_env_overrides(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     # 3) Ensure defaults for key variables if still unset
     effective: Dict[str, Any] = {}
-    effective["PM_LOG_LEVEL"] = os.getenv("PM_LOG_LEVEL", "INFO")
-    os.environ["PM_LOG_LEVEL"] = effective["PM_LOG_LEVEL"]
-
-    effective["PM_PROP_DIRS"] = os.getenv("PM_PROP_DIRS", "4")
-    os.environ["PM_PROP_DIRS"] = effective["PM_PROP_DIRS"]
-
-    effective["PM_PRIORITY_SWEEPS"] = os.getenv("PM_PRIORITY_SWEEPS", "8")
-    os.environ["PM_PRIORITY_SWEEPS"] = effective["PM_PRIORITY_SWEEPS"]
 
     # bubble up some common dataset selectors
     if "DATA_TYPE" in os.environ:
