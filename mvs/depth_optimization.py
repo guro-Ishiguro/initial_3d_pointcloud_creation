@@ -843,7 +843,6 @@ def _propagate_bucket_push4_cuda(
                 top_k_costs,
                 adaptive_weight_sigma_color,
                 zncc_epsilon,
-                np.int32(config.USE_MEDIAN_TOP_K),
             )
 
             if new_cost < cost_map[nr, nc]:
@@ -1207,7 +1206,6 @@ def _random_search_cuda(
         top_k_costs,
         adaptive_weight_sigma_color,
         zncc_epsilon,
-        np.int32(config.USE_MEDIAN_TOP_K),
     )
     if new_cost < cost_map[r, c]:
         depth_map[r, c] = d_new

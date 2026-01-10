@@ -456,28 +456,8 @@ def run():
     except Exception as e:
         logging.warning(f"Failed to save selected pose plot: {e}")
 
-    # --- Target selection (name-free, supports "selected order" dataset ordinal) ---
-    # DATASET_ORDINAL is 1-based and injected by app/cli.py in multi-dataset runs.
+    # --- Target selection ---
     requested = None
-    target_dataset_ordinal = getattr(config, "TARGET_DATASET_ORDINAL", None)
-    if target_dataset_ordinal is not None:
-        try:
-            target_dataset_ordinal = int(target_dataset_ordinal)
-        except Exception:
-            target_dataset_ordinal = None
-
-    if target_dataset_ordinal is not None:
-        try:
-            current_ordinal = int(os.getenv("DATASET_ORDINAL", "1"))
-        except Exception:
-            current_ordinal = 1
-        if current_ordinal != target_dataset_ordinal:
-            # Skip datasets not matching the requested ordinal (exit 0).
-            logging.info(
-                f"Skipping this dataset (DATASET_ORDINAL={current_ordinal}) because TARGET_DATASET_ORDINAL={target_dataset_ordinal}"
-            )
-            return 0
-
     if hasattr(config, "TARGET_INDICES") and config.TARGET_INDICES:
         requested = list(config.TARGET_INDICES)
 
