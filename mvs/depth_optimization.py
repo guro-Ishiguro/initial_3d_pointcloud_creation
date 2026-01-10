@@ -556,6 +556,54 @@ def _evaluate_cost_jit(
     return np.median(costs[:top_k])
 
 
+@njit(parallel=True, fastmath=True)
+def _initialize_cost_map_jit(
+    cost_map,
+    depth_map,
+    normal_map,
+    propagation_mask,
+    patch_size,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
+    top_k_costs,
+    adaptive_weight_sigma_color,
+    zncc_epsilon,
+):
+    """
+    全ピクセルに対して並列に初期コストを計算する
+    """
+    h, w = depth_map.shape
+    for r in prange(h):
+        for c in range(w):
+            if propagation_mask[r, c] and np.isfinite(depth_map[r, c]):
+                cost_map[r, c] = _evaluate_cost_jit(
+                    r,
+                    c,
+                    depth_map[r, c],
+                    normal_map[r, c, 0],
+                    normal_map[r, c, 1],
+                    normal_map[r, c, 2],
+                    patch_size,
+                    ref_image_gray,
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_images_gray,
+                    src_K,
+                    src_R,
+                    src_T,
+                    top_k_costs,
+                    adaptive_weight_sigma_color,
+                    zncc_epsilon,
+                )
+
+
 @cuda.jit
 def _propagate_spatial_one_color_cuda(
     depth_map,
@@ -634,136 +682,11 @@ def _propagate_spatial_one_color_cuda(
 
 
 @cuda.jit
-def _propagate_bucket_one_bin_cuda(
+def _initialize_cost_map_cuda(
     depth_map,
     normal_map,
     cost_map,
     propagation_mask,
-    bin_rs,
-    bin_cs,
-    patch_size,
-    top_k_costs,
-    adaptive_weight_sigma_color,
-    ref_image_gray,
-    ref_pose_K,
-    ref_pose_R,
-    ref_pose_T,
-    src_images_gray,
-    src_K,
-    src_R,
-    src_T,
-):
-    start = cuda.grid(1)
-    stride = cuda.gridsize(1)
-    n = bin_rs.shape[0]
-    for idx in range(start, n, stride):
-        r = int(bin_rs[idx])
-        c = int(bin_cs[idx])
-        h, w = depth_map.shape
-        if not (0 <= r < h and 0 <= c < w):
-            continue
-        if not propagation_mask[r, c]:
-            continue
-
-    # This kernel is now unused (kept for reference). See push-directional kernel below.
-    return
-
-
-@cuda.jit
-def _propagate_bucket_push_dir_cuda(
-    depth_map,
-    normal_map,
-    cost_map,
-    propagation_mask,
-    bin_rs,
-    bin_cs,
-    dir_code,
-    patch_size,
-    top_k_costs,
-    adaptive_weight_sigma_color,
-    zncc_epsilon,
-    ref_image_gray,
-    ref_pose_K,
-    ref_pose_R,
-    ref_pose_T,
-    src_images_gray,
-    src_K,
-    src_R,
-    src_T,
-    update_counter,
-):
-    start = cuda.grid(1)
-    stride = cuda.gridsize(1)
-    n = bin_rs.shape[0]
-    for idx in range(start, n, stride):
-        r = int(bin_rs[idx])
-        c = int(bin_cs[idx])
-        h, w = depth_map.shape
-        if not (0 <= r < h and 0 <= c < w):
-            continue
-        if not propagation_mask[r, c]:
-            continue
-
-        src_depth = depth_map[r, c]
-        if math.isnan(src_depth) or math.isinf(src_depth):
-            continue
-        src_normal = normal_map[r, c]
-
-        # 4-neighborhood: up, down, left, right
-        if dir_code == 0:
-            nr = r - 1
-            nc = c
-        elif dir_code == 1:
-            nr = r + 1
-            nc = c
-        elif dir_code == 2:
-            nr = r
-            nc = c - 1
-        else:
-            nr = r
-            nc = c + 1
-
-        if not (0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc]):
-            continue
-
-        new_cost = _evaluate_cost_cuda(
-            nr,
-            nc,
-            src_depth,
-            src_normal[0],
-            src_normal[1],
-            src_normal[2],
-            patch_size,
-            ref_image_gray,
-            ref_pose_K,
-            ref_pose_R,
-            ref_pose_T,
-            src_images_gray,
-            src_K,
-            src_R,
-            src_T,
-            top_k_costs,
-            adaptive_weight_sigma_color,
-            zncc_epsilon,
-        )
-
-        if new_cost < cost_map[nr, nc]:
-            depth_map[nr, nc] = src_depth
-            normal_map[nr, nc, 0] = src_normal[0]
-            normal_map[nr, nc, 1] = src_normal[1]
-            normal_map[nr, nc, 2] = src_normal[2]
-            cost_map[nr, nc] = new_cost
-            cuda.atomic.add(update_counter, 0, 1)
-
-
-@cuda.jit
-def _propagate_bucket_push4_cuda(
-    depth_map,
-    normal_map,
-    cost_map,
-    propagation_mask,
-    bin_rs,
-    bin_cs,
     patch_size,
     top_k_costs,
     adaptive_weight_sigma_color,
@@ -777,294 +700,42 @@ def _propagate_bucket_push4_cuda(
     src_R,
     src_T,
 ):
-    start = cuda.grid(1)
-    stride = cuda.gridsize(1)
-    n = bin_rs.shape[0]
-    for idx in range(start, n, stride):
-        r = int(bin_rs[idx])
-        c = int(bin_cs[idx])
-        h, w = depth_map.shape
-        if not (0 <= r < h and 0 <= c < w):
-            continue
-        if not propagation_mask[r, c]:
-            continue
-
-        src_depth = depth_map[r, c]
-        if math.isnan(src_depth) or math.isinf(src_depth):
-            continue
-        src_normal = normal_map[r, c]
-
-        # Four directions (checkerboard)
-        for d in range(4):
-            if d == 0:
-                nr = r - 1
-                nc = c
-            elif d == 1:
-                nr = r + 1
-                nc = c
-            elif d == 2:
-                nr = r
-                nc = c - 1
-            elif d == 3:
-                nr = r
-                nc = c + 1
-            elif d == 4:
-                nr = r - 1
-                nc = c - 1
-            elif d == 5:
-                nr = r - 1
-                nc = c + 1
-            elif d == 6:
-                nr = r + 1
-                nc = c - 1
-            else:
-                nr = r + 1
-                nc = c + 1
-
-            if not (0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc]):
-                continue
-
-            new_cost = _evaluate_cost_cuda(
-                nr,
-                nc,
-                src_depth,
-                src_normal[0],
-                src_normal[1],
-                src_normal[2],
-                patch_size,
-                ref_image_gray,
-                ref_pose_K,
-                ref_pose_R,
-                ref_pose_T,
-                src_images_gray,
-                src_K,
-                src_R,
-                src_T,
-                top_k_costs,
-                adaptive_weight_sigma_color,
-                zncc_epsilon,
-            )
-
-            if new_cost < cost_map[nr, nc]:
-                depth_map[nr, nc] = src_depth
-                normal_map[nr, nc, 0] = src_normal[0]
-                normal_map[nr, nc, 1] = src_normal[1]
-                normal_map[nr, nc, 2] = src_normal[2]
-                cost_map[nr, nc] = new_cost
-
-
-@njit(parallel=True, fastmath=True)
-def _propagate_spatial_one_color_jit(
-    depth_map,
-    normal_map,
-    cost_map,  # 更新対象のマップ
-    propagation_mask,
-    neighbors_dr,
-    neighbors_dc,  # 伝播方向 (NumPy配列に修正)
-    color,  # 対象の色
-    r_min,
-    r_max,
-    c_min,
-    c_max,  # 処理範囲
-    # パラメータ
-    patch_size,
-    top_k_costs,
-    adaptive_weight_sigma_color,
-    # 参照ビューのデータ
-    ref_image_gray,
-    ref_pose_K,
-    ref_pose_R,
-    ref_pose_T,
-    # ソースビューのデータ
-    src_images_gray,
-    src_K,
-    src_R,
-    src_T,
-):
     """
-    指定された範囲のチェッカーボードの一つの色（赤または黒）のピクセルに対して空間伝播を実行する。
+    GPUで全ピクセルに対して並列に初期コストを計算する
     """
+    c, r = cuda.grid(2)
     h, w = depth_map.shape
-    # 指定された範囲のピクセルを並列で処理
-    for r in prange(max(1, r_min), min(h - 1, r_max)):
-        for c in range(max(1, c_min), min(w - 1, c_max)):
-            if not propagation_mask[r, c]:
-                continue
 
-            # 対象の色（赤 or 黒）のピクセルのみを処理
-            if (r + c) % 2 != color:
-                continue
-
-            if math.isnan(depth_map[r, c]) or math.isinf(depth_map[r, c]):
-                continue
-
-            # 隣接ピクセルからより良い平面（深度と法線）を伝播させる
-            for i in range(len(neighbors_dr)):
-                dr = neighbors_dr[i]
-                dc = neighbors_dc[i]
-                nr, nc = r + dr, c + dc
-
-                # 隣接ピクセルもマスク内である必要がある
-                if not (0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc]):
-                    continue
-
-                neighbor_depth = depth_map[nr, nc]
-                if math.isnan(neighbor_depth) or math.isinf(neighbor_depth):
-                    continue
-
-                # 現在のピクセル(r, c)の位置で、隣接ピクセル(nr, nc)の平面を評価
-                neighbor_normal = normal_map[nr, nc]
-                new_cost = _evaluate_cost_jit(
-                    r,
-                    c,
-                    neighbor_depth,
-                    neighbor_normal[0],
-                    neighbor_normal[1],
-                    neighbor_normal[2],
-                    patch_size,
-                    ref_image_gray,
-                    ref_pose_K,
-                    ref_pose_R,
-                    ref_pose_T,
-                    src_images_gray,
-                    src_K,
-                    src_R,
-                    src_T,
-                    top_k_costs,
-                    adaptive_weight_sigma_color,
-                    np.float32(config.ZNCC_EPSILON),
-                )
-
-                # コストが改善されれば、現在のピクセルの平面を更新
-                if new_cost < cost_map[r, c]:
-                    depth_map[r, c] = neighbor_depth
-                    normal_map[r, c] = neighbor_normal
-                    cost_map[r, c] = new_cost
-
-
-@njit(parallel=True, fastmath=True)
-def _propagate_bucket_jit(
-    depth_map,
-    normal_map,
-    cost_map,
-    initial_depth_error,
-    propagation_mask,
-    num_bins,
-    patch_size,
-    top_k_costs,
-    adaptive_weight_sigma_color,
-    ref_image_gray,
-    ref_pose_K,
-    ref_pose_R,
-    ref_pose_T,
-    src_images_gray,
-    src_K,
-    src_R,
-    src_T,
-):
-    """
-    コストをビンに分割し、低コストのビンから優先的に並列伝播を実行する。
-    """
-    h, w = depth_map.shape
-    neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
-    neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
-
-    # --- 1. 有効なピクセルを抽出し、コストに基づいてビンに分類 ---
-    valid_pixels_coords = np.empty((h * w, 2), dtype=np.int32)
-    valid_pixels_costs = np.empty(h * w, dtype=np.float32)
-    valid_pixel_count = 0
-    for r in range(h):
-        for c in range(w):
-            cost = initial_depth_error[r, c]
-            if propagation_mask[r, c] and np.isfinite(cost):
-                valid_pixels_coords[valid_pixel_count, 0] = r
-                valid_pixels_coords[valid_pixel_count, 1] = c
-                valid_pixels_costs[valid_pixel_count] = cost
-                valid_pixel_count += 1
-
-    if valid_pixel_count == 0:
+    if r >= h or c >= w:
+        return
+    if not propagation_mask[r, c]:
+        return
+    d = depth_map[r, c]
+    if math.isnan(d) or math.isinf(d):
         return
 
-    # コストの最小値と最大値からビンの幅を計算
-    min_cost = np.inf
-    max_cost = -np.inf
-    for i in range(valid_pixel_count):
-        cost = valid_pixels_costs[i]
-        if cost < min_cost:
-            min_cost = cost
-        if cost > max_cost:
-            max_cost = cost
-
-    if max_cost - min_cost < 1e-6:
-        bin_width = 1.0
-        num_bins = 1
-    else:
-        bin_width = (max_cost - min_cost) / num_bins
-
-    # 各有効ピクセルがどのビンに属するかを計算
-    pixel_bin_indices = np.floor(
-        (valid_pixels_costs[:valid_pixel_count] - min_cost) / bin_width
-    ).astype(np.int32)
-    pixel_bin_indices[pixel_bin_indices >= num_bins] = num_bins - 1
-
-    # --- 2. バケット伝播ループ ---
-    # 優先度の高い（コストの低い）ビンから順番に処理
-    for bin_idx in range(num_bins):
-        # 現在のビンに属するピクセルを並列で処理
-        for i in prange(valid_pixel_count):
-            # このピクセルが現在の処理対象ビンに属しているかチェック
-            if pixel_bin_indices[i] != bin_idx:
-                continue
-
-            # 伝播元となるピクセル（source）の情報を取得
-            r_source, c_source = valid_pixels_coords[i]
-            source_depth = depth_map[r_source, c_source]
-            if math.isnan(source_depth) or math.isinf(source_depth):
-                continue
-            source_normal = normal_map[r_source, c_source]
-
-            # 4方向の近傍ピクセル（target）へ伝播
-            for j in range(len(neighbors_dr)):
-                r_target, c_target = (
-                    r_source + neighbors_dr[j],
-                    c_source + neighbors_dc[j],
-                )
-
-                # 伝播先が画像範囲内で、かつマスク内かチェック
-                if not (
-                    0 <= r_target < h
-                    and 0 <= c_target < w
-                    and propagation_mask[r_target, c_target]
-                ):
-                    continue
-
-                # 伝播元の平面を、伝播先の位置で評価し、新しいコストを計算
-                new_cost = _evaluate_cost_jit(
-                    r_target,
-                    c_target,
-                    source_depth,
-                    source_normal[0],
-                    source_normal[1],
-                    source_normal[2],
-                    patch_size,
-                    ref_image_gray,
-                    ref_pose_K,
-                    ref_pose_R,
-                    ref_pose_T,
-                    src_images_gray,
-                    src_K,
-                    src_R,
-                    src_T,
-                    top_k_costs,
-                    adaptive_weight_sigma_color,
-                    np.float32(config.ZNCC_EPSILON),
-                )
-
-                # コストが改善される場合、伝播先の平面情報を更新
-                if new_cost < cost_map[r_target, c_target]:
-                    depth_map[r_target, c_target] = source_depth
-                    normal_map[r_target, c_target] = source_normal
-                    cost_map[r_target, c_target] = new_cost
+    n = normal_map[r, c]
+    cost = _evaluate_cost_cuda(
+        r,
+        c,
+        d,
+        n[0],
+        n[1],
+        n[2],
+        patch_size,
+        ref_image_gray,
+        ref_pose_K,
+        ref_pose_R,
+        ref_pose_T,
+        src_images_gray,
+        src_K,
+        src_R,
+        src_T,
+        top_k_costs,
+        adaptive_weight_sigma_color,
+        zncc_epsilon,
+    )
+    cost_map[r, c] = cost
 
 
 @cuda.jit
@@ -1213,88 +884,6 @@ def _random_search_cuda(
         normal_map[r, c, 1] = n_new[1]
         normal_map[r, c, 2] = n_new[2]
         cost_map[r, c] = new_cost
-
-
-@njit(parallel=True, fastmath=True)
-def _random_search_jit(
-    depth_map,
-    normal_map,
-    cost_map,
-    search_mask,
-    iteration,
-    patch_size,
-    top_k_costs,
-    decay_rate,
-    normal_search_angle,
-    ref_image_gray,
-    ref_pose_K,
-    ref_pose_R,
-    ref_pose_T,
-    src_images_gray,
-    src_K,
-    src_R,
-    src_T,
-    adaptive_weight_sigma_color,
-    depth_range_map,
-):
-    """画像全体に対してランダム探索を実行する"""
-    h, w = depth_map.shape
-    for r in prange(h):
-        for c in range(w):
-            if not search_mask[r, c]:
-                continue
-
-            if math.isnan(depth_map[r, c]) or math.isinf(depth_map[r, c]):
-                continue
-            d_current = depth_map[r, c]
-            d_range = depth_range_map[r, c]
-            d_new = d_current + (np.random.rand() * 2 - 1) * d_range
-            if d_new <= 0:
-                continue
-
-            n_current = normal_map[r, c]
-            angle_rad = np.radians(
-                (np.random.rand() * 2 - 1)
-                * normal_search_angle
-                * (decay_rate**iteration)
-            )
-            rand_axis = np.random.randn(3).astype(np.float32)
-            rand_axis /= np.linalg.norm(rand_axis)
-            cos_a, sin_a = np.float32(np.cos(angle_rad)), np.float32(np.sin(angle_rad))
-            one_minus_cos_a = np.float32(1.0) - cos_a
-            n_new = (
-                n_current * cos_a
-                + np.cross(rand_axis, n_current) * sin_a
-                + rand_axis * np.dot(rand_axis, n_current) * one_minus_cos_a
-            )
-            n_new /= np.linalg.norm(n_new)
-
-            new_cost = _evaluate_cost_jit(
-                r,
-                c,
-                d_new,
-                n_new[0],
-                n_new[1],
-                n_new[2],
-                patch_size,
-                ref_image_gray,
-                ref_pose_K,
-                ref_pose_R,
-                ref_pose_T,
-                src_images_gray,
-                src_K,
-                src_R,
-                src_T,
-                top_k_costs,
-                adaptive_weight_sigma_color,
-                np.float32(config.ZNCC_EPSILON),
-            )
-            if new_cost < cost_map[r, c]:
-                depth_map[r, c], normal_map[r, c], cost_map[r, c] = (
-                    d_new,
-                    n_new,
-                    new_cost,
-                )
 
 
 @njit(fastmath=True)
@@ -1818,30 +1407,52 @@ class DepthOptimization:
             [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
         )
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
-        # 初期コストを計算
-        for r in range(h):
-            for c in range(w):
-                if propagation_mask[r, c] and np.isfinite(depth_map[r, c]):
-                    cost_map[r, c] = _evaluate_cost_jit(
-                        r,
-                        c,
-                        depth_map[r, c],
-                        normal_map[r, c, 0],
-                        normal_map[r, c, 1],
-                        normal_map[r, c, 2],
-                        self.config.PATCHMATCH_PATCH_SIZE,
-                        ref_image_gray,
-                        ref_pose_K,
-                        ref_pose_R,
-                        ref_pose_T,
-                        src_images_gray,
-                        src_K,
-                        src_R,
-                        src_T,
-                        self.config.TOP_K_COSTS,
-                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                        np.float32(self.config.ZNCC_EPSILON),
-                    )
+        
+        # 初期コストをGPUで計算（CPU版より高速）
+        logging.info("Computing initial cost map on GPU...")
+        threadsperblock = (16, 16)
+        blockspergrid_x = (w + threadsperblock[0] - 1) // threadsperblock[0]
+        blockspergrid_y = (h + threadsperblock[1] - 1) // threadsperblock[1]
+        blockspergrid = (blockspergrid_x, blockspergrid_y)
+        
+        # GPUデバイスにデータを転送
+        d_depth_map = cuda.to_device(depth_map.astype(np.float32))
+        d_normal_map = cuda.to_device(normal_map.astype(np.float32))
+        d_cost_map = cuda.to_device(cost_map)
+        d_propagation_mask = cuda.to_device(propagation_mask)
+        d_ref_image_gray = cuda.to_device(ref_image_gray)
+        d_ref_pose_K = cuda.to_device(ref_pose_K)
+        d_ref_pose_R = cuda.to_device(ref_pose_R)
+        d_ref_pose_T = cuda.to_device(ref_pose_T)
+        d_src_images_gray = cuda.to_device(np.ascontiguousarray(src_images_gray))
+        d_src_K = cuda.to_device(np.ascontiguousarray(src_K))
+        d_src_R = cuda.to_device(np.ascontiguousarray(src_R))
+        d_src_T = cuda.to_device(np.ascontiguousarray(src_T))
+        
+        # GPUで初期コストを計算
+        _initialize_cost_map_cuda[blockspergrid, threadsperblock](
+            d_depth_map,
+            d_normal_map,
+            d_cost_map,
+            d_propagation_mask,
+            self.config.PATCHMATCH_PATCH_SIZE,
+            self.config.TOP_K_COSTS,
+            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+            np.float32(self.config.ZNCC_EPSILON),
+            d_ref_image_gray,
+            d_ref_pose_K,
+            d_ref_pose_R,
+            d_ref_pose_T,
+            d_src_images_gray,
+            d_src_K,
+            d_src_R,
+            d_src_T,
+        )
+        cuda.synchronize()
+        
+        # 結果をホストにコピー
+        cost_map = d_cost_map.copy_to_host()
+        logging.info("Initial cost map computation completed on GPU.")
 
         # Early-stop state will be managed on-the-fly without predeclared thresholds
 
@@ -2251,16 +1862,17 @@ class DepthOptimization:
             if self._gpu_cum_start_nojit is None:
                 self._gpu_cum_start_nojit = time.time()
 
-            # Save depth per-iteration if requested
-            if save_per_iter and save_dir is not None:
+            # Save depth per-iteration if requested (only on last iteration to reduce I/O overhead)
+            is_last_iter = (i + 1 == self.config.PATCHMATCH_ITERATIONS)
+            if save_per_iter and save_dir is not None and is_last_iter:
                 depth_tmp = d_depth_map.copy_to_host()
                 save_path = os.path.join(save_dir, f"depth_iter_{i+1:02d}.png")
                 logging.info(f"Saving depth map at iteration {i+1} to {save_path}")
                 save_depth_map_as_image(depth_tmp, save_path)
             else:
                 depth_tmp = None
-            # Save normal per-iteration if requested
-            if save_normals_per_iter and normal_save_dir is not None:
+            # Save normal per-iteration if requested (only on last iteration to reduce I/O overhead)
+            if save_normals_per_iter and normal_save_dir is not None and is_last_iter:
                 normal_tmp = d_normal_map.copy_to_host()
                 save_path_n = os.path.join(
                     normal_save_dir, f"normal_iter_{i+1:02d}.png"
