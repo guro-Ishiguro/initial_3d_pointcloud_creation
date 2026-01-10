@@ -556,6 +556,54 @@ def _evaluate_cost_jit(
     return np.median(costs[:top_k])
 
 
+@njit(parallel=True, fastmath=True)
+def _initialize_cost_map_jit(
+    cost_map,
+    depth_map,
+    normal_map,
+    propagation_mask,
+    patch_size,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
+    top_k_costs,
+    adaptive_weight_sigma_color,
+    zncc_epsilon,
+):
+    """
+    全ピクセルに対して並列に初期コストを計算する
+    """
+    h, w = depth_map.shape
+    for r in prange(h):
+        for c in range(w):
+            if propagation_mask[r, c] and np.isfinite(depth_map[r, c]):
+                cost_map[r, c] = _evaluate_cost_jit(
+                    r,
+                    c,
+                    depth_map[r, c],
+                    normal_map[r, c, 0],
+                    normal_map[r, c, 1],
+                    normal_map[r, c, 2],
+                    patch_size,
+                    ref_image_gray,
+                    ref_pose_K,
+                    ref_pose_R,
+                    ref_pose_T,
+                    src_images_gray,
+                    src_K,
+                    src_R,
+                    src_T,
+                    top_k_costs,
+                    adaptive_weight_sigma_color,
+                    zncc_epsilon,
+                )
+
+
 @cuda.jit
 def _propagate_spatial_one_color_cuda(
     depth_map,
@@ -1818,30 +1866,27 @@ class DepthOptimization:
             [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
         )
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
-        # 初期コストを計算
-        for r in range(h):
-            for c in range(w):
-                if propagation_mask[r, c] and np.isfinite(depth_map[r, c]):
-                    cost_map[r, c] = _evaluate_cost_jit(
-                        r,
-                        c,
-                        depth_map[r, c],
-                        normal_map[r, c, 0],
-                        normal_map[r, c, 1],
-                        normal_map[r, c, 2],
-                        self.config.PATCHMATCH_PATCH_SIZE,
-                        ref_image_gray,
-                        ref_pose_K,
-                        ref_pose_R,
-                        ref_pose_T,
-                        src_images_gray,
-                        src_K,
-                        src_R,
-                        src_T,
-                        self.config.TOP_K_COSTS,
-                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                        np.float32(self.config.ZNCC_EPSILON),
-                    )
+        # 初期コストを計算（並列化版）
+        logging.info("Computing initial cost map (parallelized)...")
+        _initialize_cost_map_jit(
+            cost_map,
+            depth_map,
+            normal_map,
+            propagation_mask,
+            self.config.PATCHMATCH_PATCH_SIZE,
+            ref_image_gray,
+            ref_pose_K,
+            ref_pose_R,
+            ref_pose_T,
+            src_images_gray,
+            src_K,
+            src_R,
+            src_T,
+            self.config.TOP_K_COSTS,
+            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+            np.float32(self.config.ZNCC_EPSILON),
+        )
+        logging.info("Initial cost map computation completed.")
 
         # Early-stop state will be managed on-the-fly without predeclared thresholds
 
@@ -2251,16 +2296,17 @@ class DepthOptimization:
             if self._gpu_cum_start_nojit is None:
                 self._gpu_cum_start_nojit = time.time()
 
-            # Save depth per-iteration if requested
-            if save_per_iter and save_dir is not None:
+            # Save depth per-iteration if requested (only on last iteration to reduce I/O overhead)
+            is_last_iter = (i + 1 == self.config.PATCHMATCH_ITERATIONS)
+            if save_per_iter and save_dir is not None and is_last_iter:
                 depth_tmp = d_depth_map.copy_to_host()
                 save_path = os.path.join(save_dir, f"depth_iter_{i+1:02d}.png")
                 logging.info(f"Saving depth map at iteration {i+1} to {save_path}")
                 save_depth_map_as_image(depth_tmp, save_path)
             else:
                 depth_tmp = None
-            # Save normal per-iteration if requested
-            if save_normals_per_iter and normal_save_dir is not None:
+            # Save normal per-iteration if requested (only on last iteration to reduce I/O overhead)
+            if save_normals_per_iter and normal_save_dir is not None and is_last_iter:
                 normal_tmp = d_normal_map.copy_to_host()
                 save_path_n = os.path.join(
                     normal_save_dir, f"normal_iter_{i+1:02d}.png"
