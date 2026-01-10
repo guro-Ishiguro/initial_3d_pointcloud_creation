@@ -560,7 +560,6 @@ def _initialize_cost_map_jit(
     cost_map,
     depth_map,
     normal_map,
-    propagation_mask,
     patch_size,
     ref_image_gray,
     ref_pose_K,
@@ -580,7 +579,7 @@ def _initialize_cost_map_jit(
     h, w = depth_map.shape
     for r in prange(h):
         for c in range(w):
-            if propagation_mask[r, c] and np.isfinite(depth_map[r, c]):
+            if np.isfinite(depth_map[r, c]):
                 cost_map[r, c] = _evaluate_cost_jit(
                     r,
                     c,
@@ -608,7 +607,6 @@ def _propagate_spatial_one_color_cuda(
     depth_map,
     normal_map,
     cost_map,
-    propagation_mask,
     neighbors_dr,
     neighbors_dc,
     color,
@@ -630,8 +628,6 @@ def _propagate_spatial_one_color_cuda(
 
     if r >= h or c >= w:
         return
-    if not propagation_mask[r, c]:
-        return
     if (r + c) % 2 != color:
         return
     # 無効深度の画素はスキップ
@@ -643,7 +639,7 @@ def _propagate_spatial_one_color_cuda(
         dc = neighbors_dc[i]
         nr, nc = r + dr, c + dc
 
-        if not (0 <= nr < h and 0 <= nc < w and propagation_mask[nr, nc]):
+        if not (0 <= nr < h and 0 <= nc < w):
             continue
 
         neighbor_depth = depth_map[nr, nc]
@@ -685,7 +681,6 @@ def _initialize_cost_map_cuda(
     depth_map,
     normal_map,
     cost_map,
-    propagation_mask,
     patch_size,
     top_k_costs,
     adaptive_weight_sigma_color,
@@ -706,8 +701,6 @@ def _initialize_cost_map_cuda(
     h, w = depth_map.shape
 
     if r >= h or c >= w:
-        return
-    if not propagation_mask[r, c]:
         return
     d = depth_map[r, c]
     if math.isnan(d) or math.isinf(d):
@@ -742,7 +735,6 @@ def _random_search_cuda(
     depth_map,
     normal_map,
     cost_map,
-    search_mask,
     iteration,
     patch_size,
     top_k_costs,
@@ -766,8 +758,6 @@ def _random_search_cuda(
     thread_id = r * w + c
 
     if r >= h or c >= w:
-        return
-    if not search_mask[r, c]:
         return
     d_current = depth_map[r, c]
     if math.isnan(d_current) or math.isinf(d_current) or d_current <= 0:
@@ -1428,13 +1418,6 @@ class DepthOptimization:
             depth_map, ref_pose["K"].astype(np.float32)
         )
 
-        # 初期の視差(深度)が有効な画素の近傍も含めたマスク（ダイレーション）
-        valid_initial_mask = np.isfinite(initial_depth)
-        kernel = np.ones((7, 7), np.uint8)
-        propagation_mask = cv2.dilate(
-            valid_initial_mask.astype(np.uint8), kernel, iterations=1
-        ).astype(np.bool_)
-
         ref_image_gray = cv2.cvtColor(ref_image, cv2.COLOR_RGB2GRAY).astype(np.float32)
         ref_pose_K, ref_pose_R, ref_pose_T = (
             ref_pose["K"].astype(np.float32),
@@ -1470,7 +1453,6 @@ class DepthOptimization:
         d_depth_map = cuda.to_device(depth_map.astype(np.float32))
         d_normal_map = cuda.to_device(normal_map.astype(np.float32))
         d_cost_map = cuda.to_device(cost_map)
-        d_propagation_mask = cuda.to_device(propagation_mask)
         d_ref_image_gray = cuda.to_device(ref_image_gray)
         d_ref_pose_K = cuda.to_device(ref_pose_K)
         d_ref_pose_R = cuda.to_device(ref_pose_R)
@@ -1485,7 +1467,6 @@ class DepthOptimization:
             d_depth_map,
             d_normal_map,
             d_cost_map,
-            d_propagation_mask,
             self.config.PATCHMATCH_PATCH_SIZE,
             self.config.TOP_K_COSTS,
             self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
@@ -1545,7 +1526,6 @@ class DepthOptimization:
                 depth_map,
                 normal_map,
                 cost_map,
-                propagation_mask,
                 initial_depth_error,
                 ref_image_gray,
                 ref_pose_K,
@@ -1579,7 +1559,7 @@ class DepthOptimization:
 
         # --- Debug: cost_map statistics and cost validation check on samples ---
         try:
-            mask = propagation_mask & np.isfinite(depth_map)
+            mask = np.isfinite(depth_map)
             if np.any(mask):
                 valid_costs = cost_map[mask]
                 logging.info(
@@ -1628,7 +1608,6 @@ class DepthOptimization:
 
         logging.info("PatchMatch MVS refinement finished.")
         final_depth_map = depth_map.copy()
-        final_depth_map[~propagation_mask] = np.nan
 
         # Save per-iteration timing plot (optional)
         try:
@@ -1769,7 +1748,6 @@ class DepthOptimization:
         depth_map,
         normal_map,
         cost_map,
-        propagation_mask,
         initial_depth_error,
         ref_image_gray,
         ref_pose_K,
@@ -1804,7 +1782,6 @@ class DepthOptimization:
         d_depth_map = cuda.to_device(depth_map)
         d_normal_map = cuda.to_device(normal_map)
         d_cost_map = cuda.to_device(cost_map)
-        d_propagation_mask = cuda.to_device(propagation_mask)
         d_ref_image_gray = cuda.to_device(ref_image_gray)
         d_ref_pose_K = cuda.to_device(ref_pose_K)
         d_ref_pose_R = cuda.to_device(ref_pose_R)
@@ -1843,7 +1820,6 @@ class DepthOptimization:
                     d_depth_map,
                     d_normal_map,
                     d_cost_map,
-                    d_propagation_mask,
                     d_neighbors_dr,
                     d_neighbors_dc,
                     j,
@@ -1871,7 +1847,6 @@ class DepthOptimization:
                 d_depth_map,
                 d_normal_map,
                 d_cost_map,
-                d_propagation_mask,
                 i,
                 self.config.PATCHMATCH_PATCH_SIZE,
                 self.config.TOP_K_COSTS,
