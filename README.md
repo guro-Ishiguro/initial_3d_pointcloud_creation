@@ -160,9 +160,14 @@ python tools/aggregate.py --csv_dir output/<dataset_name>/csv --output result.cs
 
 ## 評価
 
+ここではこのプロジェクトで生成された深度画像や点群を評価するためのコードを用意してあるが、他にも[RAFT-Stereo](https://github.com/princeton-vl/RAFT-Stereo)で深度を推定するコードや他のエラーマップを生成するコードも用意しているため、必要に応じてそちらを参考にする。
+
+- [RAFT-Stereoで深度を推定するコード](https://github.com/guro-Ishiguro/raftstereo_depth_estimation)
+- [エラーマップを生成するコード](https://github.com/guro-Ishiguro/depth_errormap_toolkit)
+
 ### 深度評価
 
-推定深度と真値深度を比較し、評価指標を計算してCSVファイルに保存する。
+推定深度と真値深度を比較し、評価指標を計算してCSVファイルに保存する。深度画像の評価には[シミュレータから取得されたEXR形式の真値深度画像](https://github.com/guro-Ishiguro/ConstructionSiteSimulator?tab=readme-ov-file#%E9%9D%99%E7%9A%84%E3%83%9E%E3%83%83%E3%83%97%E3%81%AE%E3%81%9F%E3%82%81%E3%81%AE%E5%8B%95%E7%94%BB%E5%83%8F%E3%81%AE%E5%8F%96%E5%BE%97%E6%96%B9%E6%B3%95)があることを前提とする。
 
 ```bash
 # データセットを指定して評価
@@ -182,7 +187,7 @@ python evaluation/depth_evaluate.py --output_dir output/<dataset_name>
 
 ### 点群評価
 
-生成された点群の品質を評価する。
+生成された点群の品質を評価する。点群の評価には[シミュレータから取得されたオブジェクトの真値メッシュ](https://github.com/guro-Ishiguro/ConstructionSiteSimulator?tab=readme-ov-file#%E7%9C%9F%E5%80%A4%E3%83%A1%E3%83%83%E3%82%B7%E3%83%A5ground-truth-mesh%E3%81%AE%E5%87%BA%E5%8A%9B%E6%96%B9%E6%B3%95)があることを前提とする。
 
 ```bash
 python evaluation/pointcloud_evaluation.py --predicted <predicted.ply> --ground_truth <ground_truth.ply>
