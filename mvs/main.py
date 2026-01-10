@@ -15,7 +15,10 @@ import open3d as o3d
 matplotlib.use("Agg")  # headless save
 import matplotlib.pyplot as plt  # noqa: E402
 from depth_estimation import DepthEstimator  # noqa: E402
-from depth_optimization import DepthOptimization  # noqa: E402
+from depth_optimization import (
+    DepthOptimization,
+    _initialize_normals_from_depth_jit,
+)  # noqa: E402
 from disparity_estimation import ImageProcessor  # noqa: E402
 from logging_setup import setup_logging  # noqa: E402
 from point_cloud_integrator import PointCloudIntegrator  # noqa: E402
@@ -302,37 +305,10 @@ def _save_selected_pose_plot(
 
 
 def _compute_normals_from_depth(depth_map: np.ndarray, K: np.ndarray) -> np.ndarray:
-    h, w = depth_map.shape
-    normals = np.zeros((h, w, 3), dtype=np.float32)
-    cx, cy = float(K[0, 2]), float(K[1, 2])
-    fx, fy = float(K[0, 0]), float(K[1, 1])
-    for r in range(1, h - 1):
-        for c in range(1, w - 1):
-            dc = depth_map[r, c]
-            if not np.isfinite(dc):
-                continue
-            p_center = np.array(
-                [(c - cx) * dc / fx, (r - cy) * dc / fy, dc], dtype=np.float32
-            )
-            dr = depth_map[r, c + 1]
-            dd = depth_map[r + 1, c]
-            if not (np.isfinite(dr) and np.isfinite(dd)):
-                continue
-            p_right = np.array(
-                [(c + 1 - cx) * dr / fx, (r - cy) * dr / fy, dr], dtype=np.float32
-            )
-            p_down = np.array(
-                [(c - cx) * dd / fx, (r + 1 - cy) * dd / fy, dd], dtype=np.float32
-            )
-            v_c = p_right - p_center
-            v_r = p_down - p_center
-            n = np.cross(v_r, v_c)
-            norm = np.linalg.norm(n)
-            if norm > 1e-6:
-                normals[r, c] = n / norm
-            else:
-                normals[r, c] = np.array([0.0, 0.0, 1.0], dtype=np.float32)
-    return normals
+    """
+    深度マップから法線マップを計算する（高速なJITコンパイル版を使用）
+    """
+    return _initialize_normals_from_depth_jit(depth_map.astype(np.float32), K.astype(np.float32))
 
 
 def _export_gt_depth_pngs_per_view(
