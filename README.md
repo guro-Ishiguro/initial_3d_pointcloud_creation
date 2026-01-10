@@ -122,6 +122,72 @@ python -m mvs.main
 
 詳細は`app/mvs.yaml`を参照する。
 
+## ツール
+
+### データセット統合ツール
+
+複数のデータセットを1つのデータセットに統合する。
+
+```bash
+# 対話的にデータセットを選択して統合
+python tools/merge_datasets.py
+
+# コマンドライン引数でデータセットを指定
+python tools/merge_datasets.py dataset1 dataset2 dataset3
+```
+
+統合後のデータセットは`data/<merged_name>/`に作成され、通常のデータセットと同様に処理できる。
+
+### バッチ処理ツール
+
+複数回のMVS処理を連続実行する。各実行で設定を変更しながら処理を実行する。
+
+```bash
+python tools/run_batch_mvs.py --dataset <dataset_name>
+```
+
+## 評価
+
+### 深度評価
+
+推定深度と真値深度を比較し、評価指標を計算してCSVファイルに保存する。
+
+```bash
+# データセットを指定して評価
+python evaluation/depth_evaluate.py --dataset <dataset_name>
+
+# 出力ディレクトリを指定
+python evaluation/depth_evaluate.py --output_dir output/<dataset_name>
+```
+
+評価指標:
+- `abs_rel`: 絶対相対誤差
+- `sq_rel`: 二乗相対誤差
+- `rmse`: 平均二乗平方根誤差
+- `rmse_log`: 対数空間でのRMSE
+- `mae`: 平均絶対誤差
+- `delta1`, `delta2`, `delta3`: 閾値内の精度
+
+### 点群評価
+
+生成された点群の品質を評価する。
+
+```bash
+python evaluation/pointcloud_evaluation.py --predicted <predicted.ply> --ground_truth <ground_truth.ply>
+```
+
+### 評価結果の集約
+
+複数の評価結果CSVファイルを集約して平均値を計算する。
+
+```bash
+# CSVディレクトリを指定して集約
+python evaluation/aggregate.py --csv_dir output/<dataset_name>/csv
+
+# 出力ファイル名を指定
+python evaluation/aggregate.py --csv_dir output/<dataset_name>/csv --output result.csv
+```
+
 ## 出力
 
 処理が完了すると、`output/<dataset_name>/`以下に以下のファイルが生成される:
@@ -161,9 +227,11 @@ initial_3d_pointcloud_creation/
 │   └── config.py           # 設定管理
 ├── evaluation/
 │   ├── depth_evaluate.py   # 深度評価
-│   └── pointcloud_evaluation.py # 点群評価
+│   ├── pointcloud_evaluation.py # 点群評価
+│   └── aggregate.py        # 評価結果の集約
 ├── tools/
-│   └── merge_datasets.py   # データセット統合ツール
+│   ├── merge_datasets.py   # データセット統合ツール
+│   └── run_batch_mvs.py    # バッチ処理ツール
 ├── data/                   # データセットディレクトリ
 ├── output/                 # 出力ディレクトリ
 └── requirements.txt        # 依存パッケージ
