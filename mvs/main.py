@@ -351,7 +351,7 @@ def _export_gt_depth_pngs_per_view(
         else:
             gt_resized = gt
 
-        save_each_depth_dir = os.path.join(out_depth_dir, f"depth_{idx_int:04d}")
+        save_each_depth_dir = os.path.join(out_depth_dir, f"{idx_int:04d}")
         os.makedirs(save_each_depth_dir, exist_ok=True)
         save_depth_map_as_image(
             gt_resized, os.path.join(save_each_depth_dir, f"gt_depth_{idx_int:04d}.png")
@@ -1210,7 +1210,7 @@ def run():
             _, _, left_path, _, _ = all_pairs_data[idx]
             filename_stem = Path(left_path).stem
         else:
-            filename_stem = f"depth_{idx:04d}"
+            filename_stem = f"{idx:04d}"
         save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, filename_stem)
         save_each_normal_dir = os.path.join(config.NORMAL_IMAGE_DIR, filename_stem)
         gt_depth = all_gt_depths.get(idx, None)
@@ -1353,7 +1353,7 @@ def run():
             _, _, left_path, _, _ = all_pairs_data[idx]
             filename_stem = Path(left_path).stem
         else:
-            filename_stem = f"depth_{idx:04d}"
+            filename_stem = f"{idx:04d}"
         csv_subdir = os.path.join(config.CSV_DIR, filename_stem)
         time_csv_path = os.path.join(csv_subdir, "time.csv")
 

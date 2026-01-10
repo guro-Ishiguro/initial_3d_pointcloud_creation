@@ -1865,7 +1865,7 @@ class DepthOptimization:
         save_each_depth_dir = None
         # ファイル名ベースのフォルダ名を使用（フォールバック: ref_idx）
         depth_folder_name = (
-            filename_stem if filename_stem is not None else f"depth_{ref_idx:04d}"
+            filename_stem if filename_stem is not None else f"{ref_idx:04d}"
         )
         if config.DEBUG_SAVE_DEPTH_MAPS:
             save_each_depth_dir = os.path.join(
