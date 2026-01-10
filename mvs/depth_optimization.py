@@ -3,7 +3,6 @@
 import logging
 import math
 import os
-import threading
 import time
 
 import cv2
@@ -1557,121 +1556,6 @@ class DepthOptimization:
             )
             self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR = 10.0
 
-        # Asynchronous CUDA JIT warm-up to hide initial compile latency during I/O
-        try:
-            import os
-
-            if os.getenv("PM_GPU_WARMUP", "1") == "1":
-                t = threading.Thread(target=self._async_warmup, daemon=True)
-                t.start()
-        except Exception as e:
-            logging.debug(f"GPU warm-up thread not started: {e}")
-
-    def _async_warmup(self):
-        try:
-            self._warmup_kernels()
-        except Exception as e:
-            logging.debug(f"GPU warm-up failed: {e}")
-
-    def _warmup_kernels(self):
-        """
-        Launch tiny dummy kernels once to trigger CUDA JIT compilation ahead of time.
-        This runs in a background thread to overlap with image pre-loading.
-        """
-        h, w = 32, 32
-        depth_map = np.ones((h, w), dtype=np.float32)
-        normal_map = np.zeros((h, w, 3), dtype=np.float32)
-        cost_map = np.full((h, w), np.inf, dtype=np.float32)
-        propagation_mask = np.ones((h, w), dtype=np.bool_)
-        ref_image_gray = np.ones((h, w), dtype=np.float32)
-        ref_pose_K = np.array(
-            [[500.0, 0.0, w / 2], [0.0, 500.0, h / 2], [0.0, 0.0, 1.0]],
-            dtype=np.float32,
-        )
-        ref_pose_R = np.eye(3, dtype=np.float32)
-        ref_pose_T = np.zeros(3, dtype=np.float32)
-        src_images_gray = np.stack([ref_image_gray, ref_image_gray], axis=0)
-        src_K = np.stack([ref_pose_K, ref_pose_K], axis=0)
-        src_R = np.stack([ref_pose_R, ref_pose_R], axis=0)
-        src_T = np.stack([ref_pose_T, ref_pose_T], axis=0)
-
-        # Device copies
-        d_depth_map = cuda.to_device(depth_map)
-        d_normal_map = cuda.to_device(normal_map)
-        d_cost_map = cuda.to_device(cost_map)
-        d_propagation_mask = cuda.to_device(propagation_mask)
-        d_ref_image_gray = cuda.to_device(ref_image_gray)
-        d_ref_pose_K = cuda.to_device(ref_pose_K)
-        d_ref_pose_R = cuda.to_device(ref_pose_R)
-        d_ref_pose_T = cuda.to_device(ref_pose_T)
-        d_src_images_gray = cuda.to_device(src_images_gray)
-        d_src_K = cuda.to_device(src_K)
-        d_src_R = cuda.to_device(src_R)
-        d_src_T = cuda.to_device(src_T)
-        d_depth_range_map = cuda.to_device(np.full((h, w), 1.0, dtype=np.float32))
-        rng_states = create_xoroshiro128p_states(16 * 16, seed=1)
-
-        threadsperblock = (16, 16)
-        blockspergrid = ((w + 15) // 16, (h + 15) // 16)
-
-        # Initialize normals kernel
-        _initialize_normals_from_depth_cuda[blockspergrid, threadsperblock](
-            d_normal_map, d_depth_map, d_ref_pose_K
-        )
-
-        # Propagation kernels (checkerboard)
-        neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
-        neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
-        d_neighbors_dr = cuda.to_device(neighbors_dr)
-        d_neighbors_dc = cuda.to_device(neighbors_dc)
-        for j in [0, 1]:
-            _propagate_spatial_one_color_cuda[blockspergrid, threadsperblock](
-                d_depth_map,
-                d_normal_map,
-                d_cost_map,
-                d_propagation_mask,
-                d_neighbors_dr,
-                d_neighbors_dc,
-                j,
-                7,
-                3,
-                10,
-                np.float32(self.config.ZNCC_EPSILON),
-                d_ref_image_gray,
-                d_ref_pose_K,
-                d_ref_pose_R,
-                d_ref_pose_T,
-                d_src_images_gray,
-                d_src_K,
-                d_src_R,
-                d_src_T,
-            )
-
-        # Random search kernel
-        _random_search_cuda[blockspergrid, threadsperblock](
-            d_depth_map,
-            d_normal_map,
-            d_cost_map,
-            d_propagation_mask,
-            0,
-            7,
-            3,
-            0.9,
-            20.0,
-            np.float32(config.ZNCC_EPSILON),
-            d_ref_image_gray,
-            d_ref_pose_K,
-            d_ref_pose_R,
-            d_ref_pose_T,
-            d_src_images_gray,
-            d_src_K,
-            d_src_R,
-            d_src_T,
-            10.0,
-            d_depth_range_map,
-            rng_states,
-        )
-        cuda.synchronize()
 
     def _initialize_normals_gpu(self, depth_map, K):
         h, w = depth_map.shape

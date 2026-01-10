@@ -1,7 +1,0 @@
-env:
-  # GPU warmup (1/0)
-  # 1: Enable GPU warmup to hide initial compile latency
-  # 0: Disable GPU warmup
-  PM_GPU_WARMUP: "1"
-
-# NOTE: MVS の詳細設定は app/mvs.yaml を唯一の情報源とします
