@@ -146,6 +146,18 @@ python tools/merge_datasets.py dataset1 dataset2 dataset3
 python tools/run_batch_mvs.py --dataset <dataset_name>
 ```
 
+### 評価結果の集約
+
+複数の評価結果CSVファイルを集約して平均値を計算する。
+
+```bash
+# CSVディレクトリを指定して集約
+python tools/aggregate.py --csv_dir output/<dataset_name>/csv
+
+# 出力ファイル名を指定
+python tools/aggregate.py --csv_dir output/<dataset_name>/csv --output result.csv
+```
+
 ## 評価
 
 ### 深度評価
@@ -174,18 +186,6 @@ python evaluation/depth_evaluate.py --output_dir output/<dataset_name>
 
 ```bash
 python evaluation/pointcloud_evaluation.py --predicted <predicted.ply> --ground_truth <ground_truth.ply>
-```
-
-### 評価結果の集約
-
-複数の評価結果CSVファイルを集約して平均値を計算する。
-
-```bash
-# CSVディレクトリを指定して集約
-python evaluation/aggregate.py --csv_dir output/<dataset_name>/csv
-
-# 出力ファイル名を指定
-python evaluation/aggregate.py --csv_dir output/<dataset_name>/csv --output result.csv
 ```
 
 ## 出力
