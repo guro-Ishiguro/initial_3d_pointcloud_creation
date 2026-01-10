@@ -56,72 +56,6 @@ def _pose_unity_to_cv_RT(pos_unity, quat_unity):
     return R_cv, T_cv
 
 
-def _load_global_neighbor_pool(csv_path: str):
-    """
-    Load a global neighbor pool from CSV (e.g. output/<group>/csv/global_selected_poses.csv).
-    Expected columns (at least):
-      left_path, pos_x,pos_y,pos_z, rot_x,rot_y,rot_z,rot_w
-    Optional:
-      right_path, id
-    Returns:
-      frames: list[dict]
-      by_key: dict[id] -> dict
-      order_key: list of frames in CSV order
-    """
-    frames = []
-    if not csv_path or not os.path.exists(csv_path):
-        return frames, {}, []
-    try:
-        with open(csv_path, newline="") as f:
-            r = csv.DictReader(f)
-            for row in r:
-                if not row:
-                    continue
-                try:
-                    left_path = str(row.get("left_path", "")).strip()
-                    right_path = str(row.get("right_path", "")).strip()
-                    px = float(row.get("pos_x"))
-                    py = float(row.get("pos_y"))
-                    pz = float(row.get("pos_z"))
-                    rx = float(row.get("rot_x"))
-                    ry = float(row.get("rot_y"))
-                    rz = float(row.get("rot_z"))
-                    rw = float(row.get("rot_w"))
-                    frame_id = row.get("id", None)
-                    if frame_id is not None and str(frame_id).strip() != "":
-                        frame_id = int(frame_id)
-                    else:
-                        frame_id = None
-                except Exception:
-                    continue
-                if not left_path or not os.path.exists(left_path):
-                    # If absolute paths weren't stored, skip (can't be used as neighbor image)
-                    continue
-                frame_dict = {
-                    "left_path": left_path,
-                    "right_path": right_path,
-                    "pos": (px, py, pz),
-                    "quat": (rx, ry, rz, rw),
-                }
-                if frame_id is not None:
-                    frame_dict["id"] = frame_id
-                frames.append(frame_dict)
-    except Exception:
-        return [], {}, []
-
-    by_key = {}
-    for i, fr in enumerate(frames):
-        frame_id = fr.get("id")
-        if frame_id is not None:
-            by_key[frame_id] = fr
-        else:
-            # If no id is provided, use index as id
-            by_key[i] = fr
-            fr["id"] = i
-    ordered = frames[:]
-    return frames, by_key, ordered
-
-
 def _select_nearest_neighbors(
     *,
     ref_pos: tuple,
@@ -196,9 +130,8 @@ def _log_selected_neighbors(ref_idx: int, frames: list):
             items.append(str(ni))
 
     mode = str(getattr(config, "NEIGHBOR_SELECTION_MODE", "")).strip()
-    pool = str(getattr(config, "NEIGHBOR_POOL_MODE", "")).strip()
     logging.info(
-        f"[Neighbors] ref={ref_idx} mode={mode} pool={pool} count={len(frames or [])} -> {items}"
+        f"[Neighbors] ref={ref_idx} mode={mode} count={len(frames or [])} -> {items}"
     )
 
 
@@ -459,7 +392,7 @@ def run():
 
     if requested is not None:
         # Explicit request:
-        # - [] means "skip this dataset" (useful for verification runs in multi-dataset mode)
+        # - [] means "skip this dataset"
         if len(requested) == 0:
             logging.info(
                 "TARGET_INDICES specified as empty for this dataset; skipping processing."
@@ -500,7 +433,7 @@ def run():
     except Exception as e:
         logging.warning(f"GT per-view export skipped: {e}")
 
-    # --- Neighbor selection (mode-switchable, optionally cross-dataset via global CSV) ---
+    # --- Neighbor selection ---
     neighbor_selection_mode = (
         str(
             os.getenv(
@@ -511,16 +444,6 @@ def run():
         .strip()
         .lower()
     )
-    neighbor_pool_mode = (
-        str(
-            os.getenv(
-                "NEIGHBOR_POOL_MODE", getattr(config, "NEIGHBOR_POOL_MODE", "local")
-            )
-        )
-        .strip()
-        .lower()
-    )
-
     # local pool pose cache (for neighbor selection)
     local_pose = {}
     for i in available_indices:
@@ -530,27 +453,6 @@ def run():
                 "pos": tuple(p),
                 "quat": tuple(q),
             }
-
-    # optional global pool (cross-dataset)
-    # Global neighbor pool CSV is provided via environment variable by app/cli.py in multi-dataset runs.
-    # We intentionally do not require a YAML key for this, so mvs.yaml can stay identical for single/multi use.
-    global_pool_csv = str(os.getenv("GLOBAL_NEIGHBOR_POOL_CSV", "")).strip()
-    want_global = neighbor_pool_mode in ("global_csv", "auto")
-    global_frames, global_by_key, global_ordered = (
-        _load_global_neighbor_pool(global_pool_csv) if want_global else ([], {}, [])
-    )
-
-    # auto/global fallback behavior
-    if want_global and not global_frames:
-        if neighbor_pool_mode == "global_csv":
-            logging.warning(
-                f"NEIGHBOR_POOL_MODE=global_csv but GLOBAL_NEIGHBOR_POOL_CSV not available/readable: {global_pool_csv!r}. Falling back to local pool."
-            )
-        neighbor_pool_mode = "local"
-    elif neighbor_pool_mode == "auto" and global_frames:
-        # Treat 'auto' as 'global_csv' when the pool is actually available,
-        # so downstream selection uses cross-dataset candidates.
-        neighbor_pool_mode = "global_csv"
 
     # parameters for adjacent (existing behavior)
     neighbor_each_side = int(getattr(config, "NEIGHBOR_KEYFRAMES_EACH_SIDE", 3) or 3)
@@ -576,98 +478,50 @@ def run():
         if neighbor_selection_mode == "adjacent":
             if neighbor_each_side <= 0:
                 return []
-            if neighbor_pool_mode == "local":
-                pos = bisect.bisect_left(available_indices, ref_idx)
-                out = []
-                for k in range(1, neighbor_each_side + 1):
-                    j = pos - k
-                    if j >= 0:
-                        ni = available_indices[j]
-                        if ni != ref_idx and ni in local_pose:
-                            fr = dict(local_pose[ni])
-                            fr["left_path"] = data_loader.get_image_paths(ni)[0]
-                            fr["id"] = ni
-                            out.append(fr)
-                for k in range(1, neighbor_each_side + 1):
-                    j = pos + k
-                    if j < len(available_indices):
-                        ni = available_indices[j]
-                        if ni != ref_idx and ni in local_pose:
-                            fr = dict(local_pose[ni])
-                            fr["left_path"] = data_loader.get_image_paths(ni)[0]
-                            fr["id"] = ni
-                            out.append(fr)
-                return out
-            else:
-                # global_csv pool: adjacent in CSV order
-                ref_fr = global_by_key.get(int(ref_idx), None)
-                if ref_fr is None:
-                    return []
-                # find position in ordered list
-                try:
-                    pos = global_ordered.index(ref_fr)
-                except Exception:
-                    return []
-                out = []
-                for k in range(1, neighbor_each_side + 1):
-                    j = pos - k
-                    if j >= 0:
-                        fr = dict(global_ordered[j])
-                        fr["id"] = fr.get("id", j)
+            pos = bisect.bisect_left(available_indices, ref_idx)
+            out = []
+            for k in range(1, neighbor_each_side + 1):
+                j = pos - k
+                if j >= 0:
+                    ni = available_indices[j]
+                    if ni != ref_idx and ni in local_pose:
+                        fr = dict(local_pose[ni])
+                        fr["left_path"] = data_loader.get_image_paths(ni)[0]
+                        fr["id"] = ni
                         out.append(fr)
-                for k in range(1, neighbor_each_side + 1):
-                    j = pos + k
-                    if j < len(global_ordered):
-                        fr = dict(global_ordered[j])
-                        fr["id"] = fr.get("id", j)
+            for k in range(1, neighbor_each_side + 1):
+                j = pos + k
+                if j < len(available_indices):
+                    ni = available_indices[j]
+                    if ni != ref_idx and ni in local_pose:
+                        fr = dict(local_pose[ni])
+                        fr["left_path"] = data_loader.get_image_paths(ni)[0]
+                        fr["id"] = ni
                         out.append(fr)
-                return out
+            return out
 
         # nearest-by-distance
-        if neighbor_pool_mode == "global_csv":
-            ref_fr = global_by_key.get(int(ref_idx), None)
-            if ref_fr is None:
-                return []
-            candidates = [
-                fr
-                for fr in global_frames
-                if int(fr.get("id", -1)) != int(ref_idx)
-            ]
-            picked = _select_nearest_neighbors(
-                ref_pos=tuple(ref_fr["pos"]),
-                candidates=candidates,
-                count=nearest_count,
-                r_min=nearest_r_min,
-                r_max=nearest_r_max,
-            )
-            out = []
-            for fr in picked:
-                d = dict(fr)
-                d["id"] = d.get("id", -1)
-                out.append(d)
-            return out
-        else:
-            ref = local_pose.get(ref_idx, None)
-            if ref is None:
-                return []
-            candidates = [
-                {
-                    "pos": local_pose[i]["pos"],
-                    "quat": local_pose[i]["quat"],
-                    "left_path": data_loader.get_image_paths(i)[0],
-                    "id": i,
-                }
-                for i in available_indices
-                if i != ref_idx and i in local_pose
-            ]
-            picked = _select_nearest_neighbors(
-                ref_pos=tuple(ref["pos"]),
-                candidates=candidates,
-                count=nearest_count,
-                r_min=nearest_r_min,
-                r_max=nearest_r_max,
-            )
-            return picked
+        ref = local_pose.get(ref_idx, None)
+        if ref is None:
+            return []
+        candidates = [
+            {
+                "pos": local_pose[i]["pos"],
+                "quat": local_pose[i]["quat"],
+                "left_path": data_loader.get_image_paths(i)[0],
+                "id": i,
+            }
+            for i in available_indices
+            if i != ref_idx and i in local_pose
+        ]
+        picked = _select_nearest_neighbors(
+            ref_pos=tuple(ref["pos"]),
+            candidates=candidates,
+            count=nearest_count,
+            r_min=nearest_r_min,
+            r_max=nearest_r_max,
+        )
+        return picked
 
     def _get_neighbor_view(ref_idx: int, fr: dict):
         # load neighbor image & pose (R,T)
@@ -675,24 +529,15 @@ def run():
         if not left_path:
             return None
 
-        if neighbor_pool_mode == "local":
-            # prefer already loaded local images
-            ni = int(fr.get("id", -1))
-            img = loaded_images.get(ni, None)
-            if img is None:
-                bgr = cv2.imread(left_path)
-                if bgr is None:
-                    return None
-                img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-                loaded_images[ni] = img
-        else:
-            img = loaded_images_by_path.get(left_path, None)
-            if img is None:
-                bgr = cv2.imread(left_path)
-                if bgr is None:
-                    return None
-                img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-                loaded_images_by_path[left_path] = img
+        # prefer already loaded local images
+        ni = int(fr.get("id", -1))
+        img = loaded_images.get(ni, None)
+        if img is None:
+            bgr = cv2.imread(left_path)
+            if bgr is None:
+                return None
+            img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            loaded_images[ni] = img
 
         pos = fr.get("pos", None)
         quat = fr.get("quat", None)

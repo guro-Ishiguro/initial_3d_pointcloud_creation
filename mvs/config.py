@@ -14,7 +14,7 @@ except Exception:
 load_dotenv()
 
 """
-データセット選択の方針（環境変数やYAMLによる選択は廃止）
+データセット選択の方針:
 1. 複数ディレクトリがある場合は、ターミナルで対話選択
 2. 1件のみなら自動選択
 """
@@ -90,22 +90,7 @@ CAMERA_PARAMS_CSV = os.path.join(TXT_DIR, "camera_params.csv")
 ORB_SLAM_LOG = os.path.join(TXT_DIR, "KeyFrameTrajectory.txt")
 
 OUTPUT_DIR = os.path.join(HOME_DIR, "output")
-"""
-出力ディレクトリの方針:
- - 単一セッション: output/<DATA_TYPE>/*
- - 複数セッションを1つのグループとしてまとめたい場合:
-     env OUTPUT_GROUP_NAME を指定し、
-     output/<OUTPUT_GROUP_NAME>/<OUTPUT_SESSION_NAME>/* にセッション別の中間生成物を出す。
-   例) OUTPUT_GROUP_NAME=SessionA_SessionB, OUTPUT_SESSION_NAME=SessionA
-"""
-OUTPUT_GROUP_NAME = os.getenv("OUTPUT_GROUP_NAME", "").strip()
-OUTPUT_SESSION_NAME = os.getenv("OUTPUT_SESSION_NAME", "").strip() or DATA_TYPE
-if OUTPUT_GROUP_NAME:
-    OUTPUT_TYPE_DIR = os.path.join(OUTPUT_DIR, OUTPUT_GROUP_NAME, OUTPUT_SESSION_NAME)
-    GROUP_OUTPUT_DIR = os.path.join(OUTPUT_DIR, OUTPUT_GROUP_NAME)
-else:
-    OUTPUT_TYPE_DIR = os.path.join(OUTPUT_DIR, DATA_TYPE)
-    GROUP_OUTPUT_DIR = OUTPUT_TYPE_DIR
+OUTPUT_TYPE_DIR = os.path.join(OUTPUT_DIR, DATA_TYPE)
 POINT_CLOUD_DIR = os.path.join(OUTPUT_TYPE_DIR, "point_cloud")
 POINT_CLOUD_FILE_PATH = os.path.join(POINT_CLOUD_DIR, "output.ply")
 OLD_POINT_CLOUD_FILE_PATH = os.path.join(POINT_CLOUD_DIR, "old_output.ply")
