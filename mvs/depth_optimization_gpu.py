@@ -806,8 +806,8 @@ def _propagate_bucket_push4_cuda(
             continue
         src_normal = normal_map[r, c]
 
-        # Four or eight directions based on config
-        for d in range(8 if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8 else 4):
+        # Four directions (checkerboard)
+        for d in range(4):
             if d == 0:
                 nr = r - 1
                 nc = c
@@ -1556,10 +1556,6 @@ class DepthOptimization:
                 "ADAPTIVE_WEIGHT_SIGMA_COLOR not found in config. Using default value 10.0."
             )
             self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR = 10.0
-        if not hasattr(self.config, "BUCKET_PROPAGATION_BINS"):
-            logging.warning(
-                "BUCKET_PROPAGATION_BINS not found in config. Using default value 16."
-            )
 
         # Asynchronous CUDA JIT warm-up to hide initial compile latency during I/O
         try:
@@ -1623,69 +1619,33 @@ class DepthOptimization:
             d_normal_map, d_depth_map, d_ref_pose_K
         )
 
-        # Propagation kernels based on method
-        if (
-            getattr(self.config, "CHOICED_PROPAGATION_METHOD", "checkerboard")
-            == "checkerboard"
-        ):
-            neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
-            neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
-            d_neighbors_dr = cuda.to_device(neighbors_dr)
-            d_neighbors_dc = cuda.to_device(neighbors_dc)
-            for j in [0, 1]:
-                _propagate_spatial_one_color_cuda[blockspergrid, threadsperblock](
-                    d_depth_map,
-                    d_normal_map,
-                    d_cost_map,
-                    d_propagation_mask,
-                    d_neighbors_dr,
-                    d_neighbors_dc,
-                    j,
-                    7,
-                    3,
-                    10,
-                    np.float32(self.config.ZNCC_EPSILON),
-                    d_ref_image_gray,
-                    d_ref_pose_K,
-                    d_ref_pose_R,
-                    d_ref_pose_T,
-                    d_src_images_gray,
-                    d_src_K,
-                    d_src_R,
-                    d_src_T,
-                )
-        else:
-            # Bucket push directions kernel (use small bin arrays)
-            bin_rs = cuda.to_device(np.array([8, 16], dtype=np.int32))
-            bin_cs = cuda.to_device(np.array([8, 16], dtype=np.int32))
-            update_counter = cuda.to_device(np.array([0], dtype=np.int32))
-            # auto-tune launch dims based on bin size
-            threads_1d = 256
-            blocks_1d = (bin_rs.size + threads_1d - 1) // threads_1d
-            blocks_1d = max(1, blocks_1d)
-            for dir_code in range(4):
-                _propagate_bucket_push_dir_cuda[blocks_1d, threads_1d](
-                    d_depth_map,
-                    d_normal_map,
-                    d_cost_map,
-                    d_propagation_mask,
-                    bin_rs,
-                    bin_cs,
-                    dir_code,
-                    7,
-                    3,
-                    10,
-                    np.float32(self.config.ZNCC_EPSILON),
-                    d_ref_image_gray,
-                    d_ref_pose_K,
-                    d_ref_pose_R,
-                    d_ref_pose_T,
-                    d_src_images_gray,
-                    d_src_K,
-                    d_src_R,
-                    d_src_T,
-                    update_counter,
-                )
+        # Propagation kernels (checkerboard)
+        neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+        neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
+        d_neighbors_dr = cuda.to_device(neighbors_dr)
+        d_neighbors_dc = cuda.to_device(neighbors_dc)
+        for j in [0, 1]:
+            _propagate_spatial_one_color_cuda[blockspergrid, threadsperblock](
+                d_depth_map,
+                d_normal_map,
+                d_cost_map,
+                d_propagation_mask,
+                d_neighbors_dr,
+                d_neighbors_dc,
+                j,
+                7,
+                3,
+                10,
+                np.float32(self.config.ZNCC_EPSILON),
+                d_ref_image_gray,
+                d_ref_pose_K,
+                d_ref_pose_R,
+                d_ref_pose_T,
+                d_src_images_gray,
+                d_src_K,
+                d_src_R,
+                d_src_T,
+            )
 
         # Random search kernel
         _random_search_cuda[blockspergrid, threadsperblock](
@@ -1897,7 +1857,7 @@ class DepthOptimization:
         filename_stem=None,
     ):
         logging.info(
-            f"Starting PatchMatch MVS depth refinement using '{self.config.CHOICED_PROPAGATION_METHOD}' method..."
+            "Starting PatchMatch MVS depth refinement using checkerboard propagation..."
         )
 
         h, w = initial_depth.shape
@@ -2118,103 +2078,6 @@ class DepthOptimization:
 
         return final_depth_map, iter_times_gpu
 
-    def refine_depth_with_patchmatch_vanilla(
-        self, ref_image, ref_pose, neighbor_views_data, ref_idx=0, filename_stem=None
-    ):
-        """
-        通常のPatchMatch MVSを実行。深度は一様乱数で初期化し、探索範囲は固定値から減衰させる。
-        """
-        logging.info(
-            "Starting VANILLA PatchMatch MVS depth refinement (random initialization)..."
-        )
-        h, w, _ = ref_image.shape
-
-        # 1. 深度マップを一様乱数で初期化
-        min_depth = self.config.PATCHMATCH_VANILLA_MIN_DEPTH
-        max_depth = self.config.PATCHMATCH_VANILLA_MAX_DEPTH
-        depth_map = np.random.uniform(min_depth, max_depth, (h, w)).astype(np.float32)
-
-        # ファイル名ベースのフォルダ名を使用（フォールバック: ref_idx）
-        folder_name = (
-            filename_stem if filename_stem is not None else f"depth_{ref_idx:04d}"
-        )
-        if config.DEBUG_SAVE_DEPTH_MAPS:
-            save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, folder_name)
-            save_depth_path = os.path.join(save_each_depth_dir, f"depth_iter_00.png")
-            logging.info(f"Saving initial depth map to {save_depth_path}")
-            save_depth_map_as_image(depth_map, save_depth_path)
-
-        # 2. 法線マップを初期化
-        normal_map = self._initialize_normals_gpu(
-            depth_map, ref_pose["K"].astype(np.float32)
-        )
-
-        if self.config.DEBUG_SAVE_NORMAL_MAPS:
-            save_each_normal_dir = os.path.join(config.NORMAL_IMAGE_DIR, folder_name)
-            save_path_normal = os.path.join(save_each_normal_dir, f"normal_iter_00.png")
-            logging.info(f"Saving initial normal map to {save_path_normal}")
-            save_normal_map_as_image(normal_map.copy(), save_path_normal)
-
-        # 3. JITコンパイル用にデータを準備
-        ref_image_gray = cv2.cvtColor(ref_image, cv2.COLOR_RGB2GRAY).astype(np.float32)
-        ref_pose_K, ref_pose_R, ref_pose_T = (
-            ref_pose["K"].astype(np.float32),
-            ref_pose["R"].astype(np.float32),
-            ref_pose["T"].astype(np.float32),
-        )
-        src_images_gray = np.stack(
-            [
-                cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY).astype(np.float32)
-                for view in neighbor_views_data
-            ],
-            axis=0,
-        )
-        src_K = np.stack(
-            [view["K"].astype(np.float32) for view in neighbor_views_data], axis=0
-        )
-        src_R = np.stack(
-            [view["R"].astype(np.float32) for view in neighbor_views_data], axis=0
-        )
-        src_T = np.stack(
-            [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
-        )
-        cost_map = np.full((h, w), np.inf, dtype=np.float32)
-        propagation_mask = np.full((h, w), True, dtype=np.bool_)
-
-        # ダミーの initial_depth_error を作成
-        initial_depth_error = np.full_like(
-            depth_map,
-            self.config.PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE,
-            dtype=np.float32,
-        )
-
-        # 4. PatchMatch反復ループ (GPU)
-        depth_map, normal_map, cost_map = self._propagate_and_search_gpu(
-            depth_map,
-            normal_map,
-            cost_map,
-            propagation_mask,
-            initial_depth_error,
-            ref_image_gray,
-            ref_pose_K,
-            ref_pose_R,
-            ref_pose_T,
-            src_images_gray,
-            src_K,
-            src_R,
-            src_T,
-            save_per_iter=config.DEBUG_SAVE_DEPTH_MAPS,
-            save_dir=(
-                os.path.join(config.DEPTH_IMAGE_DIR, folder_name)
-                if config.DEBUG_SAVE_DEPTH_MAPS
-                else None
-            ),
-            ref_idx=ref_idx,
-        )
-
-        logging.info("Vanilla PatchMatch MVS refinement finished.")
-        return depth_map
-
     def filter_depth_map_by_geometric_consistency(
         self, ref_depth_map, ref_pose, neighbor_views_data, all_optimized_depths
     ):
@@ -2420,121 +2283,36 @@ class DepthOptimization:
                 f"PatchMatch GPU Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
             )
 
-            # Propagation
-            if self.config.CHOICED_PROPAGATION_METHOD == "checkerboard":
-                with time_block("GPU propagate checkerboard"):
-                    if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8:
-                        neighbors_dr = np.array(
-                            [-1, 1, 0, 0, -1, -1, 1, 1], dtype=np.int8
-                        )
-                        neighbors_dc = np.array(
-                            [0, 0, -1, 1, -1, 1, -1, 1], dtype=np.int8
-                        )
-                    else:
-                        neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
-                        neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
-                    d_neighbors_dr = cuda.to_device(neighbors_dr)
-                    d_neighbors_dc = cuda.to_device(neighbors_dc)
-                    for j in [0, 1]:
-                        _propagate_spatial_one_color_cuda[
-                            blockspergrid, threadsperblock
-                        ](
-                            d_depth_map,
-                            d_normal_map,
-                            d_cost_map,
-                            d_propagation_mask,
-                            d_neighbors_dr,
-                            d_neighbors_dc,
-                            j,
-                            7,
-                            3,
-                            10,
-                            np.float32(self.config.ZNCC_EPSILON),
-                            d_ref_image_gray,
-                            d_ref_pose_K,
-                            d_ref_pose_R,
-                            d_ref_pose_T,
-                            d_src_images_gray,
-                            d_src_K,
-                            d_src_R,
-                            d_src_T,
-                        )
-            else:
-                # Priority/bucket propagation path (GPU native)
-                if i > 0:
-                    with time_block("GPU propagate priority"):
-                        mask = propagation_mask & np.isfinite(initial_depth_error)
-                        rs, cs = np.nonzero(mask)
-                        if rs.size > 0:
-                            costs = initial_depth_error[rs, cs].astype(np.float32)
-                            log_ndarray_stats("priority/bin_costs", costs)
-                            num_bins = getattr(
-                                self.config, "BUCKET_PROPAGATION_BINS", 4
-                            )
-                            cmin = float(np.min(costs))
-                            cmax = float(np.max(costs))
-                            if cmax - cmin < 1e-6:
-                                bin_indices = np.zeros_like(costs, dtype=np.int32)
-                                num_bins_effective = 1
-                            else:
-                                bin_width = (cmax - cmin) / num_bins
-                                bin_indices = np.floor(
-                                    (costs - cmin) / bin_width
-                                ).astype(np.int32)
-                                bin_indices[bin_indices >= num_bins] = num_bins - 1
-                                num_bins_effective = num_bins
-                            for b in range(num_bins_effective):
-                                sel = bin_indices == b
-                                if not np.any(sel):
-                                    continue
-                                bin_rs = rs[sel].astype(np.int32)
-                                bin_cs = cs[sel].astype(np.int32)
-                                # 固定順（行優先→列）で並べ替え、決定的な処理順を担保
-                                order = np.lexsort((bin_cs, bin_rs))
-                                bin_rs_sorted = bin_rs[order]
-                                bin_cs_sorted = bin_cs[order]
-                                d_bin_rs = cuda.to_device(bin_rs_sorted)
-                                d_bin_cs = cuda.to_device(bin_cs_sorted)
-                                threads_1d = 256
-                                blocks_1d = (
-                                    bin_rs_sorted.size + threads_1d - 1
-                                ) // threads_1d
-                                max_inner_sweeps = int(
-                                    getattr(self.config, "PRIORITY_MAX_SWEEPS", 8)
-                                )
-                                for _ in range(max_inner_sweeps):
-                                    d_update_counter = cuda.to_device(
-                                        np.array([0], dtype=np.int32)
-                                    )
-                                    for dir_code in range(4):
-                                        _propagate_bucket_push_dir_cuda[
-                                            blocks_1d, threads_1d
-                                        ](
-                                            d_depth_map,
-                                            d_normal_map,
-                                            d_cost_map,
-                                            d_propagation_mask,
-                                            d_bin_rs,
-                                            d_bin_cs,
-                                            dir_code,
-                                            self.config.PATCHMATCH_PATCH_SIZE,
-                                            self.config.TOP_K_COSTS,
-                                            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                                            np.float32(self.config.ZNCC_EPSILON),
-                                            d_ref_image_gray,
-                                            d_ref_pose_K,
-                                            d_ref_pose_R,
-                                            d_ref_pose_T,
-                                            d_src_images_gray,
-                                            d_src_K,
-                                            d_src_R,
-                                            d_src_T,
-                                            d_update_counter,
-                                        )
-                                        cuda.synchronize()
-                                    updates = d_update_counter.copy_to_host()[0]
-                                    if updates == 0:
-                                        break
+            # Propagation (checkerboard)
+            with time_block("GPU propagate checkerboard"):
+                neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+                neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
+                d_neighbors_dr = cuda.to_device(neighbors_dr)
+                d_neighbors_dc = cuda.to_device(neighbors_dc)
+                for j in [0, 1]:
+                    _propagate_spatial_one_color_cuda[
+                        blockspergrid, threadsperblock
+                    ](
+                        d_depth_map,
+                        d_normal_map,
+                        d_cost_map,
+                        d_propagation_mask,
+                        d_neighbors_dr,
+                        d_neighbors_dc,
+                        j,
+                        7,
+                        3,
+                        10,
+                        np.float32(self.config.ZNCC_EPSILON),
+                        d_ref_image_gray,
+                        d_ref_pose_K,
+                        d_ref_pose_R,
+                        d_ref_pose_T,
+                        d_src_images_gray,
+                        d_src_K,
+                        d_src_R,
+                        d_src_T,
+                    )
 
             # Random Search
             depth_range_map = (

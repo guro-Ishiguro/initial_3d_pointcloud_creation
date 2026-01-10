@@ -290,12 +290,8 @@ def _propagate_bucket_jit(
     コストをビンに分割し、低コストのビンから優先的に並列伝播を実行する。
     """
     h, w = depth_map.shape
-    if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8:
-        neighbors_dr = np.array([-1, 1, 0, 0, -1, -1, 1, 1], dtype=np.int8)
-        neighbors_dc = np.array([0, 0, -1, 1, -1, 1, -1, 1], dtype=np.int8)
-    else:
-        neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
-        neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
+    neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+    neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
 
     # --- 1. 有効なピクセルを抽出し、コストに基づいてビンに分類 ---
     valid_pixels_coords = np.empty((h * w, 2), dtype=np.int32)
@@ -661,10 +657,6 @@ class DepthOptimization:
                 "ADAPTIVE_WEIGHT_SIGMA_COLOR not found in config. Using default value 10.0."
             )
             self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR = 10.0
-        if not hasattr(self.config, "BUCKET_PROPAGATION_BINS"):
-            logging.warning(
-                "BUCKET_PROPAGATION_BINS not found in config. Using default value 16."
-            )
 
     def _debug_patch_visualization(
         self,
@@ -834,7 +826,7 @@ class DepthOptimization:
         filename_stem=None,
     ):
         logging.info(
-            f"Starting PatchMatch MVS depth refinement using '{self.config.CHOICED_PROPAGATION_METHOD}' method..."
+            "Starting PatchMatch MVS depth refinement using checkerboard propagation..."
         )
 
         h, w = initial_depth.shape
@@ -908,38 +900,16 @@ class DepthOptimization:
             os.makedirs(save_each_csv_dir, exist_ok=True)
             clear_folder(save_each_csv_dir)
             csv_files = {
-                "rmse": os.path.join(
-                    save_each_csv_dir,
-                    f"rmse_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "mae": os.path.join(
-                    save_each_csv_dir,
-                    f"mae_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "abs_rel": os.path.join(
-                    save_each_csv_dir,
-                    f"abs_rel_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "sq_rel": os.path.join(
-                    save_each_csv_dir,
-                    f"sq_rel_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
+                "rmse": os.path.join(save_each_csv_dir, "rmse_checkerboard.csv"),
+                "mae": os.path.join(save_each_csv_dir, "mae_checkerboard.csv"),
+                "abs_rel": os.path.join(save_each_csv_dir, "abs_rel_checkerboard.csv"),
+                "sq_rel": os.path.join(save_each_csv_dir, "sq_rel_checkerboard.csv"),
                 "rmse_log": os.path.join(
-                    save_each_csv_dir,
-                    f"rmse_log_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
+                    save_each_csv_dir, "rmse_log_checkerboard.csv"
                 ),
-                "delta1": os.path.join(
-                    save_each_csv_dir,
-                    f"delta1_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "delta2": os.path.join(
-                    save_each_csv_dir,
-                    f"delta2_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
-                "delta3": os.path.join(
-                    save_each_csv_dir,
-                    f"delta3_{self.config.CHOICED_PROPAGATION_METHOD}.csv",
-                ),
+                "delta1": os.path.join(save_each_csv_dir, "delta1_checkerboard.csv"),
+                "delta2": os.path.join(save_each_csv_dir, "delta2_checkerboard.csv"),
+                "delta3": os.path.join(save_each_csv_dir, "delta3_checkerboard.csv"),
             }
             for metric, path in csv_files.items():
                 initialize_csv(path, ["image_idx", "iter", "time", metric])
@@ -965,66 +935,37 @@ class DepthOptimization:
                 f"PatchMatch Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
             )
 
-            # --- 1. 空間伝播 ---
-            if self.config.CHOICED_PROPAGATION_METHOD == "checkerboard":
-                logging.info("Starting checkerboard propagation ...")
-                if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8:
-                    neighbors_dr = np.array([-1, 1, 0, 0, -1, -1, 1, 1], dtype=np.int8)
-                    neighbors_dc = np.array([0, 0, -1, 1, -1, 1, -1, 1], dtype=np.int8)
-                else:
-                    neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
-                    neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
-                with time_block("CPU propagate checkerboard"):
-                    for j in [0, 1]:
-                        _propagate_spatial_one_color_jit(
-                            depth_map,
-                            normal_map,
-                            cost_map,
-                            propagation_mask,
-                            neighbors_dr,
-                            neighbors_dc,
-                            j,
-                            0,
-                            h,
-                            0,
-                            w,
-                            self.config.PATCHMATCH_PATCH_SIZE,
-                            self.config.TOP_K_COSTS,
-                            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                            np.float32(self.config.ZNCC_EPSILON),
-                            ref_image_gray,
-                            ref_pose_K,
-                            ref_pose_R,
-                            ref_pose_T,
-                            src_images_gray,
-                            src_K,
-                            src_R,
-                            src_T,
-                        )
-
-            elif self.config.CHOICED_PROPAGATION_METHOD == "priority":
-                if i > 0:
-                    logging.info("Starting priority propagation ...")
-                    with time_block("CPU propagate priority"):
-                        _propagate_bucket_jit(
-                            depth_map,
-                            normal_map,
-                            cost_map,
-                            initial_depth_error,
-                            propagation_mask,
-                            self.config.BUCKET_PROPAGATION_BINS,
-                            self.config.PATCHMATCH_PATCH_SIZE,
-                            self.config.TOP_K_COSTS,
-                            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                            ref_image_gray,
-                            ref_pose_K,
-                            ref_pose_R,
-                            ref_pose_T,
-                            src_images_gray,
-                            src_K,
-                            src_R,
-                            src_T,
-                        )
+            # --- 1. 空間伝播 (checkerboard) ---
+            logging.info("Starting checkerboard propagation ...")
+            neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+            neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
+            with time_block("CPU propagate checkerboard"):
+                for j in [0, 1]:
+                    _propagate_spatial_one_color_jit(
+                        depth_map,
+                        normal_map,
+                        cost_map,
+                        propagation_mask,
+                        neighbors_dr,
+                        neighbors_dc,
+                        j,
+                        0,
+                        h,
+                        0,
+                        w,
+                        self.config.PATCHMATCH_PATCH_SIZE,
+                        self.config.TOP_K_COSTS,
+                        self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                        np.float32(self.config.ZNCC_EPSILON),
+                        ref_image_gray,
+                        ref_pose_K,
+                        ref_pose_R,
+                        ref_pose_T,
+                        src_images_gray,
+                        src_K,
+                        src_R,
+                        src_T,
+                    )
 
             # --- 2. ランダム探索 ---
             depth_range_map = (
@@ -1170,170 +1111,6 @@ class DepthOptimization:
             logging.warning(f"Could not save CPU iteration time plot: {e}")
         final_depth_map[~propagation_mask] = np.nan
         return final_depth_map, iter_times
-
-    def refine_depth_with_patchmatch_vanilla(
-        self, ref_image, ref_pose, neighbor_views_data, ref_idx=0, filename_stem=None
-    ):
-        """
-        通常のPatchMatch MVSを実行。深度は一様乱数で初期化し、探索範囲は固定値から減衰させる。
-        """
-        logging.info(
-            "Starting VANILLA PatchMatch MVS depth refinement (random initialization)..."
-        )
-        h, w, _ = ref_image.shape
-
-        # 1. 深度マップを一様乱数で初期化
-        min_depth = self.config.PATCHMATCH_VANILLA_MIN_DEPTH
-        max_depth = self.config.PATCHMATCH_VANILLA_MAX_DEPTH
-        depth_map = np.random.uniform(min_depth, max_depth, (h, w)).astype(np.float32)
-
-        # ファイル名ベースのフォルダ名を使用（フォールバック: ref_idx）
-        folder_name = (
-            filename_stem if filename_stem is not None else f"depth_{ref_idx:04d}"
-        )
-        if config.DEBUG_SAVE_DEPTH_MAPS:
-            save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, folder_name)
-            save_depth_path = os.path.join(save_each_depth_dir, f"depth_iter_00.png")
-            logging.info(f"Saving initial depth map to {save_depth_path}")
-            save_depth_map_as_image(depth_map, save_depth_path)
-
-        # 2. 法線マップを初期化
-        normal_map = _initialize_normals_from_depth_jit(
-            depth_map, ref_pose["K"].astype(np.float32)
-        )
-
-        if self.config.DEBUG_SAVE_NORMAL_MAPS:
-            save_each_normal_dir = os.path.join(config.NORMAL_IMAGE_DIR, folder_name)
-            save_path_normal = os.path.join(save_each_normal_dir, f"normal_iter_00.png")
-            logging.info(f"Saving initial normal map to {save_path_normal}")
-            save_normal_map_as_image(normal_map.copy(), save_path_normal)
-
-        # 3. JITコンパイル用にデータを準備
-        ref_image_gray = cv2.cvtColor(ref_image, cv2.COLOR_RGB2GRAY).astype(np.float32)
-        ref_pose_K, ref_pose_R, ref_pose_T = (
-            ref_pose["K"].astype(np.float32),
-            ref_pose["R"].astype(np.float32),
-            ref_pose["T"].astype(np.float32),
-        )
-        src_images_gray = np.stack(
-            [
-                cv2.cvtColor(view["image"], cv2.COLOR_RGB2GRAY).astype(np.float32)
-                for view in neighbor_views_data
-            ],
-            axis=0,
-        )
-        src_K = np.stack(
-            [view["K"].astype(np.float32) for view in neighbor_views_data], axis=0
-        )
-        src_R = np.stack(
-            [view["R"].astype(np.float32) for view in neighbor_views_data], axis=0
-        )
-        src_T = np.stack(
-            [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
-        )
-        cost_map = np.full((h, w), np.inf, dtype=np.float32)
-        propagation_mask = np.full((h, w), True, dtype=np.bool_)
-
-        # 4. PatchMatch反復ループ
-        for i in range(self.config.PATCHMATCH_ITERATIONS):
-            logging.info(
-                f"Vanilla PatchMatch Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
-            )
-
-            # --- 空間伝播 ---
-            if i % 2 == 0:
-                if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8:
-                    neighbors_dr = np.array([-1, -1, -1, 0], dtype=np.int8)
-                    neighbors_dc = np.array([-1, 0, 1, -1], dtype=np.int8)
-                else:
-                    neighbors_dr = np.array([-1, 0], dtype=np.int8)
-                    neighbors_dc = np.array([0, -1], dtype=np.int8)
-            else:
-                if config.PROPAGATION_NEIGHBOR_DIRECTIONS == 8:
-                    neighbors_dr = np.array([1, 1, 1, 0], dtype=np.int8)
-                    neighbors_dc = np.array([-1, 0, 1, 1], dtype=np.int8)
-                else:
-                    neighbors_dr = np.array([1, 0], dtype=np.int8)
-                    neighbors_dc = np.array([0, 1], dtype=np.int8)
-
-            for color_idx in [0, 1]:
-                _propagate_spatial_one_color_jit(
-                    depth_map,
-                    normal_map,
-                    cost_map,
-                    propagation_mask,
-                    neighbors_dr,
-                    neighbors_dc,
-                    color_idx,
-                    0,
-                    h,
-                    0,
-                    w,
-                    self.config.PATCHMATCH_PATCH_SIZE,
-                    self.config.TOP_K_COSTS,
-                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                    ref_image_gray,
-                    ref_pose_K,
-                    ref_pose_R,
-                    ref_pose_T,
-                    src_images_gray,
-                    src_K,
-                    src_R,
-                    src_T,
-                )
-
-            # --- ランダム探索 ---
-            depth_range_map = np.full(
-                (h, w),
-                self.config.PATCHMATCH_VANILLA_INITIAL_SEARCH_RANGE
-                * (self.config.PATCHMATCH_DECAY_RATE**i),
-                dtype=np.float32,
-            )
-            search_mask = np.full((h, w), True, dtype=np.bool_)
-            _random_search_jit(
-                depth_map,
-                normal_map,
-                cost_map,
-                search_mask,
-                i,
-                self.config.PATCHMATCH_PATCH_SIZE,
-                self.config.TOP_K_COSTS,
-                self.config.PATCHMATCH_DECAY_RATE,
-                self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE,
-                ref_image_gray,
-                ref_pose_K,
-                ref_pose_R,
-                ref_pose_T,
-                src_images_gray,
-                src_K,
-                src_R,
-                src_T,
-                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                np.float32(self.config.ZNCC_EPSILON),
-                depth_range_map,
-            )
-
-            # イテレーションごとのデプスマップ保存
-            if self.config.DEBUG_SAVE_DEPTH_MAPS:
-                save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, folder_name)
-                save_path = os.path.join(
-                    save_each_depth_dir, f"depth_iter_{i+1:02d}.png"
-                )
-                logging.info(f"Saving intermediate depth map to {save_path}")
-                save_depth_map_as_image(depth_map.copy(), save_path)
-
-            if self.config.DEBUG_SAVE_NORMAL_MAPS:
-                save_each_normal_dir = os.path.join(
-                    config.NORMAL_IMAGE_DIR, folder_name
-                )
-                save_path_normal = os.path.join(
-                    save_each_normal_dir, f"normal_iter_{i+1:02d}.png"
-                )
-                logging.info(f"Saving intermediate normal map to {save_path_normal}")
-                save_normal_map_as_image(normal_map.copy(), save_path_normal)
-
-        logging.info("Vanilla PatchMatch MVS refinement finished.")
-        return depth_map
 
     def filter_depth_map_by_geometric_consistency(
         self, ref_depth_map, ref_pose, neighbor_views_data, all_optimized_depths
