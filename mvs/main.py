@@ -972,9 +972,9 @@ def run():
                     f"Saved {len(iter_times_gpu)} iteration times to {time_csv_path}"
                 )
             else:
-            logging.warning(
-                f"iter_times_gpu is None or empty for index {idx}, skipping iteration time recording"
-            )
+                logging.warning(
+                    f"iter_times_gpu is None or empty for index {idx}, skipping iteration time recording"
+                )
 
             # 最適化後の深度の有効ピクセル数をログ出力
             valid_pixels_before_photo = np.sum(np.isfinite(optimized_depth))
