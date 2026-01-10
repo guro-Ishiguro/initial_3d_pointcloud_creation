@@ -60,13 +60,13 @@ def _load_global_neighbor_pool(csv_path: str):
     """
     Load a global neighbor pool from CSV (e.g. output/<group>/csv/global_selected_poses.csv).
     Expected columns (at least):
-      dataset, local_idx, left_path, pos_x,pos_y,pos_z, rot_x,rot_y,rot_z,rot_w
+      left_path, pos_x,pos_y,pos_z, rot_x,rot_y,rot_z,rot_w
     Optional:
-      global_idx, right_path
+      right_path, id
     Returns:
       frames: list[dict]
-      by_key: dict[(dataset, local_idx)] -> dict
-      order_key: list of frames in CSV order (or global_idx order if present)
+      by_key: dict[id] -> dict
+      order_key: list of frames in CSV order
     """
     frames = []
     if not csv_path or not os.path.exists(csv_path):
@@ -78,8 +78,6 @@ def _load_global_neighbor_pool(csv_path: str):
                 if not row:
                     continue
                 try:
-                    ds = str(row.get("dataset", "")).strip()
-                    li = int(row.get("local_idx"))
                     left_path = str(row.get("left_path", "")).strip()
                     right_path = str(row.get("right_path", "")).strip()
                     px = float(row.get("pos_x"))
@@ -89,38 +87,38 @@ def _load_global_neighbor_pool(csv_path: str):
                     ry = float(row.get("rot_y"))
                     rz = float(row.get("rot_z"))
                     rw = float(row.get("rot_w"))
-                    gidx = row.get("global_idx", None)
-                    gidx = (
-                        int(gidx)
-                        if gidx is not None and str(gidx).strip() != ""
-                        else None
-                    )
+                    frame_id = row.get("id", None)
+                    if frame_id is not None and str(frame_id).strip() != "":
+                        frame_id = int(frame_id)
+                    else:
+                        frame_id = None
                 except Exception:
                     continue
                 if not left_path or not os.path.exists(left_path):
                     # If absolute paths weren't stored, skip (can't be used as neighbor image)
                     continue
-                frames.append(
-                    {
-                        "dataset": ds,
-                        "local_idx": li,
-                        "global_idx": gidx,
-                        "left_path": left_path,
-                        "right_path": right_path,
-                        "pos": (px, py, pz),
-                        "quat": (rx, ry, rz, rw),
-                    }
-                )
+                frame_dict = {
+                    "left_path": left_path,
+                    "right_path": right_path,
+                    "pos": (px, py, pz),
+                    "quat": (rx, ry, rz, rw),
+                }
+                if frame_id is not None:
+                    frame_dict["id"] = frame_id
+                frames.append(frame_dict)
     except Exception:
         return [], {}, []
 
-    by_key = {(fr["dataset"], fr["local_idx"]): fr for fr in frames}
-
-    # Build ordered list: prefer global_idx if available for all/most frames
-    if frames and all(fr.get("global_idx") is not None for fr in frames):
-        ordered = sorted(frames, key=lambda d: int(d["global_idx"]))
-    else:
-        ordered = frames[:]
+    by_key = {}
+    for i, fr in enumerate(frames):
+        frame_id = fr.get("id")
+        if frame_id is not None:
+            by_key[frame_id] = fr
+        else:
+            # If no id is provided, use index as id
+            by_key[i] = fr
+            fr["id"] = i
+    ordered = frames[:]
     return frames, by_key, ordered
 
 
@@ -190,14 +188,12 @@ def _log_selected_neighbors(ref_idx: int, frames: list):
 
     items = []
     for fr in (frames or [])[:max_per]:
-        ds = fr.get("dataset", "")
-        li = fr.get("local_idx", fr.get("id", None))
-        gi = fr.get("global_idx", None)
+        ni = fr.get("id", None)
         if show_paths:
             lp = fr.get("left_path", "")
-            items.append(f"{ds}:{li} (g={gi}) path={lp}")
+            items.append(f"{ni} path={lp}")
         else:
-            items.append(f"{ds}:{li} (g={gi})")
+            items.append(str(ni))
 
     mode = str(getattr(config, "NEIGHBOR_SELECTION_MODE", "")).strip()
     pool = str(getattr(config, "NEIGHBOR_POOL_MODE", "")).strip()
@@ -533,8 +529,6 @@ def run():
             local_pose[i] = {
                 "pos": tuple(p),
                 "quat": tuple(q),
-                "dataset": getattr(config, "DATA_TYPE", ""),
-                "local_idx": i,
             }
 
     # optional global pool (cross-dataset)
@@ -578,9 +572,7 @@ def run():
             loaded_images[idx] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     def _neighbors_for_ref(ref_idx: int):
-        # returns list of frame dicts with keys: pos, quat, left_path, id, dataset, local_idx
-        ref_ds = str(getattr(config, "DATA_TYPE", "")).strip()
-
+        # returns list of frame dicts with keys: pos, quat, left_path, id
         if neighbor_selection_mode == "adjacent":
             if neighbor_each_side <= 0:
                 return []
@@ -607,20 +599,13 @@ def run():
                             out.append(fr)
                 return out
             else:
-                # global_csv pool: adjacent in global_idx (CSV order if no global_idx)
-                key = (ref_ds, int(ref_idx))
-                ref_fr = global_by_key.get(key, None)
+                # global_csv pool: adjacent in CSV order
+                ref_fr = global_by_key.get(int(ref_idx), None)
                 if ref_fr is None:
                     return []
                 # find position in ordered list
                 try:
-                    if ref_fr.get("global_idx") is not None:
-                        pos = bisect.bisect_left(
-                            [int(fr["global_idx"]) for fr in global_ordered],
-                            int(ref_fr["global_idx"]),
-                        )
-                    else:
-                        pos = global_ordered.index(ref_fr)
+                    pos = global_ordered.index(ref_fr)
                 except Exception:
                     return []
                 out = []
@@ -628,36 +613,25 @@ def run():
                     j = pos - k
                     if j >= 0:
                         fr = dict(global_ordered[j])
-                        fr["id"] = (
-                            int(fr.get("global_idx"))
-                            if fr.get("global_idx") is not None
-                            else j
-                        )
+                        fr["id"] = fr.get("id", j)
                         out.append(fr)
                 for k in range(1, neighbor_each_side + 1):
                     j = pos + k
                     if j < len(global_ordered):
                         fr = dict(global_ordered[j])
-                        fr["id"] = (
-                            int(fr.get("global_idx"))
-                            if fr.get("global_idx") is not None
-                            else j
-                        )
+                        fr["id"] = fr.get("id", j)
                         out.append(fr)
                 return out
 
-        # nearest-by-distance (cross-dataset capable)
+        # nearest-by-distance
         if neighbor_pool_mode == "global_csv":
-            ref_fr = global_by_key.get((ref_ds, int(ref_idx)), None)
+            ref_fr = global_by_key.get(int(ref_idx), None)
             if ref_fr is None:
                 return []
             candidates = [
                 fr
                 for fr in global_frames
-                if not (
-                    fr.get("dataset") == ref_ds
-                    and int(fr.get("local_idx")) == int(ref_idx)
-                )
+                if int(fr.get("id", -1)) != int(ref_idx)
             ]
             picked = _select_nearest_neighbors(
                 ref_pos=tuple(ref_fr["pos"]),
@@ -669,11 +643,7 @@ def run():
             out = []
             for fr in picked:
                 d = dict(fr)
-                d["id"] = (
-                    int(d.get("global_idx"))
-                    if d.get("global_idx") is not None
-                    else int(d.get("local_idx", -1))
-                )
+                d["id"] = d.get("id", -1)
                 out.append(d)
             return out
         else:
@@ -684,8 +654,6 @@ def run():
                 {
                     "pos": local_pose[i]["pos"],
                     "quat": local_pose[i]["quat"],
-                    "dataset": ref_ds,
-                    "local_idx": i,
                     "left_path": data_loader.get_image_paths(i)[0],
                     "id": i,
                 }
@@ -709,7 +677,7 @@ def run():
 
         if neighbor_pool_mode == "local":
             # prefer already loaded local images
-            ni = int(fr.get("local_idx", fr.get("id", -1)))
+            ni = int(fr.get("id", -1))
             img = loaded_images.get(ni, None)
             if img is None:
                 bgr = cv2.imread(left_path)
@@ -731,9 +699,8 @@ def run():
         if pos is None or quat is None:
             return None
         R_n, T_n = _pose_unity_to_cv_RT(pos, quat)
-        # local_idxが存在する場合はそれを使用、そうでない場合はidを使用
-        # これにより、all_optimized_depthsのキーと一致する
-        image_idx = int(fr.get("local_idx", fr.get("id", -1)))
+        # all_optimized_depthsのキーと一致する
+        image_idx = int(fr.get("id", -1))
         return {
             "image": img,
             "image_idx": image_idx,
@@ -1123,11 +1090,7 @@ def run():
         _log_selected_neighbors(idx, neighbor_frames)
         for fr in neighbor_frames:
             # For Step 2, require that neighbor has an optimized depth.
-            # This check is necessary for both local and global_csv modes:
-            # - local: only neighbors from the same dataset
-            # - global_csv: may include neighbors from other datasets, but we can only use
-            #   those that have been processed (exist in all_optimized_depths)
-            ni = int(fr.get("local_idx", fr.get("id", -1)))
+            ni = int(fr.get("id", -1))
             if ni not in all_optimized_depths:
                 continue
             nv = _get_neighbor_view(idx, fr)
