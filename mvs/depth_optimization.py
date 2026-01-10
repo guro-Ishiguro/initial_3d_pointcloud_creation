@@ -1350,27 +1350,6 @@ class DepthOptimization:
             [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
         )
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
-        # 初期コストを計算（並列化版）
-        logging.info("Computing initial cost map (parallelized)...")
-        _initialize_cost_map_jit(
-            cost_map,
-            depth_map,
-            normal_map,
-            propagation_mask,
-            self.config.PATCHMATCH_PATCH_SIZE,
-            ref_image_gray,
-            ref_pose_K,
-            ref_pose_R,
-            ref_pose_T,
-            src_images_gray,
-            src_K,
-            src_R,
-            src_T,
-            self.config.TOP_K_COSTS,
-            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-            np.float32(self.config.ZNCC_EPSILON),
-        )
-        logging.info("Initial cost map computation completed.")
 
         # Early-stop state will be managed on-the-fly without predeclared thresholds
 
