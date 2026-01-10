@@ -1107,16 +1107,22 @@ def run():
         merged_cols_list.append(world_colors)
         pointcloud_elapsed = time.time() - pointcloud_start
         append_to_csv(time_csv_path, ["pointcloud", f"{pointcloud_elapsed:.6f}"])
-        logging.info(f"[{filename_stem}] 点群変換完了: {pointcloud_elapsed:.4f}秒")
+        logging.info(f"[{filename_stem}] 点群変換完了: {pointcloud_elapsed:.4f}秒 (点群数: {len(world_points)})")
 
-        logging.info(f"[{filename_stem}] 点群統合中...")
-        logging.info(f"[{filename_stem}] 点群統合中...")
+    # --- 全点群を一度だけ統合 ---
+    if merged_pts_list:
+        logging.info("")
+        logging.info("-" * 80)
+        logging.info("全点群を統合中...")
+        logging.info(f"統合対象: {len(merged_pts_list)}個の点群")
+        logging.info("-" * 80)
+        integ_start = time.time()
         integ_pts, integ_cols = point_cloud_integrator.integrate_depth_maps_median(
             merged_pts_list, merged_cols_list, voxel_size=0.1
         )
+        integ_elapsed = time.time() - integ_start
+        logging.info(f"点群統合完了: {len(integ_pts)}点 (処理時間: {integ_elapsed:.2f}秒)")
         last_integ_pts, last_integ_cols = integ_pts, integ_cols
-        logging.info(f"[{filename_stem}] 点群統合完了: {len(integ_pts)}点")
-        logging.info(f"[{filename_stem}] 点群統合完了: {len(integ_pts)}点")
 
     # --- 最終保存 ---
     logging.info("")
