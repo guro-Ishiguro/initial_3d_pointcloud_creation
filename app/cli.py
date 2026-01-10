@@ -77,7 +77,7 @@ def _get_mvs_yaml_path(project_root: str) -> str:
 def _write_prepass_mvs_yaml(project_root: str, out_path: str) -> str:
     """
     Create a temporary MVS YAML for a fast prepass:
-      - EXPORT_GT_PER_VIEW_ENABLE: false (avoid expensive GT export)
+      - DEBUG_SAVE_GT_DEPTH_MAPS: false (avoid expensive GT export)
     Other settings (especially frame selection) are inherited from the current mvs.yaml.
     Returns the written path (or empty string on failure).
     """
@@ -97,8 +97,7 @@ def _write_prepass_mvs_yaml(project_root: str, out_path: str) -> str:
     except Exception:
         cfg = {}
 
-    cfg["EXPORT_GT_PER_VIEW_ENABLE"] = False
-    cfg["EXPORT_GT_PER_VIEW_ONLY_TARGET"] = True
+    cfg["DEBUG_SAVE_GT_DEPTH_MAPS"] = False
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     try:

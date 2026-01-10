@@ -422,61 +422,37 @@ def run():
 
     # --- Log which images will be used (after subsampling & file existence checks) ---
     try:
-        save_selected_csv = bool(getattr(config, "SAVE_SELECTED_FRAMES_CSV", True))
-        if save_selected_csv:
-            selected_csv_name = (
-                str(
-                    getattr(config, "SELECTED_FRAMES_CSV_NAME", "selected_frames.csv")
-                ).strip()
-                or "selected_frames.csv"
-            )
-            selected_frames_csv_path = os.path.join(config.CSV_DIR, selected_csv_name)
-            with open(selected_frames_csv_path, "w", newline="") as f:
-                w = csv.writer(f)
-                w.writerow(["index", "left_path", "right_path"])
-                for idx in available_indices:
-                    _, _, left_path, right_path, _ = all_pairs_data[idx]
-                    w.writerow([idx, left_path, right_path])
-            logging.info(
-                f"Selected frames CSV saved: {selected_frames_csv_path} (count={len(available_indices)})"
-            )
-            max_print = int(getattr(config, "LOG_SELECTED_FRAMES_MAX", 10) or 10)
-            max_print = max(0, max_print)
-            if max_print > 0:
-                preview = available_indices[:max_print]
-                logging.info(
-                    f"Selected frame indices (first {len(preview)}): {preview}"
-                )
+        selected_frames_csv_path = os.path.join(config.CSV_DIR, "selected_frames.csv")
+        with open(selected_frames_csv_path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["index", "left_path", "right_path"])
+            for idx in available_indices:
+                _, _, left_path, right_path, _ = all_pairs_data[idx]
+                w.writerow([idx, left_path, right_path])
+        logging.info(
+            f"Selected frames CSV saved: {selected_frames_csv_path} (count={len(available_indices)})"
+        )
     except Exception as e:
         logging.warning(f"Failed to write selected frames CSV: {e}")
 
     # --- Plot & save selected camera poses (trajectory) ---
     try:
-        if bool(getattr(config, "SAVE_SELECTED_POSE_PLOT", True)):
-            plots_dir = os.path.join(config.OUTPUT_TYPE_DIR, "plots")
-            plot_name = (
-                str(
-                    getattr(
-                        config, "SELECTED_POSE_PLOT_NAME", "selected_camera_poses.png"
-                    )
-                ).strip()
-                or "selected_camera_poses.png"
-            )
-            plot_path = os.path.join(plots_dir, plot_name)
-            plane = str(getattr(config, "POSE_PLOT_PLANE", "xz") or "xz")
-            arrow_stride = int(getattr(config, "POSE_PLOT_ARROW_STRIDE", 5) or 5)
-            arrow_stride = max(1, arrow_stride)
-            arrow_scale = float(getattr(config, "POSE_PLOT_ARROW_SCALE", 0.25) or 0.25)
-            _save_selected_pose_plot(
-                data_loader=data_loader,
-                selected_indices=available_indices,
-                out_path=plot_path,
-                plane=plane,
-                arrow_stride=arrow_stride,
-                arrow_scale=arrow_scale,
-                title=f"Session={getattr(config, 'DATA_TYPE', '')} selected={len(available_indices)}",
-            )
-            logging.info(f"Selected pose plot saved: {plot_path}")
+        plots_dir = os.path.join(config.OUTPUT_TYPE_DIR, "plots")
+        plot_path = os.path.join(plots_dir, "selected_camera_poses.png")
+        plane = str(getattr(config, "POSE_PLOT_PLANE", "xz") or "xz")
+        arrow_stride = int(getattr(config, "POSE_PLOT_ARROW_STRIDE", 5) or 5)
+        arrow_stride = max(1, arrow_stride)
+        arrow_scale = float(getattr(config, "POSE_PLOT_ARROW_SCALE", 0.25) or 0.25)
+        _save_selected_pose_plot(
+            data_loader=data_loader,
+            selected_indices=available_indices,
+            out_path=plot_path,
+            plane=plane,
+            arrow_stride=arrow_stride,
+            arrow_scale=arrow_scale,
+            title=f"Session={getattr(config, 'DATA_TYPE', '')} selected={len(available_indices)}",
+        )
+        logging.info(f"Selected pose plot saved: {plot_path}")
     except Exception as e:
         logging.warning(f"Failed to save selected pose plot: {e}")
 
@@ -522,7 +498,7 @@ def run():
             )
         if not target_indices:
             logging.error(
-                "No TARGET_INDICES are available after filtering. Check FRAME_SELECTION_MODE or dataset integrity."
+                "No TARGET_INDICES are available after filtering. Check FRAME_STRIDE or dataset integrity."
             )
             return 1
     else:
@@ -534,11 +510,10 @@ def run():
 
     # --- Optional: Export GT depth PNGs per selected view (expensive; run after selection) ---
     try:
-        if bool(getattr(config, "EXPORT_GT_PER_VIEW_ENABLE", True)):
-            only_target = bool(getattr(config, "EXPORT_GT_PER_VIEW_ONLY_TARGET", True))
-            idxs = target_indices if only_target else available_indices
+        if bool(getattr(config, "DEBUG_SAVE_GT_DEPTH_MAPS", True)):
+            # 常に処理対象のビューのみエクスポート
             exported = _export_gt_depth_pngs_per_view(
-                indices=idxs,
+                indices=target_indices,
                 label_depth_dir=getattr(config, "LABEL_DEPTH_IMAGE_DIR", ""),
                 out_depth_dir=config.DEPTH_IMAGE_DIR,
                 all_pairs_data=all_pairs_data,
@@ -1135,71 +1110,6 @@ def run():
             #             flip_x=True,
             #         )
 
-            # integ_pts, integ_cols = point_cloud_integrator.integrate_depth_maps_median(
-            #     merged_pts_list, merged_cols_list, voxel_size=0.1
-            # )
-            # if getattr(config, "STREAMING_VIEWER", False) and integ_pts.size > 0:
-            #     try:
-            #         if vis is None:
-            #             vis = o3d.visualization.Visualizer()
-            #             vis.create_window(
-            #                 window_name="Streaming Point Cloud",
-            #                 width=1280,
-            #                 height=720,
-            #                 visible=True,
-            #             )
-            #             opt = vis.get_render_option()
-            #             opt.background_color = np.asarray([0, 0, 0])
-            #             added = False
-            #         live_pcd.points = o3d.utility.Vector3dVector(integ_pts)
-            #         live_pcd.colors = o3d.utility.Vector3dVector(integ_cols)
-            #         if not added:
-            #             vis.add_geometry(live_pcd)
-            #             # 初回のみカメラ姿勢を設定
-            #             ctr = vis.get_view_control()
-            #             front = np.asarray(
-            #                 getattr(config, "VIEWER_TOPDOWN_FRONT", [0.0, -1.0, 0.0])
-            #             )
-            #             up = np.asarray(
-            #                 getattr(config, "VIEWER_TOPDOWN_UP", [0.0, 0.0, 1.0])
-            #             )
-            #             # ロール回転（画面の回転）を up ベクトルに反映
-            #             roll_deg = float(getattr(config, "VIEWER_ROLL_DEG", 0.0))
-            #             if abs(roll_deg) > 1e-3:
-            #                 theta = np.deg2rad(roll_deg)
-            #                 # front 軸まわり回転（Rodrigues）
-            #                 f = front / (np.linalg.norm(front) + 1e-9)
-            #                 Kx = np.array(
-            #                     [[0, -f[2], f[1]], [f[2], 0, -f[0]], [-f[1], f[0], 0]],
-            #                     dtype=float,
-            #                 )
-            #                 Rf = (
-            #                     np.eye(3)
-            #                     + np.sin(theta) * Kx
-            #                     + (1 - np.cos(theta)) * (Kx @ Kx)
-            #                 )
-            #                 up = (Rf @ up.reshape(3, 1)).ravel()
-            #             center = (
-            #                 np.mean(integ_pts, axis=0)
-            #                 if integ_pts.size > 0
-            #                 else np.array([0, 0, 0], dtype=float)
-            #             )
-            #             zoom = float(getattr(config, "VIEWER_TOPDOWN_ZOOM", 0.7))
-            #             try:
-            #                 ctr.set_front(front)
-            #                 ctr.set_up(up)
-            #                 ctr.set_lookat(center)
-            #                 ctr.set_zoom(zoom)
-            #             except Exception:
-            #                 pass
-            #             added = True
-            #         else:
-            #             vis.update_geometry(live_pcd)
-            #         vis.poll_events()
-            #         vis.update_renderer()
-            #     except Exception as e:
-            #         logging.warning(f"Streaming viewer update failed: {e}")
-            # last_integ_pts, last_integ_cols = integ_pts, integ_cols
 
         except Exception as e:
             logging.error(f"Error in Step 1 for image pair {idx}: {e}", exc_info=True)
@@ -1344,11 +1254,6 @@ def run():
         "\n--- Step 3: Converting depth maps to point clouds and integrating ---"
     )
     merged_pts_list, merged_cols_list = [], []
-    live_pcd = None
-    vis = None
-    added = False
-    if getattr(config, "STREAMING_VIEWER", False):
-        live_pcd = o3d.geometry.PointCloud()
     last_integ_pts, last_integ_cols = None, None
 
     for idx in target_indices:
@@ -1386,67 +1291,6 @@ def run():
         integ_pts, integ_cols = point_cloud_integrator.integrate_depth_maps_median(
             merged_pts_list, merged_cols_list, voxel_size=0.1
         )
-        if getattr(config, "STREAMING_VIEWER", False) and integ_pts.size > 0:
-            try:
-                if vis is None:
-                    vis = o3d.visualization.Visualizer()
-                    vis.create_window(
-                        window_name="Streaming Point Cloud",
-                        width=1280,
-                        height=720,
-                        visible=True,
-                    )
-                    opt = vis.get_render_option()
-                    opt.background_color = np.asarray([0, 0, 0])
-                    added = False
-                live_pcd.points = o3d.utility.Vector3dVector(integ_pts)
-                live_pcd.colors = o3d.utility.Vector3dVector(integ_cols)
-                if not added:
-                    vis.add_geometry(live_pcd)
-                    # 初回のみカメラ姿勢を設定
-                    ctr = vis.get_view_control()
-                    front = np.asarray(
-                        getattr(config, "VIEWER_TOPDOWN_FRONT", [0.0, -1.0, 0.0])
-                    )
-                    up = np.asarray(
-                        getattr(config, "VIEWER_TOPDOWN_UP", [0.0, 0.0, 1.0])
-                    )
-                    # ロール回転（画面の回転）を up ベクトルに反映
-                    roll_deg = float(getattr(config, "VIEWER_ROLL_DEG", 0.0))
-                    if abs(roll_deg) > 1e-3:
-                        theta = np.deg2rad(roll_deg)
-                        # front 軸まわり回転（Rodrigues）
-                        f = front / (np.linalg.norm(front) + 1e-9)
-                        Kx = np.array(
-                            [[0, -f[2], f[1]], [f[2], 0, -f[0]], [-f[1], f[0], 0]],
-                            dtype=float,
-                        )
-                        Rf = (
-                            np.eye(3)
-                            + np.sin(theta) * Kx
-                            + (1 - np.cos(theta)) * (Kx @ Kx)
-                        )
-                        up = (Rf @ up.reshape(3, 1)).ravel()
-                    center = (
-                        np.mean(integ_pts, axis=0)
-                        if integ_pts.size > 0
-                        else np.array([0, 0, 0], dtype=float)
-                    )
-                    zoom = float(getattr(config, "VIEWER_TOPDOWN_ZOOM", 0.7))
-                    try:
-                        ctr.set_front(front)
-                        ctr.set_up(up)
-                        ctr.set_lookat(center)
-                        ctr.set_zoom(zoom)
-                    except Exception:
-                        pass
-                    added = True
-                else:
-                    vis.update_geometry(live_pcd)
-                vis.poll_events()
-                vis.update_renderer()
-            except Exception as e:
-                logging.warning(f"Streaming viewer update failed: {e}")
         last_integ_pts, last_integ_cols = integ_pts, integ_cols
 
     # --- 最終保存 ---
@@ -1499,23 +1343,7 @@ def run():
         if final_pcd and len(final_pcd.points) > 0:
             # 点群表示の制御（デフォルトは表示しない）
             show_point_cloud = getattr(config, "SHOW_POINT_CLOUD", False)
-            if getattr(config, "STREAMING_VIEWER", False) and show_point_cloud:
-                try:
-                    live_pcd.points = o3d.utility.Vector3dVector(
-                        np.asarray(final_pcd.points)
-                    )
-                    live_pcd.colors = o3d.utility.Vector3dVector(
-                        np.asarray(final_pcd.colors)
-                    )
-                    vis.update_geometry(live_pcd)
-                    logging.info(
-                        "Final cloud shown in streaming window. Close to exit."
-                    )
-                    vis.run()
-                    vis.destroy_window()
-                except Exception as e:
-                    logging.warning(f"Could not finalize streaming window: {e}")
-            elif show_point_cloud:
+            if show_point_cloud:
                 logging.info(
                     "Showing final integrated point cloud. Close the window to exit."
                 )
