@@ -532,6 +532,19 @@ class ConfigWidget(QWidget):
         widget = QWidget()
         layout = QFormLayout(widget)
 
+        # SHOW_POINT_CLOUD
+        self.config_widgets["SHOW_POINT_CLOUD"] = QCheckBox()
+        self.config_widgets["SHOW_POINT_CLOUD"].setChecked(
+            self._get_bool_value("SHOW_POINT_CLOUD", False)
+        )
+        layout.addRow(
+            QLabel("点群を表示:"), self.config_widgets["SHOW_POINT_CLOUD"]
+        )
+        layout.addRow(
+            QLabel(""),
+            QLabel("処理完了後に点群を3Dビューアで表示します。"),
+        )
+
         # VIZ_DEPTH_MIN
         self.config_widgets["VIZ_DEPTH_MIN"] = QDoubleSpinBox()
         self.config_widgets["VIZ_DEPTH_MIN"].setDecimals(1)
