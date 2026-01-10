@@ -1,11 +1,56 @@
-import argparse
+import logging
 import os
 import sys
-import threading
-import logging
-import tkinter as tk
-from tkinter import ttk, filedialog, scrolledtext
-from pathlib import Path
+import tempfile
+
+import yaml
+
+try:
+    from PyQt5.QtCore import QThread, pyqtSignal
+    from PyQt5.QtWidgets import (
+        QApplication,
+        QCheckBox,
+        QComboBox,
+        QDoubleSpinBox,
+        QFormLayout,
+        QHBoxLayout,
+        QLabel,
+        QMainWindow,
+        QProgressBar,
+        QPushButton,
+        QScrollArea,
+        QSpinBox,
+        QTabWidget,
+        QTextEdit,
+        QVBoxLayout,
+        QWidget,
+    )
+except ImportError:
+    try:
+        from PySide2.QtCore import QThread  # noqa: F401
+        from PySide2.QtCore import Signal as pyqtSignal
+        from PySide2.QtWidgets import (
+            QApplication,
+            QCheckBox,
+            QComboBox,
+            QDoubleSpinBox,
+            QFormLayout,
+            QHBoxLayout,
+            QLabel,
+            QMainWindow,
+            QProgressBar,
+            QPushButton,
+            QScrollArea,
+            QSpinBox,
+            QTabWidget,
+            QTextEdit,
+            QVBoxLayout,
+            QWidget,
+        )
+    except ImportError:
+        print("エラー: PyQt5またはPySide2が必要です。")
+        print("インストール方法: pip install PyQt5")
+        sys.exit(1)
 
 
 def _list_datasets(project_root: str):
@@ -18,252 +63,676 @@ def _list_datasets(project_root: str):
     return dirs
 
 
-class GUILogHandler(logging.Handler):
-    """GUIのログエリアにログを出力するハンドラ"""
-    def __init__(self, text_widget, root):
+def _load_default_config(config_path: str):
+    """デフォルト設定を読み込む"""
+    if os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f) or {}
+            # 数値型に変換
+            for key, value in config.items():
+                if isinstance(value, str):
+                    # 数値文字列を数値に変換
+                    try:
+                        if "." in value or "e" in value.lower():
+                            config[key] = float(value)
+                        else:
+                            config[key] = int(value)
+                    except ValueError:
+                        # 変換できない場合はそのまま（boolやNoneなど）
+                        if value.lower() in ("true", "false"):
+                            config[key] = value.lower() == "true"
+                        elif value.lower() == "null":
+                            config[key] = None
+            return config
+    return {}
+
+
+class PipelineThread(QThread):
+    """パイプラインを実行するスレッド"""
+
+    log_signal = pyqtSignal(str)
+    finished_signal = pyqtSignal(int)
+
+    def __init__(self, project_root, dataset, config_dict):
         super().__init__()
-        self.text_widget = text_widget
-        self.root = root
-        self.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
-    
+        self.project_root = project_root
+        self.dataset = dataset
+        self.config_dict = config_dict
+
+    def run(self):
+        """パイプラインを実行"""
+        try:
+            # 環境変数を設定
+            os.environ["DATA_TYPE"] = self.dataset
+
+            # 一時的なYAMLファイルを作成
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".yaml", delete=False
+            ) as f:
+                yaml.dump(
+                    self.config_dict, f, default_flow_style=False, allow_unicode=True
+                )
+                temp_config_path = f.name
+
+            try:
+                # 設定ファイルの適用
+                try:
+                    from app.settings import apply_env_overrides
+
+                    # 設定を環境変数に設定
+                    for key, value in self.config_dict.items():
+                        if value is not None:
+                            os.environ[key] = str(value)
+                    apply_env_overrides(temp_config_path)
+                    self.log_signal.emit(f"設定を適用しました。")
+                except Exception as e:
+                    self.log_signal.emit(f"警告: 設定の適用に失敗しました: {e}")
+
+                # ログハンドラを設定
+                root_logger = logging.getLogger()
+                handler = LogHandler(self.log_signal)
+                handler.setLevel(logging.INFO)
+                handler.setFormatter(
+                    logging.Formatter(
+                        "%(asctime)s - %(levelname)s - %(message)s",
+                        datefmt="%Y-%m-%d %H:%M:%S",
+                    )
+                )
+                root_logger.addHandler(handler)
+
+                try:
+                    # mvs.mainをインポートして実行
+                    try:
+                        from mvs import main as mvs_main
+                    except Exception:
+                        import importlib.util
+
+                        main_path = os.path.join(self.project_root, "mvs", "main.py")
+                        spec = importlib.util.spec_from_file_location(
+                            "mvs.main", main_path
+                        )
+                        m = importlib.util.module_from_spec(spec)
+                        assert spec and spec.loader
+                        spec.loader.exec_module(m)
+                        mvs_main = m
+
+                    # 実行
+                    result = mvs_main.run()
+                    self.finished_signal.emit(result)
+
+                finally:
+                    root_logger.removeHandler(handler)
+            finally:
+                # 一時ファイルを削除
+                try:
+                    os.unlink(temp_config_path)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            self.log_signal.emit(f"エラーが発生しました: {e}")
+            import traceback
+
+            self.log_signal.emit(traceback.format_exc())
+            self.finished_signal.emit(1)
+
+
+class LogHandler(logging.Handler):
+    """GUIのログエリアにログを出力するハンドラ"""
+
+    def __init__(self, signal):
+        super().__init__()
+        self.signal = signal
+
     def emit(self, record):
         """ログメッセージをGUIに表示"""
         try:
             msg = self.format(record)
-            # メインスレッドで実行
-            self.root.after(0, lambda: self._append_log(msg))
+            self.signal.emit(msg)
         except Exception:
             pass
-    
-    def _append_log(self, msg):
-        """ログを追加（メインスレッドで実行）"""
-        self.text_widget.insert(tk.END, msg + "\n")
-        self.text_widget.see(tk.END)
 
 
-class MVSGUI:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("3D Point Cloud Pipeline")
-        self.root.geometry("800x600")
-        
+class ConfigWidget(QWidget):
+    """設定入力ウィジェット"""
+
+    def __init__(self, default_config):
+        super().__init__()
+        self.config_widgets = {}
+        self.default_config = default_config
+        self._create_widgets()
+
+    def _get_int_value(self, key, default):
+        """整数値を取得（型変換付き）"""
+        value = self.default_config.get(key, default)
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                return default
+        return int(value) if value is not None else default
+
+    def _get_float_value(self, key, default):
+        """浮動小数点値を取得（型変換付き）"""
+        value = self.default_config.get(key, default)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError:
+                return default
+        return float(value) if value is not None else default
+
+    def _get_bool_value(self, key, default):
+        """ブール値を取得（型変換付き）"""
+        value = self.default_config.get(key, default)
+        if isinstance(value, str):
+            return value.lower() in ("true", "1", "yes", "on")
+        return bool(value) if value is not None else default
+
+    def _create_widgets(self):
+        """ウィジェットを作成"""
+        layout = QVBoxLayout(self)
+
+        # タブウィジェット
+        tabs = QTabWidget()
+        layout.addWidget(tabs)
+
+        # 各カテゴリのタブを作成
+        tabs.addTab(self._create_patchmatch_tab(), "PatchMatch基本")
+        tabs.addTab(self._create_filtering_tab(), "フィルタリング")
+        tabs.addTab(self._create_frame_tab(), "フレーム選択")
+        tabs.addTab(self._create_neighbor_tab(), "近傍ビュー")
+        tabs.addTab(self._create_debug_tab(), "デバッグ・出力")
+        tabs.addTab(self._create_visualization_tab(), "可視化")
+        tabs.addTab(self._create_other_tab(), "その他")
+
+    def _create_patchmatch_tab(self):
+        """PatchMatch基本パラメータのタブ"""
+        scroll = QScrollArea()
+        widget = QWidget()
+        layout = QFormLayout(widget)
+
+        # PATCHMATCH_ITERATIONS
+        self.config_widgets["PATCHMATCH_ITERATIONS"] = QSpinBox()
+        self.config_widgets["PATCHMATCH_ITERATIONS"].setRange(1, 100)
+        self.config_widgets["PATCHMATCH_ITERATIONS"].setValue(
+            self._get_int_value("PATCHMATCH_ITERATIONS", 10)
+        )
+        layout.addRow(
+            QLabel("PatchMatch反復回数:"), self.config_widgets["PATCHMATCH_ITERATIONS"]
+        )
+        layout.addRow(
+            QLabel(""),
+            QLabel(
+                "PatchMatchアルゴリズムの反復回数。多いほど精度が上がりますが時間がかかります。"
+            ),
+        )
+
+        # PATCHMATCH_PATCH_SIZE
+        self.config_widgets["PATCHMATCH_PATCH_SIZE"] = QSpinBox()
+        self.config_widgets["PATCHMATCH_PATCH_SIZE"].setRange(3, 15)
+        self.config_widgets["PATCHMATCH_PATCH_SIZE"].setValue(
+            self._get_int_value("PATCHMATCH_PATCH_SIZE", 7)
+        )
+        layout.addRow(
+            QLabel("パッチサイズ:"), self.config_widgets["PATCHMATCH_PATCH_SIZE"]
+        )
+        layout.addRow(
+            QLabel(""),
+            QLabel(
+                "マッチングに使用するパッチのサイズ（奇数）。大きいほど安定しますが計算コストが増えます。"
+            ),
+        )
+
+        # ZNCC_EPSILON
+        self.config_widgets["ZNCC_EPSILON"] = QDoubleSpinBox()
+        self.config_widgets["ZNCC_EPSILON"].setDecimals(10)
+        self.config_widgets["ZNCC_EPSILON"].setRange(1e-10, 1e-3)
+        self.config_widgets["ZNCC_EPSILON"].setSingleStep(1e-6)
+        self.config_widgets["ZNCC_EPSILON"].setValue(
+            self._get_float_value("ZNCC_EPSILON", 1e-6)
+        )
+        layout.addRow(QLabel("ZNCCイプシロン:"), self.config_widgets["ZNCC_EPSILON"])
+        layout.addRow(QLabel(""), QLabel("ZNCC計算時のゼロ除算を防ぐための小さな値。"))
+
+        # TOP_K_COSTS
+        self.config_widgets["TOP_K_COSTS"] = QSpinBox()
+        self.config_widgets["TOP_K_COSTS"].setRange(1, 20)
+        self.config_widgets["TOP_K_COSTS"].setValue(
+            self._get_int_value("TOP_K_COSTS", 5)
+        )
+        layout.addRow(QLabel("Top-Kコスト数:"), self.config_widgets["TOP_K_COSTS"])
+        layout.addRow(QLabel(""), QLabel("コスト集約時に使用する上位K個のコスト値。"))
+
+        # PATCHMATCH_DECAY_RATE
+        self.config_widgets["PATCHMATCH_DECAY_RATE"] = QDoubleSpinBox()
+        self.config_widgets["PATCHMATCH_DECAY_RATE"].setDecimals(2)
+        self.config_widgets["PATCHMATCH_DECAY_RATE"].setRange(0.1, 1.0)
+        self.config_widgets["PATCHMATCH_DECAY_RATE"].setSingleStep(0.1)
+        self.config_widgets["PATCHMATCH_DECAY_RATE"].setValue(
+            self._get_float_value("PATCHMATCH_DECAY_RATE", 0.9)
+        )
+        layout.addRow(QLabel("減衰率:"), self.config_widgets["PATCHMATCH_DECAY_RATE"])
+        layout.addRow(
+            QLabel(""),
+            QLabel(
+                "ランダムサーチの探索範囲を減衰させる率。イテレーションごとに探索範囲が狭くなります。"
+            ),
+        )
+
+        # PATCHMATCH_NORMAL_SEARCH_ANGLE
+        self.config_widgets["PATCHMATCH_NORMAL_SEARCH_ANGLE"] = QDoubleSpinBox()
+        self.config_widgets["PATCHMATCH_NORMAL_SEARCH_ANGLE"].setDecimals(1)
+        self.config_widgets["PATCHMATCH_NORMAL_SEARCH_ANGLE"].setRange(0.0, 90.0)
+        self.config_widgets["PATCHMATCH_NORMAL_SEARCH_ANGLE"].setValue(
+            self._get_float_value("PATCHMATCH_NORMAL_SEARCH_ANGLE", 20.0)
+        )
+        layout.addRow(
+            QLabel("法線探索角度:"),
+            self.config_widgets["PATCHMATCH_NORMAL_SEARCH_ANGLE"],
+        )
+        layout.addRow(
+            QLabel(""), QLabel("ランダムサーチで法線を探索する角度範囲（度）。")
+        )
+
+        # ADAPTIVE_WEIGHT_SIGMA_COLOR
+        self.config_widgets["ADAPTIVE_WEIGHT_SIGMA_COLOR"] = QDoubleSpinBox()
+        self.config_widgets["ADAPTIVE_WEIGHT_SIGMA_COLOR"].setDecimals(1)
+        self.config_widgets["ADAPTIVE_WEIGHT_SIGMA_COLOR"].setRange(1.0, 50.0)
+        self.config_widgets["ADAPTIVE_WEIGHT_SIGMA_COLOR"].setValue(
+            self._get_float_value("ADAPTIVE_WEIGHT_SIGMA_COLOR", 10.0)
+        )
+        layout.addRow(
+            QLabel("適応重みシグマ（色）:"),
+            self.config_widgets["ADAPTIVE_WEIGHT_SIGMA_COLOR"],
+        )
+        layout.addRow(
+            QLabel(""),
+            QLabel(
+                "色差に基づく適応的重み付けのシグマ値。大きいほど色差の影響が小さくなります。"
+            ),
+        )
+
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        return scroll
+
+    def _create_filtering_tab(self):
+        """フィルタリングパラメータのタブ"""
+        scroll = QScrollArea()
+        widget = QWidget()
+        layout = QFormLayout(widget)
+
+        # FILTERING_COLOR_DIFFERENCE_THRESHOLD
+        self.config_widgets["FILTERING_COLOR_DIFFERENCE_THRESHOLD"] = QDoubleSpinBox()
+        self.config_widgets["FILTERING_COLOR_DIFFERENCE_THRESHOLD"].setDecimals(1)
+        self.config_widgets["FILTERING_COLOR_DIFFERENCE_THRESHOLD"].setRange(0.0, 255.0)
+        self.config_widgets["FILTERING_COLOR_DIFFERENCE_THRESHOLD"].setValue(
+            self._get_float_value("FILTERING_COLOR_DIFFERENCE_THRESHOLD", 20.0)
+        )
+        layout.addRow(
+            QLabel("色差閾値:"),
+            self.config_widgets["FILTERING_COLOR_DIFFERENCE_THRESHOLD"],
+        )
+        layout.addRow(QLabel(""), QLabel("光度一貫性フィルタリングでの色差の閾値。"))
+
+        # FILTERING_MIN_CONSISTENT_VIEWS
+        self.config_widgets["FILTERING_MIN_CONSISTENT_VIEWS"] = QSpinBox()
+        self.config_widgets["FILTERING_MIN_CONSISTENT_VIEWS"].setRange(1, 20)
+        self.config_widgets["FILTERING_MIN_CONSISTENT_VIEWS"].setValue(
+            self._get_int_value("FILTERING_MIN_CONSISTENT_VIEWS", 3)
+        )
+        layout.addRow(
+            QLabel("最小一貫ビュー数（光度）:"),
+            self.config_widgets["FILTERING_MIN_CONSISTENT_VIEWS"],
+        )
+        layout.addRow(
+            QLabel(""), QLabel("光度一貫性チェックで必要な最小の一貫ビュー数。")
+        )
+
+        # GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD
+        self.config_widgets["GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD"] = QDoubleSpinBox()
+        self.config_widgets["GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD"].setDecimals(4)
+        self.config_widgets["GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD"].setRange(0.0, 1.0)
+        self.config_widgets["GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD"].setValue(
+            self._get_float_value("GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD", 0.05)
+        )
+        layout.addRow(
+            QLabel("幾何一貫性エラー閾値:"),
+            self.config_widgets["GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD"],
+        )
+        layout.addRow(
+            QLabel(""), QLabel("幾何学的な一貫性チェックでの相対深度差の閾値。")
+        )
+
+        # GEOMETRIC_MIN_CONSISTENT_VIEWS
+        self.config_widgets["GEOMETRIC_MIN_CONSISTENT_VIEWS"] = QSpinBox()
+        self.config_widgets["GEOMETRIC_MIN_CONSISTENT_VIEWS"].setRange(1, 20)
+        self.config_widgets["GEOMETRIC_MIN_CONSISTENT_VIEWS"].setValue(
+            self._get_int_value("GEOMETRIC_MIN_CONSISTENT_VIEWS", 2)
+        )
+        layout.addRow(
+            QLabel("最小一貫ビュー数（幾何）:"),
+            self.config_widgets["GEOMETRIC_MIN_CONSISTENT_VIEWS"],
+        )
+        layout.addRow(
+            QLabel(""), QLabel("幾何学的な一貫性チェックで必要な最小の一貫ビュー数。")
+        )
+
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        return scroll
+
+    def _create_frame_tab(self):
+        """フレーム選択パラメータのタブ"""
+        scroll = QScrollArea()
+        widget = QWidget()
+        layout = QFormLayout(widget)
+
+        # FRAME_STRIDE
+        self.config_widgets["FRAME_STRIDE"] = QSpinBox()
+        self.config_widgets["FRAME_STRIDE"].setRange(1, 100)
+        self.config_widgets["FRAME_STRIDE"].setValue(
+            self._get_int_value("FRAME_STRIDE", 15)
+        )
+        layout.addRow(
+            QLabel("フレームストライド:"), self.config_widgets["FRAME_STRIDE"]
+        )
+        layout.addRow(
+            QLabel(""),
+            QLabel(
+                "処理するフレームの間隔。1なら全フレーム、15なら15フレームごとに処理します。"
+            ),
+        )
+
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        return scroll
+
+    def _create_neighbor_tab(self):
+        """近傍ビュー選択パラメータのタブ"""
+        scroll = QScrollArea()
+        widget = QWidget()
+        layout = QFormLayout(widget)
+
+        # MAX_NEIGHBORS
+        self.config_widgets["MAX_NEIGHBORS"] = QSpinBox()
+        self.config_widgets["MAX_NEIGHBORS"].setRange(1, 50)
+        self.config_widgets["MAX_NEIGHBORS"].setValue(
+            self._get_int_value("MAX_NEIGHBORS", 8)
+        )
+        layout.addRow(QLabel("最大近傍数:"), self.config_widgets["MAX_NEIGHBORS"])
+        layout.addRow(QLabel(""), QLabel("使用する近傍ビューの最大数。"))
+
+        # NEIGHBOR_SELECTION_MODE
+        self.config_widgets["NEIGHBOR_SELECTION_MODE"] = QComboBox()
+        self.config_widgets["NEIGHBOR_SELECTION_MODE"].addItems(["nearest", "keyframe"])
+        mode = self.default_config.get("NEIGHBOR_SELECTION_MODE", "nearest")
+        index = 0 if mode == "nearest" else 1
+        self.config_widgets["NEIGHBOR_SELECTION_MODE"].setCurrentIndex(index)
+        layout.addRow(
+            QLabel("近傍選択モード:"), self.config_widgets["NEIGHBOR_SELECTION_MODE"]
+        )
+        layout.addRow(
+            QLabel(""), QLabel("nearest: 距離が近い順、keyframe: キーフレームベース。")
+        )
+
+        # NEIGHBOR_NEAREST_COUNT
+        self.config_widgets["NEIGHBOR_NEAREST_COUNT"] = QSpinBox()
+        self.config_widgets["NEIGHBOR_NEAREST_COUNT"].setRange(1, 50)
+        self.config_widgets["NEIGHBOR_NEAREST_COUNT"].setValue(
+            self._get_int_value("NEIGHBOR_NEAREST_COUNT", 10)
+        )
+        layout.addRow(
+            QLabel("近傍数（nearest）:"), self.config_widgets["NEIGHBOR_NEAREST_COUNT"]
+        )
+        layout.addRow(QLabel(""), QLabel("nearestモードで選択する近傍の数。"))
+
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        return scroll
+
+    def _create_debug_tab(self):
+        """デバッグ・出力設定のタブ"""
+        scroll = QScrollArea()
+        widget = QWidget()
+        layout = QFormLayout(widget)
+
+        # DEBUG_SAVE_DEPTH_MAPS
+        self.config_widgets["DEBUG_SAVE_DEPTH_MAPS"] = QCheckBox()
+        self.config_widgets["DEBUG_SAVE_DEPTH_MAPS"].setChecked(
+            self._get_bool_value("DEBUG_SAVE_DEPTH_MAPS", True)
+        )
+        layout.addRow(
+            QLabel("深度マップを保存:"), self.config_widgets["DEBUG_SAVE_DEPTH_MAPS"]
+        )
+        layout.addRow(
+            QLabel(""), QLabel("各イテレーションの深度マップをPNG形式で保存します。")
+        )
+
+        # DEBUG_SAVE_NORMAL_MAPS
+        self.config_widgets["DEBUG_SAVE_NORMAL_MAPS"] = QCheckBox()
+        self.config_widgets["DEBUG_SAVE_NORMAL_MAPS"].setChecked(
+            self._get_bool_value("DEBUG_SAVE_NORMAL_MAPS", True)
+        )
+        layout.addRow(
+            QLabel("法線マップを保存:"), self.config_widgets["DEBUG_SAVE_NORMAL_MAPS"]
+        )
+        layout.addRow(
+            QLabel(""), QLabel("各イテレーションの法線マップをPNG形式で保存します。")
+        )
+
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        return scroll
+
+    def _create_visualization_tab(self):
+        """可視化パラメータのタブ"""
+        scroll = QScrollArea()
+        widget = QWidget()
+        layout = QFormLayout(widget)
+
+        # VIZ_DEPTH_MIN
+        self.config_widgets["VIZ_DEPTH_MIN"] = QDoubleSpinBox()
+        self.config_widgets["VIZ_DEPTH_MIN"].setDecimals(1)
+        self.config_widgets["VIZ_DEPTH_MIN"].setRange(0.0, 1000.0)
+        self.config_widgets["VIZ_DEPTH_MIN"].setValue(
+            self._get_float_value("VIZ_DEPTH_MIN", 17.0)
+        )
+        layout.addRow(QLabel("可視化深度最小値:"), self.config_widgets["VIZ_DEPTH_MIN"])
+        layout.addRow(QLabel(""), QLabel("深度マップ可視化時の最小深度値。"))
+
+        # VIZ_DEPTH_MAX
+        self.config_widgets["VIZ_DEPTH_MAX"] = QDoubleSpinBox()
+        self.config_widgets["VIZ_DEPTH_MAX"].setDecimals(1)
+        self.config_widgets["VIZ_DEPTH_MAX"].setRange(0.0, 1000.0)
+        self.config_widgets["VIZ_DEPTH_MAX"].setValue(
+            self._get_float_value("VIZ_DEPTH_MAX", 36.0)
+        )
+        layout.addRow(QLabel("可視化深度最大値:"), self.config_widgets["VIZ_DEPTH_MAX"])
+        layout.addRow(QLabel(""), QLabel("深度マップ可視化時の最大深度値。"))
+
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        return scroll
+
+    def _create_other_tab(self):
+        """その他のタブ"""
+        scroll = QScrollArea()
+        widget = QWidget()
+        layout = QFormLayout(widget)
+
+        layout.addRow(QLabel("その他の設定項目は現在のデフォルト値が使用されます。"))
+
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        return scroll
+
+    def get_config(self):
+        """現在の設定値を取得"""
+        config = {}
+        for key, widget in self.config_widgets.items():
+            if isinstance(widget, QCheckBox):
+                config[key] = widget.isChecked()
+            elif isinstance(widget, QComboBox):
+                config[key] = widget.currentText()
+            elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+                config[key] = widget.value()
+        return config
+
+
+class MVSGUI(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("3D Point Cloud Pipeline")
+        self.setGeometry(100, 100, 900, 700)
+
         # プロジェクトルートを取得
-        self.project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        self.project_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..")
+        )
         self.mvs_dir = os.path.join(self.project_root, "mvs")
-        
+
         # sys.pathに追加
         if self.project_root not in sys.path:
             sys.path.insert(0, self.project_root)
         if self.mvs_dir not in sys.path:
             sys.path.insert(0, self.mvs_dir)
-        
+
+        # デフォルト設定を読み込み
+        default_config_path = os.path.join(self.project_root, "app", "mvs.yaml")
+        self.default_config = _load_default_config(default_config_path)
+
         # 変数
-        self.selected_dataset = tk.StringVar()
-        self.config_path = tk.StringVar()
-        self.is_running = False
-        self.log_handler = None
-        
+        self.pipeline_thread = None
+
         self._create_widgets()
         self._load_datasets()
-    
+
     def _create_widgets(self):
         """ウィジェットを作成"""
-        # メインフレーム
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        # グリッドの重み設定
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(3, weight=1)
-        
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        layout = QVBoxLayout(central_widget)
+        layout.setSpacing(10)
+
         # データセット選択
-        ttk.Label(main_frame, text="データセット:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        dataset_combo = ttk.Combobox(main_frame, textvariable=self.selected_dataset, state="readonly", width=50)
-        dataset_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5, padx=5)
-        self.dataset_combo = dataset_combo
-        
-        # 設定ファイル選択
-        ttk.Label(main_frame, text="設定ファイル:").grid(row=1, column=0, sticky=tk.W, pady=5)
-        config_frame = ttk.Frame(main_frame)
-        config_frame.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=5, padx=5)
-        config_frame.columnconfigure(0, weight=1)
-        
-        config_entry = ttk.Entry(config_frame, textvariable=self.config_path, width=40)
-        config_entry.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 5))
-        
-        ttk.Button(config_frame, text="参照...", command=self._browse_config).grid(row=0, column=1)
-        ttk.Button(config_frame, text="クリア", command=lambda: self.config_path.set("")).grid(row=0, column=2, padx=(5, 0))
-        
+        dataset_layout = QHBoxLayout()
+        dataset_layout.addWidget(QLabel("データセット:"))
+        self.dataset_combo = QComboBox()
+        self.dataset_combo.setMinimumWidth(300)
+        dataset_layout.addWidget(self.dataset_combo)
+        dataset_layout.addStretch()
+        layout.addLayout(dataset_layout)
+
+        # 設定タブ
+        self.config_widget = ConfigWidget(self.default_config)
+        layout.addWidget(self.config_widget)
+
         # 実行ボタン
-        self.run_button = ttk.Button(main_frame, text="実行", command=self._run_pipeline, width=20)
-        self.run_button.grid(row=2, column=0, columnspan=2, pady=10)
-        
+        self.run_button = QPushButton("実行")
+        self.run_button.clicked.connect(self._run_pipeline)
+        self.run_button.setMinimumHeight(40)
+        layout.addWidget(self.run_button)
+
         # ログ表示エリア
-        ttk.Label(main_frame, text="ログ:").grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
-        
-        log_frame = ttk.Frame(main_frame)
-        log_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
-        
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=20, width=80, wrap=tk.WORD)
-        self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
+        layout.addWidget(QLabel("ログ:"))
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setFontFamily("Courier")
+        self.log_text.setMaximumHeight(200)
+        layout.addWidget(self.log_text)
+
         # クリアボタン
-        ttk.Button(main_frame, text="ログをクリア", command=self._clear_log).grid(row=5, column=0, columnspan=2, pady=5)
-        
+        clear_log_btn = QPushButton("ログをクリア")
+        clear_log_btn.clicked.connect(self._clear_log)
+        layout.addWidget(clear_log_btn)
+
         # 進捗バー
-        self.progress = ttk.Progressbar(main_frame, mode='indeterminate')
-        self.progress.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-    
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)  # 不定進捗
+        self.progress.setVisible(False)
+        layout.addWidget(self.progress)
+
     def _load_datasets(self):
         """データセットのリストを読み込み"""
         datasets = _list_datasets(self.project_root)
         if datasets:
-            self.dataset_combo['values'] = datasets
-            if len(datasets) == 1:
-                self.selected_dataset.set(datasets[0])
-            elif datasets:
-                self.selected_dataset.set(datasets[0])
+            self.dataset_combo.addItems(datasets)
+            if datasets:
+                self.dataset_combo.setCurrentIndex(0)
         else:
             self._log("警告: データセットが見つかりませんでした。")
-            self.run_button.config(state='disabled')
-    
-    def _browse_config(self):
-        """設定ファイルを選択"""
-        initial_dir = os.path.join(self.project_root, "app")
-        if not os.path.exists(initial_dir):
-            initial_dir = self.project_root
-        
-        filename = filedialog.askopenfilename(
-            title="設定ファイルを選択",
-            initialdir=initial_dir,
-            filetypes=[("YAML files", "*.yaml *.yml"), ("All files", "*.*")]
-        )
-        if filename:
-            self.config_path.set(filename)
-    
+            self.run_button.setEnabled(False)
+
     def _log(self, message):
         """ログを表示"""
-        self.log_text.insert(tk.END, message + "\n")
-        self.log_text.see(tk.END)
-        self.root.update_idletasks()
-    
+        self.log_text.append(message)
+        # 自動スクロール
+        scrollbar = self.log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
     def _clear_log(self):
         """ログをクリア"""
-        self.log_text.delete(1.0, tk.END)
-    
+        self.log_text.clear()
+
     def _run_pipeline(self):
         """パイプラインを実行"""
-        if self.is_running:
+        if self.pipeline_thread and self.pipeline_thread.isRunning():
             self._log("既に実行中です。")
             return
-        
+
         # データセットの確認
-        dataset = self.selected_dataset.get()
+        dataset = self.dataset_combo.currentText()
         if not dataset:
             self._log("エラー: データセットを選択してください。")
             return
-        
+
         datasets = _list_datasets(self.project_root)
         if dataset not in datasets:
             self._log(f"エラー: データセット '{dataset}' が見つかりません。")
             return
-        
-        # 設定ファイルの確認
-        config_path = self.config_path.get().strip()
-        if config_path and not os.path.exists(config_path):
-            self._log(f"警告: 設定ファイル '{config_path}' が見つかりません。デフォルト設定を使用します。")
-            config_path = None
-        
+
+        # 設定を取得
+        config_dict = self.config_widget.get_config()
+
         # UIを無効化
-        self.is_running = True
-        self.run_button.config(state='disabled')
-        self.dataset_combo.config(state='disabled')
-        self.progress.start()
-        
-        # 別スレッドで実行
-        thread = threading.Thread(target=self._execute_pipeline, args=(dataset, config_path))
-        thread.daemon = True
-        thread.start()
-    
-    def _execute_pipeline(self, dataset, config_path):
-        """パイプラインを実行（別スレッド）"""
-        try:
-            self._log(f"データセット '{dataset}' でパイプラインを開始します...")
-            
-            # 環境変数を設定
-            os.environ["DATA_TYPE"] = dataset
-            
-            # 設定ファイルの適用
-            if config_path:
-                try:
-                    from app.settings import apply_env_overrides
-                    apply_env_overrides(config_path)
-                    self._log(f"設定ファイル '{config_path}' を読み込みました。")
-                except Exception as e:
-                    self._log(f"警告: 設定ファイルの読み込みに失敗しました: {e}")
-            
-            # ログハンドラを設定
-            root_logger = logging.getLogger()
-            
-            # GUI用のログハンドラを追加
-            self.log_handler = GUILogHandler(self.log_text, self.root)
-            self.log_handler.setLevel(logging.INFO)
-            root_logger.addHandler(self.log_handler)
-            
-            try:
-                # mvs.mainをインポートして実行
-                try:
-                    from mvs import main as mvs_main
-                except Exception:
-                    import importlib.util
-                    main_path = os.path.join(self.project_root, "mvs", "main.py")
-                    spec = importlib.util.spec_from_file_location("mvs.main", main_path)
-                    m = importlib.util.module_from_spec(spec)
-                    assert spec and spec.loader
-                    spec.loader.exec_module(m)
-                    mvs_main = m
-                
-                # 実行
-                result = mvs_main.run()
-                
-                if result == 0:
-                    self._log("パイプラインが正常に完了しました。")
-                else:
-                    self._log(f"パイプラインがエラーで終了しました（コード: {result}）。")
-                    
-            finally:
-                # ログハンドラを削除
-                if self.log_handler:
-                    root_logger.removeHandler(self.log_handler)
-                    self.log_handler = None
-                
-        except Exception as e:
-            self._log(f"エラーが発生しました: {e}")
-            import traceback
-            self._log(traceback.format_exc())
-        finally:
-            # UIを有効化
-            self.root.after(0, self._reset_ui)
-    
-    def _reset_ui(self):
-        """UIをリセット"""
-        self.is_running = False
-        self.run_button.config(state='normal')
-        self.dataset_combo.config(state='readonly')
-        self.progress.stop()
+        self.run_button.setEnabled(False)
+        self.dataset_combo.setEnabled(False)
+        self.config_widget.setEnabled(False)
+        self.progress.setVisible(True)
+
+        self._log(f"データセット '{dataset}' でパイプラインを開始します...")
+
+        # スレッドで実行
+        self.pipeline_thread = PipelineThread(self.project_root, dataset, config_dict)
+        self.pipeline_thread.log_signal.connect(self._log)
+        self.pipeline_thread.finished_signal.connect(self._on_pipeline_finished)
+        self.pipeline_thread.start()
+
+    def _on_pipeline_finished(self, result):
+        """パイプライン完了時の処理"""
+        if result == 0:
+            self._log("パイプラインが正常に完了しました。")
+        else:
+            self._log(f"パイプラインがエラーで終了しました（コード: {result}）。")
+
+        # UIを有効化
+        self.run_button.setEnabled(True)
+        self.dataset_combo.setEnabled(True)
+        self.config_widget.setEnabled(True)
+        self.progress.setVisible(False)
+        self.pipeline_thread = None
 
 
 def main():
     """GUIアプリケーションを起動"""
-    root = tk.Tk()
-    app = MVSGUI(root)
-    root.mainloop()
+    app = QApplication(sys.argv)
+    window = MVSGUI()
+    window.show()
+    sys.exit(app.exec_())
 
 
 if __name__ == "__main__":
     main()
-
