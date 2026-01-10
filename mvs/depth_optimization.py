@@ -7,7 +7,6 @@ import time
 
 import cv2
 import numpy as np
-from logging_setup import time_block
 from numba import cuda, njit, prange
 from numba.cuda.random import create_xoroshiro128p_states
 from utils import (
@@ -1835,52 +1834,22 @@ class DepthOptimization:
             )
 
             # Propagation (checkerboard)
-            with time_block("GPU propagate checkerboard"):
-                neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
-                neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
-                d_neighbors_dr = cuda.to_device(neighbors_dr)
-                d_neighbors_dc = cuda.to_device(neighbors_dc)
-                for j in [0, 1]:
-                    _propagate_spatial_one_color_cuda[blockspergrid, threadsperblock](
-                        d_depth_map,
-                        d_normal_map,
-                        d_cost_map,
-                        d_propagation_mask,
-                        d_neighbors_dr,
-                        d_neighbors_dc,
-                        j,
-                        7,
-                        3,
-                        10,
-                        np.float32(self.config.ZNCC_EPSILON),
-                        d_ref_image_gray,
-                        d_ref_pose_K,
-                        d_ref_pose_R,
-                        d_ref_pose_T,
-                        d_src_images_gray,
-                        d_src_K,
-                        d_src_R,
-                        d_src_T,
-                    )
-
-            # Random Search
-            depth_range_map = (
-                initial_depth_error.astype(np.float32)
-                * (self.config.PATCHMATCH_DECAY_RATE**i)
-            ).astype(np.float32)
-            cuda.to_device(depth_range_map, to=d_depth_range_map)
-
-            with time_block("GPU random_search"):
-                _random_search_cuda[blockspergrid, threadsperblock](
+            neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
+            neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
+            d_neighbors_dr = cuda.to_device(neighbors_dr)
+            d_neighbors_dc = cuda.to_device(neighbors_dc)
+            for j in [0, 1]:
+                _propagate_spatial_one_color_cuda[blockspergrid, threadsperblock](
                     d_depth_map,
                     d_normal_map,
                     d_cost_map,
                     d_propagation_mask,
-                    i,
-                    self.config.PATCHMATCH_PATCH_SIZE,
-                    self.config.TOP_K_COSTS,
-                    self.config.PATCHMATCH_DECAY_RATE,
-                    self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE,
+                    d_neighbors_dr,
+                    d_neighbors_dc,
+                    j,
+                    7,
+                    3,
+                    10,
                     np.float32(self.config.ZNCC_EPSILON),
                     d_ref_image_gray,
                     d_ref_pose_K,
@@ -1890,10 +1859,37 @@ class DepthOptimization:
                     d_src_K,
                     d_src_R,
                     d_src_T,
-                    self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
-                    d_depth_range_map,
-                    rng_states,
                 )
+
+            # Random Search
+            depth_range_map = (
+                initial_depth_error.astype(np.float32)
+                * (self.config.PATCHMATCH_DECAY_RATE**i)
+            ).astype(np.float32)
+            cuda.to_device(depth_range_map, to=d_depth_range_map)
+            _random_search_cuda[blockspergrid, threadsperblock](
+                d_depth_map,
+                d_normal_map,
+                d_cost_map,
+                d_propagation_mask,
+                i,
+                self.config.PATCHMATCH_PATCH_SIZE,
+                self.config.TOP_K_COSTS,
+                self.config.PATCHMATCH_DECAY_RATE,
+                self.config.PATCHMATCH_NORMAL_SEARCH_ANGLE,
+                np.float32(self.config.ZNCC_EPSILON),
+                d_ref_image_gray,
+                d_ref_pose_K,
+                d_ref_pose_R,
+                d_ref_pose_T,
+                d_src_images_gray,
+                d_src_K,
+                d_src_R,
+                d_src_T,
+                self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+                d_depth_range_map,
+                rng_states,
+            )
             cuda.synchronize()
 
             # Mark cumulative timer start after first successful kernel run (exclude initial JIT)
