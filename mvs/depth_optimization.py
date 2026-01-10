@@ -1934,7 +1934,7 @@ class DepthOptimization:
             cum_txt = ""
             if first_iter_start_time is not None:
                 cum_time = time.time() - first_iter_start_time
-                cum_txt = f" | cum={cum_time:.2f}s"
+                cum_txt = f", 累積: {cum_time:.2f}秒"
             if gt_depth is not None:
                 if depth_tmp is None:
                     depth_host = d_depth_map.copy_to_host()
@@ -1943,7 +1943,8 @@ class DepthOptimization:
                 try:
                     metrics = compute_depth_metrics(depth_host, gt_depth)
                     logging.info(
-                        f"[GPU] Iter {i+1}: {iter_duration:.2f}s{cum_txt} | "
+                        f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] イテレーション {i+1}/{self.config.PATCHMATCH_ITERATIONS} "
+                        f"(経過時間: {iter_duration:.2f}秒{cum_txt}) | "
                         f"MAE={metrics['mae']:.4f}, AbsRel={metrics['abs_rel']:.4f}, SqRel={metrics['sq_rel']:.4f}, "
                         f"RMSE={metrics['rmse']:.4f}, RMSElog={metrics['rmse_log']:.4f}, "
                         f"d1={metrics['delta1']:.4f}, d2={metrics['delta2']:.4f}, d3={metrics['delta3']:.4f}"
@@ -1954,7 +1955,10 @@ class DepthOptimization:
                         f"[GPU] Could not compute metrics at iter {i+1}: {e}"
                     )
             else:
-                logging.info(f"[GPU] Iter {i+1}: {iter_duration:.2f}s{cum_txt}")
+                logging.info(
+                    f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] イテレーション {i+1}/{self.config.PATCHMATCH_ITERATIONS} "
+                    f"(経過時間: {iter_duration:.2f}秒{cum_txt})"
+                )
 
             # Early convergence check disabled
             # depth_curr = d_depth_map.copy_to_host()

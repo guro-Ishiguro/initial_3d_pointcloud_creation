@@ -651,8 +651,9 @@ def run():
             disp = image_processor.create_disparity(li_gray, ri_gray)
             initial_depth = depth_estimator.disparity_to_depth(disp)
             end_time_initial_depth = time.time()
+            elapsed_initial = end_time_initial_depth - start_time_initial_depth
             logging.info(
-                f"[{filename_stem}] 初期深度計算完了: {end_time_initial_depth - start_time_initial_depth:.4f}秒"
+                f"[{filename_stem}] 初期深度計算完了 (経過時間: {elapsed_initial:.2f}秒)"
             )
 
             save_disparity_map_with_colorbar(
@@ -723,7 +724,7 @@ def run():
             )
             refine_elapsed = time.time() - refine_start
             logging.info(
-                f"[{filename_stem}] PatchMatch最適化完了: {refine_elapsed:.2f}秒"
+                f"[{filename_stem}] PatchMatch最適化完了 (経過時間: {refine_elapsed:.2f}秒)"
             )
             # 各イテレーションの時間をtime.csvに記録
             if iter_times_gpu is not None and len(iter_times_gpu) > 0:
@@ -757,7 +758,7 @@ def run():
                 )
             )
             photo_elapsed = time.time() - photo_start
-            logging.info(f"[{filename_stem}] 光度フィルタリング完了: {photo_elapsed:.4f}秒")
+            logging.info(f"[{filename_stem}] 光度フィルタリング完了 (経過時間: {photo_elapsed:.2f}秒)")
             append_to_csv(time_csv_path, ["photometric", f"{photo_elapsed:.6f}"])
             logging.debug(
                 f"Saved photometric time ({photo_elapsed:.6f}s) to {time_csv_path}"
@@ -993,7 +994,7 @@ def run():
             )
             geo_elapsed = time.time() - geo_start
             append_to_csv(time_csv_path, ["geometric", f"{geo_elapsed:.6f}"])
-            logging.info(f"[{filename_stem}] 幾何学的一貫性フィルタリング完了: {geo_elapsed:.4f}秒")
+            logging.info(f"[{filename_stem}] 幾何学的一貫性フィルタリング完了 (経過時間: {geo_elapsed:.2f}秒)")
             logging.debug(
                 f"Saved geometric time ({geo_elapsed:.6f}s) to {time_csv_path}"
             )
@@ -1107,7 +1108,7 @@ def run():
         merged_cols_list.append(world_colors)
         pointcloud_elapsed = time.time() - pointcloud_start
         append_to_csv(time_csv_path, ["pointcloud", f"{pointcloud_elapsed:.6f}"])
-        logging.info(f"[{filename_stem}] 点群変換完了: {pointcloud_elapsed:.4f}秒 (点群数: {len(world_points)})")
+        logging.info(f"[{filename_stem}] 点群変換完了 (経過時間: {pointcloud_elapsed:.2f}秒, 点群数: {len(world_points):,}点)")
 
     # --- 全点群を一度だけ統合 ---
     if merged_pts_list:
@@ -1121,7 +1122,7 @@ def run():
             merged_pts_list, merged_cols_list, voxel_size=0.1
         )
         integ_elapsed = time.time() - integ_start
-        logging.info(f"点群統合完了: {len(integ_pts)}点 (処理時間: {integ_elapsed:.2f}秒)")
+        logging.info(f"点群統合完了 (経過時間: {integ_elapsed:.2f}秒, 統合点数: {len(integ_pts):,}点)")
         last_integ_pts, last_integ_cols = integ_pts, integ_cols
 
     # --- 最終保存 ---
@@ -1191,7 +1192,22 @@ def run():
         logging.warning("No point clouds were generated.")
 
     end_time = time.time()
-    logging.info(f"Total point cloud generation time: {end_time - start_time:.2f}s")
+    total_elapsed = end_time - start_time
+    hours = int(total_elapsed // 3600)
+    minutes = int((total_elapsed % 3600) // 60)
+    seconds = total_elapsed % 60
+    
+    if hours > 0:
+        time_str = f"{hours}時間{minutes}分{seconds:.1f}秒"
+    elif minutes > 0:
+        time_str = f"{minutes}分{seconds:.1f}秒"
+    else:
+        time_str = f"{seconds:.1f}秒"
+    
+    logging.info("")
+    logging.info("=" * 80)
+    logging.info(f"全体処理完了 (総経過時間: {time_str} / {total_elapsed:.2f}秒)")
+    logging.info("=" * 80)
     return 0
 
 
