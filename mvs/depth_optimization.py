@@ -682,6 +682,63 @@ def _propagate_spatial_one_color_cuda(
 
 
 @cuda.jit
+def _initialize_cost_map_cuda(
+    depth_map,
+    normal_map,
+    cost_map,
+    propagation_mask,
+    patch_size,
+    top_k_costs,
+    adaptive_weight_sigma_color,
+    zncc_epsilon,
+    ref_image_gray,
+    ref_pose_K,
+    ref_pose_R,
+    ref_pose_T,
+    src_images_gray,
+    src_K,
+    src_R,
+    src_T,
+):
+    """
+    GPUで全ピクセルに対して並列に初期コストを計算する
+    """
+    c, r = cuda.grid(2)
+    h, w = depth_map.shape
+
+    if r >= h or c >= w:
+        return
+    if not propagation_mask[r, c]:
+        return
+    d = depth_map[r, c]
+    if math.isnan(d) or math.isinf(d):
+        return
+
+    n = normal_map[r, c]
+    cost = _evaluate_cost_cuda(
+        r,
+        c,
+        d,
+        n[0],
+        n[1],
+        n[2],
+        patch_size,
+        ref_image_gray,
+        ref_pose_K,
+        ref_pose_R,
+        ref_pose_T,
+        src_images_gray,
+        src_K,
+        src_R,
+        src_T,
+        top_k_costs,
+        adaptive_weight_sigma_color,
+        zncc_epsilon,
+    )
+    cost_map[r, c] = cost
+
+
+@cuda.jit
 def _random_search_cuda(
     depth_map,
     normal_map,
@@ -1350,6 +1407,52 @@ class DepthOptimization:
             [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
         )
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
+        
+        # 初期コストをGPUで計算（CPU版より高速）
+        logging.info("Computing initial cost map on GPU...")
+        threadsperblock = (16, 16)
+        blockspergrid_x = (w + threadsperblock[0] - 1) // threadsperblock[0]
+        blockspergrid_y = (h + threadsperblock[1] - 1) // threadsperblock[1]
+        blockspergrid = (blockspergrid_x, blockspergrid_y)
+        
+        # GPUデバイスにデータを転送
+        d_depth_map = cuda.to_device(depth_map.astype(np.float32))
+        d_normal_map = cuda.to_device(normal_map.astype(np.float32))
+        d_cost_map = cuda.to_device(cost_map)
+        d_propagation_mask = cuda.to_device(propagation_mask)
+        d_ref_image_gray = cuda.to_device(ref_image_gray)
+        d_ref_pose_K = cuda.to_device(ref_pose_K)
+        d_ref_pose_R = cuda.to_device(ref_pose_R)
+        d_ref_pose_T = cuda.to_device(ref_pose_T)
+        d_src_images_gray = cuda.to_device(np.ascontiguousarray(src_images_gray))
+        d_src_K = cuda.to_device(np.ascontiguousarray(src_K))
+        d_src_R = cuda.to_device(np.ascontiguousarray(src_R))
+        d_src_T = cuda.to_device(np.ascontiguousarray(src_T))
+        
+        # GPUで初期コストを計算
+        _initialize_cost_map_cuda[blockspergrid, threadsperblock](
+            d_depth_map,
+            d_normal_map,
+            d_cost_map,
+            d_propagation_mask,
+            self.config.PATCHMATCH_PATCH_SIZE,
+            self.config.TOP_K_COSTS,
+            self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
+            np.float32(self.config.ZNCC_EPSILON),
+            d_ref_image_gray,
+            d_ref_pose_K,
+            d_ref_pose_R,
+            d_ref_pose_T,
+            d_src_images_gray,
+            d_src_K,
+            d_src_R,
+            d_src_T,
+        )
+        cuda.synchronize()
+        
+        # 結果をホストにコピー
+        cost_map = d_cost_map.copy_to_host()
+        logging.info("Initial cost map computation completed on GPU.")
 
         # Early-stop state will be managed on-the-fly without predeclared thresholds
 
