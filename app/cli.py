@@ -77,7 +77,6 @@ def _get_mvs_yaml_path(project_root: str) -> str:
 def _write_prepass_mvs_yaml(project_root: str, out_path: str) -> str:
     """
     Create a temporary MVS YAML for a fast prepass:
-      - PREVIEW_ONLY: true (stop after selection/csv/plots)
       - EXPORT_GT_PER_VIEW_ENABLE: false (avoid expensive GT export)
     Other settings (especially frame selection) are inherited from the current mvs.yaml.
     Returns the written path (or empty string on failure).
@@ -98,7 +97,6 @@ def _write_prepass_mvs_yaml(project_root: str, out_path: str) -> str:
     except Exception:
         cfg = {}
 
-    cfg["PREVIEW_ONLY"] = True
     cfg["EXPORT_GT_PER_VIEW_ENABLE"] = False
     cfg["EXPORT_GT_PER_VIEW_ONLY_TARGET"] = True
 

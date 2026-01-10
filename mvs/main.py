@@ -15,12 +15,10 @@ import open3d as o3d
 matplotlib.use("Agg")  # headless save
 import matplotlib.pyplot as plt  # noqa: E402
 from depth_estimation import DepthEstimator  # noqa: E402
-from depth_fusion import (  # noqa: E402
-    CameraPlaneMedianFuser,
-    OrthoDepthMedianFuser,
-    WorldOrthoMedianFuser,
-)
-from depth_optimization import DepthOptimization, is_gpu_enabled  # noqa: E402
+from depth_optimization import (
+    DepthOptimization,
+    _initialize_normals_from_depth_jit,
+)  # noqa: E402
 from disparity_estimation import ImageProcessor  # noqa: E402
 from logging_setup import setup_logging  # noqa: E402
 from point_cloud_integrator import PointCloudIntegrator  # noqa: E402
@@ -307,37 +305,10 @@ def _save_selected_pose_plot(
 
 
 def _compute_normals_from_depth(depth_map: np.ndarray, K: np.ndarray) -> np.ndarray:
-    h, w = depth_map.shape
-    normals = np.zeros((h, w, 3), dtype=np.float32)
-    cx, cy = float(K[0, 2]), float(K[1, 2])
-    fx, fy = float(K[0, 0]), float(K[1, 1])
-    for r in range(1, h - 1):
-        for c in range(1, w - 1):
-            dc = depth_map[r, c]
-            if not np.isfinite(dc):
-                continue
-            p_center = np.array(
-                [(c - cx) * dc / fx, (r - cy) * dc / fy, dc], dtype=np.float32
-            )
-            dr = depth_map[r, c + 1]
-            dd = depth_map[r + 1, c]
-            if not (np.isfinite(dr) and np.isfinite(dd)):
-                continue
-            p_right = np.array(
-                [(c + 1 - cx) * dr / fx, (r - cy) * dr / fy, dr], dtype=np.float32
-            )
-            p_down = np.array(
-                [(c - cx) * dd / fx, (r + 1 - cy) * dd / fy, dd], dtype=np.float32
-            )
-            v_c = p_right - p_center
-            v_r = p_down - p_center
-            n = np.cross(v_r, v_c)
-            norm = np.linalg.norm(n)
-            if norm > 1e-6:
-                normals[r, c] = n / norm
-            else:
-                normals[r, c] = np.array([0.0, 0.0, 1.0], dtype=np.float32)
-    return normals
+    """
+    深度マップから法線マップを計算する（高速なJITコンパイル版を使用）
+    """
+    return _initialize_normals_from_depth_jit(depth_map.astype(np.float32), K.astype(np.float32))
 
 
 def _export_gt_depth_pngs_per_view(
@@ -345,10 +316,12 @@ def _export_gt_depth_pngs_per_view(
     indices: list,
     label_depth_dir: str,
     out_depth_dir: str,
+    all_pairs_data: dict,
 ):
     """
     Export GT depth EXR files to per-view folders as PNG visualizations.
     This can be expensive if run for all frames, so we allow passing only selected indices.
+    GT depth maps are saved in the same folders as the generated depth maps (using filename_stem).
     """
     if not label_depth_dir or not os.path.isdir(label_depth_dir):
         return 0
@@ -380,7 +353,14 @@ def _export_gt_depth_pngs_per_view(
         else:
             gt_resized = gt
 
-        save_each_depth_dir = os.path.join(out_depth_dir, f"depth_{idx_int:04d}")
+        # 生成された深度マップと同じフォルダを使用（filename_stem）
+        if idx_int in all_pairs_data:
+            _, _, left_path, _, _ = all_pairs_data[idx_int]
+            filename_stem = Path(left_path).stem
+        else:
+            filename_stem = f"{idx_int:04d}"
+        
+        save_each_depth_dir = os.path.join(out_depth_dir, filename_stem)
         os.makedirs(save_each_depth_dir, exist_ok=True)
         save_depth_map_as_image(
             gt_resized, os.path.join(save_each_depth_dir, f"gt_depth_{idx_int:04d}.png")
@@ -414,7 +394,6 @@ def run():
     image_processor = ImageProcessor(config)
     depth_estimator = DepthEstimator(config)
     depth_optimization = DepthOptimization(config)
-    logging.info(f"DepthOptimization backend: {'GPU' if is_gpu_enabled() else 'CPU'}")
     point_cloud_integrator = PointCloudIntegrator(config)
 
     os.makedirs(config.POINT_CLOUD_DIR, exist_ok=True)
@@ -501,11 +480,6 @@ def run():
     except Exception as e:
         logging.warning(f"Failed to save selected pose plot: {e}")
 
-    # If you only want to run subsampling + logs/plots quickly, enable PREVIEW_ONLY.
-    if bool(getattr(config, "PREVIEW_ONLY", False)):
-        logging.info("PREVIEW_ONLY enabled: stopping after frame selection and plots.")
-        return 0
-
     # --- Target selection (name-free, supports "selected order" dataset ordinal) ---
     # DATASET_ORDINAL is 1-based and injected by app/cli.py in multi-dataset runs.
     requested = None
@@ -567,6 +541,7 @@ def run():
                 indices=idxs,
                 label_depth_dir=getattr(config, "LABEL_DEPTH_IMAGE_DIR", ""),
                 out_depth_dir=config.DEPTH_IMAGE_DIR,
+                all_pairs_data=all_pairs_data,
             )
             logging.info(
                 f"Exported {exported} GT depth views into per-view folders under {config.DEPTH_IMAGE_DIR}"
@@ -823,42 +798,6 @@ def run():
     all_poses = {}
     all_images = {}
     all_gt_depths = {}
-    # 逐次深度融合: カメラ平面（参照ビュー）へワープして中央値融合
-    cam_fuser = None
-    ortho_fuser = (
-        OrthoDepthMedianFuser()
-        if getattr(config, "DEPTH_FUSION_ENABLE", False)
-        else None
-    )
-    # Unityの鉛直下向き(Y-)視点に合わせ、平面=(X,Z)、深度=Y を採用（必要なら depth_invert=True）
-    world_ortho_fuser = (
-        WorldOrthoMedianFuser(
-            x_min=None,
-            x_max=None,
-            y_min=None,
-            y_max=None,
-            pixel_size=config.pixel_size,
-            plane_axes=(0, 2),
-            depth_axis=1,
-            depth_invert=False,
-        )
-        if getattr(config, "DEPTH_FUSION_ENABLE", False)
-        else None
-    )
-
-    # 参照カメラ（最初のターゲット）で融合先を固定
-    if getattr(config, "DEPTH_FUSION_ENABLE", False) and target_indices:
-        ref_idx0 = target_indices[0]
-        _, ref_T0, _, _, ref_R0 = all_pairs_data[ref_idx0]
-        if ref_idx0 in loaded_images:
-            ref_h0, ref_w0, _ = loaded_images[ref_idx0].shape
-        else:
-            # フォールバック：最初の読み込み済み画像サイズ
-            any_idx = next(iter(loaded_images))
-            ref_h0, ref_w0, _ = loaded_images[any_idx].shape
-        cam_fuser = CameraPlaneMedianFuser(
-            height=ref_h0, width=ref_w0, K=config.K, R_ref=ref_R0, T_ref=ref_T0
-        )
 
     for idx in target_indices:
         if idx not in loaded_images:
@@ -916,11 +855,7 @@ def run():
                     gt_depth = cv2.resize(
                         gt_depth, (w, h), interpolation=cv2.INTER_NEAREST
                     )
-                # 可視化PNGのみを保存
-                gt_vis_path = os.path.join(
-                    save_each_depth_dir, f"gt_depth_{idx:04d}.png"
-                )
-                save_depth_map_as_image(gt_depth, gt_vis_path)
+                # GT depthのPNG保存は_export_gt_depth_pngs_per_viewで統一して行うため、ここでは削除
 
         try:
             li_bgr = cv2.imread(left_path)
@@ -1021,12 +956,6 @@ def run():
                 logging.warning(
                     f"iter_times_gpu is None or empty for index {idx}, skipping iteration time recording"
                 )
-            # optimized_depth = depth_optimization.refine_depth_with_patchmatch_vanilla(
-            #     ref_image=li_rgb,
-            #     ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
-            #     neighbor_views_data=neighbor_views_data,
-            #     ref_idx=idx,
-            # )
 
             # 最適化後の深度の有効ピクセル数をログ出力
             valid_pixels_before_photo = np.sum(np.isfinite(optimized_depth))
@@ -1196,11 +1125,6 @@ def run():
             # merged_pts_list.append(world_points)
             # merged_cols_list.append(world_colors)
 
-            # # 逐次深度融合
-            # if world_ortho_fuser is not None:
-            #     fused_world_ortho = world_ortho_fuser.add_world_points(world_points)
-            #     if config.DEBUG_SAVE_DEPTH_MAPS and fused_world_ortho is not None:
-            #         world_ortho_fuser.save_fused_depth(
             #             os.path.join(
             #                 config.DEPTH_IMAGE_DIR,
             #                 f"depth_{idx:04d}",
@@ -1296,7 +1220,7 @@ def run():
             _, _, left_path, _, _ = all_pairs_data[idx]
             filename_stem = Path(left_path).stem
         else:
-            filename_stem = f"depth_{idx:04d}"
+            filename_stem = f"{idx:04d}"
         save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, filename_stem)
         save_each_normal_dir = os.path.join(config.NORMAL_IMAGE_DIR, filename_stem)
         gt_depth = all_gt_depths.get(idx, None)
@@ -1308,11 +1232,14 @@ def run():
         neighbor_frames = _neighbors_for_ref(idx)
         _log_selected_neighbors(idx, neighbor_frames)
         for fr in neighbor_frames:
-            # For Step 2, require that neighbor has an optimized depth if it's a local frame.
-            if neighbor_pool_mode == "local":
-                ni = int(fr.get("local_idx", fr.get("id", -1)))
-                if ni not in all_optimized_depths:
-                    continue
+            # For Step 2, require that neighbor has an optimized depth.
+            # This check is necessary for both local and global_csv modes:
+            # - local: only neighbors from the same dataset
+            # - global_csv: may include neighbors from other datasets, but we can only use
+            #   those that have been processed (exist in all_optimized_depths)
+            ni = int(fr.get("local_idx", fr.get("id", -1)))
+            if ni not in all_optimized_depths:
+                continue
             nv = _get_neighbor_view(idx, fr)
             if nv is not None:
                 neighbor_views_data.append(nv)
@@ -1439,7 +1366,7 @@ def run():
             _, _, left_path, _, _ = all_pairs_data[idx]
             filename_stem = Path(left_path).stem
         else:
-            filename_stem = f"depth_{idx:04d}"
+            filename_stem = f"{idx:04d}"
         csv_subdir = os.path.join(config.CSV_DIR, filename_stem)
         time_csv_path = os.path.join(csv_subdir, "time.csv")
 
@@ -1455,29 +1382,6 @@ def run():
         logging.debug(
             f"Saved pointcloud time ({pointcloud_elapsed:.6f}s) to {time_csv_path}"
         )
-
-        # 逐次深度融合
-        if world_ortho_fuser is not None:
-            fused_world_ortho = world_ortho_fuser.add_world_points(world_points)
-            if config.DEBUG_SAVE_DEPTH_MAPS and fused_world_ortho is not None:
-                # ファイル名ベースのフォルダ名を取得（all_pairs_dataから）
-                if idx in all_pairs_data:
-                    _, _, left_path, _, _ = all_pairs_data[idx]
-                    filename_stem = Path(left_path).stem
-                else:
-                    filename_stem = f"depth_{idx:04d}"
-                save_each_depth_dir = os.path.join(
-                    config.DEPTH_IMAGE_DIR, filename_stem
-                )
-                world_ortho_fuser.save_fused_depth(
-                    os.path.join(
-                        save_each_depth_dir,
-                        "fused_ortho_running.png",
-                    ),
-                    swap_axes=True,
-                    flip_y=True,
-                    flip_x=True,
-                )
 
         integ_pts, integ_cols = point_cloud_integrator.integrate_depth_maps_median(
             merged_pts_list, merged_cols_list, voxel_size=0.1
@@ -1557,8 +1461,8 @@ def run():
             else np.vstack(merged_cols_list)
         )
 
-        # 複数ビュー可視性フィルタリング（オプション）
-        if getattr(config, "MULTI_VIEW_VISIBILITY_FILTER_ENABLED", False):
+        # 複数ビュー可視性フィルタリング（デフォルト: 有効）
+        if getattr(config, "MULTI_VIEW_VISIBILITY_FILTER_ENABLED", True):
             logging.info(
                 "\n--- Applying multi-view visibility filtering to point cloud ---"
             )
