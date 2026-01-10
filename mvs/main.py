@@ -56,74 +56,6 @@ def _pose_unity_to_cv_RT(pos_unity, quat_unity):
     return R_cv, T_cv
 
 
-def _load_global_neighbor_pool(csv_path: str):
-    """
-    Load a global neighbor pool from CSV (e.g. output/<group>/csv/global_selected_poses.csv).
-    Expected columns (at least):
-      dataset, local_idx, left_path, pos_x,pos_y,pos_z, rot_x,rot_y,rot_z,rot_w
-    Optional:
-      global_idx, right_path
-    Returns:
-      frames: list[dict]
-      by_key: dict[(dataset, local_idx)] -> dict
-      order_key: list of frames in CSV order (or global_idx order if present)
-    """
-    frames = []
-    if not csv_path or not os.path.exists(csv_path):
-        return frames, {}, []
-    try:
-        with open(csv_path, newline="") as f:
-            r = csv.DictReader(f)
-            for row in r:
-                if not row:
-                    continue
-                try:
-                    ds = str(row.get("dataset", "")).strip()
-                    li = int(row.get("local_idx"))
-                    left_path = str(row.get("left_path", "")).strip()
-                    right_path = str(row.get("right_path", "")).strip()
-                    px = float(row.get("pos_x"))
-                    py = float(row.get("pos_y"))
-                    pz = float(row.get("pos_z"))
-                    rx = float(row.get("rot_x"))
-                    ry = float(row.get("rot_y"))
-                    rz = float(row.get("rot_z"))
-                    rw = float(row.get("rot_w"))
-                    gidx = row.get("global_idx", None)
-                    gidx = (
-                        int(gidx)
-                        if gidx is not None and str(gidx).strip() != ""
-                        else None
-                    )
-                except Exception:
-                    continue
-                if not left_path or not os.path.exists(left_path):
-                    # If absolute paths weren't stored, skip (can't be used as neighbor image)
-                    continue
-                frames.append(
-                    {
-                        "dataset": ds,
-                        "local_idx": li,
-                        "global_idx": gidx,
-                        "left_path": left_path,
-                        "right_path": right_path,
-                        "pos": (px, py, pz),
-                        "quat": (rx, ry, rz, rw),
-                    }
-                )
-    except Exception:
-        return [], {}, []
-
-    by_key = {(fr["dataset"], fr["local_idx"]): fr for fr in frames}
-
-    # Build ordered list: prefer global_idx if available for all/most frames
-    if frames and all(fr.get("global_idx") is not None for fr in frames):
-        ordered = sorted(frames, key=lambda d: int(d["global_idx"]))
-    else:
-        ordered = frames[:]
-    return frames, by_key, ordered
-
-
 def _select_nearest_neighbors(
     *,
     ref_pos: tuple,
@@ -190,19 +122,16 @@ def _log_selected_neighbors(ref_idx: int, frames: list):
 
     items = []
     for fr in (frames or [])[:max_per]:
-        ds = fr.get("dataset", "")
-        li = fr.get("local_idx", fr.get("id", None))
-        gi = fr.get("global_idx", None)
+        ni = fr.get("id", None)
         if show_paths:
             lp = fr.get("left_path", "")
-            items.append(f"{ds}:{li} (g={gi}) path={lp}")
+            items.append(f"{ni} path={lp}")
         else:
-            items.append(f"{ds}:{li} (g={gi})")
+            items.append(str(ni))
 
     mode = str(getattr(config, "NEIGHBOR_SELECTION_MODE", "")).strip()
-    pool = str(getattr(config, "NEIGHBOR_POOL_MODE", "")).strip()
     logging.info(
-        f"[Neighbors] ref={ref_idx} mode={mode} pool={pool} count={len(frames or [])} -> {items}"
+        f"[Neighbors] ref={ref_idx} mode={mode} count={len(frames or [])} -> {items}"
     )
 
 
@@ -422,92 +351,48 @@ def run():
 
     # --- Log which images will be used (after subsampling & file existence checks) ---
     try:
-        save_selected_csv = bool(getattr(config, "SAVE_SELECTED_FRAMES_CSV", True))
-        if save_selected_csv:
-            selected_csv_name = (
-                str(
-                    getattr(config, "SELECTED_FRAMES_CSV_NAME", "selected_frames.csv")
-                ).strip()
-                or "selected_frames.csv"
-            )
-            selected_frames_csv_path = os.path.join(config.CSV_DIR, selected_csv_name)
-            with open(selected_frames_csv_path, "w", newline="") as f:
-                w = csv.writer(f)
-                w.writerow(["index", "left_path", "right_path"])
-                for idx in available_indices:
-                    _, _, left_path, right_path, _ = all_pairs_data[idx]
-                    w.writerow([idx, left_path, right_path])
-            logging.info(
-                f"Selected frames CSV saved: {selected_frames_csv_path} (count={len(available_indices)})"
-            )
-            max_print = int(getattr(config, "LOG_SELECTED_FRAMES_MAX", 10) or 10)
-            max_print = max(0, max_print)
-            if max_print > 0:
-                preview = available_indices[:max_print]
-                logging.info(
-                    f"Selected frame indices (first {len(preview)}): {preview}"
-                )
+        selected_frames_csv_path = os.path.join(config.CSV_DIR, "selected_frames.csv")
+        with open(selected_frames_csv_path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["index", "left_path", "right_path"])
+            for idx in available_indices:
+                _, _, left_path, right_path, _ = all_pairs_data[idx]
+                w.writerow([idx, left_path, right_path])
+        logging.info(
+            f"Selected frames CSV saved: {selected_frames_csv_path} (count={len(available_indices)})"
+        )
     except Exception as e:
         logging.warning(f"Failed to write selected frames CSV: {e}")
 
     # --- Plot & save selected camera poses (trajectory) ---
     try:
-        if bool(getattr(config, "SAVE_SELECTED_POSE_PLOT", True)):
-            plots_dir = os.path.join(config.OUTPUT_TYPE_DIR, "plots")
-            plot_name = (
-                str(
-                    getattr(
-                        config, "SELECTED_POSE_PLOT_NAME", "selected_camera_poses.png"
-                    )
-                ).strip()
-                or "selected_camera_poses.png"
-            )
-            plot_path = os.path.join(plots_dir, plot_name)
-            plane = str(getattr(config, "POSE_PLOT_PLANE", "xz") or "xz")
-            arrow_stride = int(getattr(config, "POSE_PLOT_ARROW_STRIDE", 5) or 5)
-            arrow_stride = max(1, arrow_stride)
-            arrow_scale = float(getattr(config, "POSE_PLOT_ARROW_SCALE", 0.25) or 0.25)
-            _save_selected_pose_plot(
-                data_loader=data_loader,
-                selected_indices=available_indices,
-                out_path=plot_path,
-                plane=plane,
-                arrow_stride=arrow_stride,
-                arrow_scale=arrow_scale,
-                title=f"Session={getattr(config, 'DATA_TYPE', '')} selected={len(available_indices)}",
-            )
-            logging.info(f"Selected pose plot saved: {plot_path}")
+        plots_dir = os.path.join(config.OUTPUT_TYPE_DIR, "plots")
+        plot_path = os.path.join(plots_dir, "selected_camera_poses.png")
+        plane = str(getattr(config, "POSE_PLOT_PLANE", "xz") or "xz")
+        arrow_stride = int(getattr(config, "POSE_PLOT_ARROW_STRIDE", 5) or 5)
+        arrow_stride = max(1, arrow_stride)
+        arrow_scale = float(getattr(config, "POSE_PLOT_ARROW_SCALE", 0.25) or 0.25)
+        _save_selected_pose_plot(
+            data_loader=data_loader,
+            selected_indices=available_indices,
+            out_path=plot_path,
+            plane=plane,
+            arrow_stride=arrow_stride,
+            arrow_scale=arrow_scale,
+            title=f"Session={getattr(config, 'DATA_TYPE', '')} selected={len(available_indices)}",
+        )
+        logging.info(f"Selected pose plot saved: {plot_path}")
     except Exception as e:
         logging.warning(f"Failed to save selected pose plot: {e}")
 
-    # --- Target selection (name-free, supports "selected order" dataset ordinal) ---
-    # DATASET_ORDINAL is 1-based and injected by app/cli.py in multi-dataset runs.
+    # --- Target selection ---
     requested = None
-    target_dataset_ordinal = getattr(config, "TARGET_DATASET_ORDINAL", None)
-    if target_dataset_ordinal is not None:
-        try:
-            target_dataset_ordinal = int(target_dataset_ordinal)
-        except Exception:
-            target_dataset_ordinal = None
-
-    if target_dataset_ordinal is not None:
-        try:
-            current_ordinal = int(os.getenv("DATASET_ORDINAL", "1"))
-        except Exception:
-            current_ordinal = 1
-        if current_ordinal != target_dataset_ordinal:
-            # Skip datasets not matching the requested ordinal (exit 0).
-            logging.info(
-                f"Skipping this dataset (DATASET_ORDINAL={current_ordinal}) because TARGET_DATASET_ORDINAL={target_dataset_ordinal}"
-            )
-            return 0
-
     if hasattr(config, "TARGET_INDICES") and config.TARGET_INDICES:
         requested = list(config.TARGET_INDICES)
 
     if requested is not None:
         # Explicit request:
-        # - [] means "skip this dataset" (useful for verification runs in multi-dataset mode)
+        # - [] means "skip this dataset"
         if len(requested) == 0:
             logging.info(
                 "TARGET_INDICES specified as empty for this dataset; skipping processing."
@@ -522,7 +407,7 @@ def run():
             )
         if not target_indices:
             logging.error(
-                "No TARGET_INDICES are available after filtering. Check FRAME_SELECTION_MODE or dataset integrity."
+                "No TARGET_INDICES are available after filtering. Check FRAME_STRIDE or dataset integrity."
             )
             return 1
     else:
@@ -534,11 +419,10 @@ def run():
 
     # --- Optional: Export GT depth PNGs per selected view (expensive; run after selection) ---
     try:
-        if bool(getattr(config, "EXPORT_GT_PER_VIEW_ENABLE", True)):
-            only_target = bool(getattr(config, "EXPORT_GT_PER_VIEW_ONLY_TARGET", True))
-            idxs = target_indices if only_target else available_indices
+        if bool(getattr(config, "DEBUG_SAVE_GT_DEPTH_MAPS", True)):
+            # 常に処理対象のビューのみエクスポート
             exported = _export_gt_depth_pngs_per_view(
-                indices=idxs,
+                indices=target_indices,
                 label_depth_dir=getattr(config, "LABEL_DEPTH_IMAGE_DIR", ""),
                 out_depth_dir=config.DEPTH_IMAGE_DIR,
                 all_pairs_data=all_pairs_data,
@@ -549,7 +433,7 @@ def run():
     except Exception as e:
         logging.warning(f"GT per-view export skipped: {e}")
 
-    # --- Neighbor selection (mode-switchable, optionally cross-dataset via global CSV) ---
+    # --- Neighbor selection ---
     neighbor_selection_mode = (
         str(
             os.getenv(
@@ -560,16 +444,6 @@ def run():
         .strip()
         .lower()
     )
-    neighbor_pool_mode = (
-        str(
-            os.getenv(
-                "NEIGHBOR_POOL_MODE", getattr(config, "NEIGHBOR_POOL_MODE", "local")
-            )
-        )
-        .strip()
-        .lower()
-    )
-
     # local pool pose cache (for neighbor selection)
     local_pose = {}
     for i in available_indices:
@@ -578,30 +452,7 @@ def run():
             local_pose[i] = {
                 "pos": tuple(p),
                 "quat": tuple(q),
-                "dataset": getattr(config, "DATA_TYPE", ""),
-                "local_idx": i,
             }
-
-    # optional global pool (cross-dataset)
-    # Global neighbor pool CSV is provided via environment variable by app/cli.py in multi-dataset runs.
-    # We intentionally do not require a YAML key for this, so mvs.yaml can stay identical for single/multi use.
-    global_pool_csv = str(os.getenv("GLOBAL_NEIGHBOR_POOL_CSV", "")).strip()
-    want_global = neighbor_pool_mode in ("global_csv", "auto")
-    global_frames, global_by_key, global_ordered = (
-        _load_global_neighbor_pool(global_pool_csv) if want_global else ([], {}, [])
-    )
-
-    # auto/global fallback behavior
-    if want_global and not global_frames:
-        if neighbor_pool_mode == "global_csv":
-            logging.warning(
-                f"NEIGHBOR_POOL_MODE=global_csv but GLOBAL_NEIGHBOR_POOL_CSV not available/readable: {global_pool_csv!r}. Falling back to local pool."
-            )
-        neighbor_pool_mode = "local"
-    elif neighbor_pool_mode == "auto" and global_frames:
-        # Treat 'auto' as 'global_csv' when the pool is actually available,
-        # so downstream selection uses cross-dataset candidates.
-        neighbor_pool_mode = "global_csv"
 
     # parameters for adjacent (existing behavior)
     neighbor_each_side = int(getattr(config, "NEIGHBOR_KEYFRAMES_EACH_SIDE", 3) or 3)
@@ -623,128 +474,54 @@ def run():
             loaded_images[idx] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     def _neighbors_for_ref(ref_idx: int):
-        # returns list of frame dicts with keys: pos, quat, left_path, id, dataset, local_idx
-        ref_ds = str(getattr(config, "DATA_TYPE", "")).strip()
-
+        # returns list of frame dicts with keys: pos, quat, left_path, id
         if neighbor_selection_mode == "adjacent":
             if neighbor_each_side <= 0:
                 return []
-            if neighbor_pool_mode == "local":
-                pos = bisect.bisect_left(available_indices, ref_idx)
-                out = []
-                for k in range(1, neighbor_each_side + 1):
-                    j = pos - k
-                    if j >= 0:
-                        ni = available_indices[j]
-                        if ni != ref_idx and ni in local_pose:
-                            fr = dict(local_pose[ni])
-                            fr["left_path"] = data_loader.get_image_paths(ni)[0]
-                            fr["id"] = ni
-                            out.append(fr)
-                for k in range(1, neighbor_each_side + 1):
-                    j = pos + k
-                    if j < len(available_indices):
-                        ni = available_indices[j]
-                        if ni != ref_idx and ni in local_pose:
-                            fr = dict(local_pose[ni])
-                            fr["left_path"] = data_loader.get_image_paths(ni)[0]
-                            fr["id"] = ni
-                            out.append(fr)
-                return out
-            else:
-                # global_csv pool: adjacent in global_idx (CSV order if no global_idx)
-                key = (ref_ds, int(ref_idx))
-                ref_fr = global_by_key.get(key, None)
-                if ref_fr is None:
-                    return []
-                # find position in ordered list
-                try:
-                    if ref_fr.get("global_idx") is not None:
-                        pos = bisect.bisect_left(
-                            [int(fr["global_idx"]) for fr in global_ordered],
-                            int(ref_fr["global_idx"]),
-                        )
-                    else:
-                        pos = global_ordered.index(ref_fr)
-                except Exception:
-                    return []
-                out = []
-                for k in range(1, neighbor_each_side + 1):
-                    j = pos - k
-                    if j >= 0:
-                        fr = dict(global_ordered[j])
-                        fr["id"] = (
-                            int(fr.get("global_idx"))
-                            if fr.get("global_idx") is not None
-                            else j
-                        )
-                        out.append(fr)
-                for k in range(1, neighbor_each_side + 1):
-                    j = pos + k
-                    if j < len(global_ordered):
-                        fr = dict(global_ordered[j])
-                        fr["id"] = (
-                            int(fr.get("global_idx"))
-                            if fr.get("global_idx") is not None
-                            else j
-                        )
-                        out.append(fr)
-                return out
-
-        # nearest-by-distance (cross-dataset capable)
-        if neighbor_pool_mode == "global_csv":
-            ref_fr = global_by_key.get((ref_ds, int(ref_idx)), None)
-            if ref_fr is None:
-                return []
-            candidates = [
-                fr
-                for fr in global_frames
-                if not (
-                    fr.get("dataset") == ref_ds
-                    and int(fr.get("local_idx")) == int(ref_idx)
-                )
-            ]
-            picked = _select_nearest_neighbors(
-                ref_pos=tuple(ref_fr["pos"]),
-                candidates=candidates,
-                count=nearest_count,
-                r_min=nearest_r_min,
-                r_max=nearest_r_max,
-            )
+            pos = bisect.bisect_left(available_indices, ref_idx)
             out = []
-            for fr in picked:
-                d = dict(fr)
-                d["id"] = (
-                    int(d.get("global_idx"))
-                    if d.get("global_idx") is not None
-                    else int(d.get("local_idx", -1))
-                )
-                out.append(d)
+            for k in range(1, neighbor_each_side + 1):
+                j = pos - k
+                if j >= 0:
+                    ni = available_indices[j]
+                    if ni != ref_idx and ni in local_pose:
+                        fr = dict(local_pose[ni])
+                        fr["left_path"] = data_loader.get_image_paths(ni)[0]
+                        fr["id"] = ni
+                        out.append(fr)
+            for k in range(1, neighbor_each_side + 1):
+                j = pos + k
+                if j < len(available_indices):
+                    ni = available_indices[j]
+                    if ni != ref_idx and ni in local_pose:
+                        fr = dict(local_pose[ni])
+                        fr["left_path"] = data_loader.get_image_paths(ni)[0]
+                        fr["id"] = ni
+                        out.append(fr)
             return out
-        else:
-            ref = local_pose.get(ref_idx, None)
-            if ref is None:
-                return []
-            candidates = [
-                {
-                    "pos": local_pose[i]["pos"],
-                    "quat": local_pose[i]["quat"],
-                    "dataset": ref_ds,
-                    "local_idx": i,
-                    "left_path": data_loader.get_image_paths(i)[0],
-                    "id": i,
-                }
-                for i in available_indices
-                if i != ref_idx and i in local_pose
-            ]
-            picked = _select_nearest_neighbors(
-                ref_pos=tuple(ref["pos"]),
-                candidates=candidates,
-                count=nearest_count,
-                r_min=nearest_r_min,
-                r_max=nearest_r_max,
-            )
-            return picked
+
+        # nearest-by-distance
+        ref = local_pose.get(ref_idx, None)
+        if ref is None:
+            return []
+        candidates = [
+            {
+                "pos": local_pose[i]["pos"],
+                "quat": local_pose[i]["quat"],
+                "left_path": data_loader.get_image_paths(i)[0],
+                "id": i,
+            }
+            for i in available_indices
+            if i != ref_idx and i in local_pose
+        ]
+        picked = _select_nearest_neighbors(
+            ref_pos=tuple(ref["pos"]),
+            candidates=candidates,
+            count=nearest_count,
+            r_min=nearest_r_min,
+            r_max=nearest_r_max,
+        )
+        return picked
 
     def _get_neighbor_view(ref_idx: int, fr: dict):
         # load neighbor image & pose (R,T)
@@ -752,33 +529,23 @@ def run():
         if not left_path:
             return None
 
-        if neighbor_pool_mode == "local":
-            # prefer already loaded local images
-            ni = int(fr.get("local_idx", fr.get("id", -1)))
-            img = loaded_images.get(ni, None)
-            if img is None:
-                bgr = cv2.imread(left_path)
-                if bgr is None:
-                    return None
-                img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-                loaded_images[ni] = img
-        else:
-            img = loaded_images_by_path.get(left_path, None)
-            if img is None:
-                bgr = cv2.imread(left_path)
-                if bgr is None:
-                    return None
-                img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-                loaded_images_by_path[left_path] = img
+        # prefer already loaded local images
+        ni = int(fr.get("id", -1))
+        img = loaded_images.get(ni, None)
+        if img is None:
+            bgr = cv2.imread(left_path)
+            if bgr is None:
+                return None
+            img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            loaded_images[ni] = img
 
         pos = fr.get("pos", None)
         quat = fr.get("quat", None)
         if pos is None or quat is None:
             return None
         R_n, T_n = _pose_unity_to_cv_RT(pos, quat)
-        # local_idxが存在する場合はそれを使用、そうでない場合はidを使用
-        # これにより、all_optimized_depthsのキーと一致する
-        image_idx = int(fr.get("local_idx", fr.get("id", -1)))
+        # all_optimized_depthsのキーと一致する
+        image_idx = int(fr.get("id", -1))
         return {
             "image": img,
             "image_idx": image_idx,
@@ -1135,71 +902,6 @@ def run():
             #             flip_x=True,
             #         )
 
-            # integ_pts, integ_cols = point_cloud_integrator.integrate_depth_maps_median(
-            #     merged_pts_list, merged_cols_list, voxel_size=0.1
-            # )
-            # if getattr(config, "STREAMING_VIEWER", False) and integ_pts.size > 0:
-            #     try:
-            #         if vis is None:
-            #             vis = o3d.visualization.Visualizer()
-            #             vis.create_window(
-            #                 window_name="Streaming Point Cloud",
-            #                 width=1280,
-            #                 height=720,
-            #                 visible=True,
-            #             )
-            #             opt = vis.get_render_option()
-            #             opt.background_color = np.asarray([0, 0, 0])
-            #             added = False
-            #         live_pcd.points = o3d.utility.Vector3dVector(integ_pts)
-            #         live_pcd.colors = o3d.utility.Vector3dVector(integ_cols)
-            #         if not added:
-            #             vis.add_geometry(live_pcd)
-            #             # 初回のみカメラ姿勢を設定
-            #             ctr = vis.get_view_control()
-            #             front = np.asarray(
-            #                 getattr(config, "VIEWER_TOPDOWN_FRONT", [0.0, -1.0, 0.0])
-            #             )
-            #             up = np.asarray(
-            #                 getattr(config, "VIEWER_TOPDOWN_UP", [0.0, 0.0, 1.0])
-            #             )
-            #             # ロール回転（画面の回転）を up ベクトルに反映
-            #             roll_deg = float(getattr(config, "VIEWER_ROLL_DEG", 0.0))
-            #             if abs(roll_deg) > 1e-3:
-            #                 theta = np.deg2rad(roll_deg)
-            #                 # front 軸まわり回転（Rodrigues）
-            #                 f = front / (np.linalg.norm(front) + 1e-9)
-            #                 Kx = np.array(
-            #                     [[0, -f[2], f[1]], [f[2], 0, -f[0]], [-f[1], f[0], 0]],
-            #                     dtype=float,
-            #                 )
-            #                 Rf = (
-            #                     np.eye(3)
-            #                     + np.sin(theta) * Kx
-            #                     + (1 - np.cos(theta)) * (Kx @ Kx)
-            #                 )
-            #                 up = (Rf @ up.reshape(3, 1)).ravel()
-            #             center = (
-            #                 np.mean(integ_pts, axis=0)
-            #                 if integ_pts.size > 0
-            #                 else np.array([0, 0, 0], dtype=float)
-            #             )
-            #             zoom = float(getattr(config, "VIEWER_TOPDOWN_ZOOM", 0.7))
-            #             try:
-            #                 ctr.set_front(front)
-            #                 ctr.set_up(up)
-            #                 ctr.set_lookat(center)
-            #                 ctr.set_zoom(zoom)
-            #             except Exception:
-            #                 pass
-            #             added = True
-            #         else:
-            #             vis.update_geometry(live_pcd)
-            #         vis.poll_events()
-            #         vis.update_renderer()
-            #     except Exception as e:
-            #         logging.warning(f"Streaming viewer update failed: {e}")
-            # last_integ_pts, last_integ_cols = integ_pts, integ_cols
 
         except Exception as e:
             logging.error(f"Error in Step 1 for image pair {idx}: {e}", exc_info=True)
@@ -1233,11 +935,7 @@ def run():
         _log_selected_neighbors(idx, neighbor_frames)
         for fr in neighbor_frames:
             # For Step 2, require that neighbor has an optimized depth.
-            # This check is necessary for both local and global_csv modes:
-            # - local: only neighbors from the same dataset
-            # - global_csv: may include neighbors from other datasets, but we can only use
-            #   those that have been processed (exist in all_optimized_depths)
-            ni = int(fr.get("local_idx", fr.get("id", -1)))
+            ni = int(fr.get("id", -1))
             if ni not in all_optimized_depths:
                 continue
             nv = _get_neighbor_view(idx, fr)
@@ -1344,11 +1042,6 @@ def run():
         "\n--- Step 3: Converting depth maps to point clouds and integrating ---"
     )
     merged_pts_list, merged_cols_list = [], []
-    live_pcd = None
-    vis = None
-    added = False
-    if getattr(config, "STREAMING_VIEWER", False):
-        live_pcd = o3d.geometry.PointCloud()
     last_integ_pts, last_integ_cols = None, None
 
     for idx in target_indices:
@@ -1386,67 +1079,6 @@ def run():
         integ_pts, integ_cols = point_cloud_integrator.integrate_depth_maps_median(
             merged_pts_list, merged_cols_list, voxel_size=0.1
         )
-        if getattr(config, "STREAMING_VIEWER", False) and integ_pts.size > 0:
-            try:
-                if vis is None:
-                    vis = o3d.visualization.Visualizer()
-                    vis.create_window(
-                        window_name="Streaming Point Cloud",
-                        width=1280,
-                        height=720,
-                        visible=True,
-                    )
-                    opt = vis.get_render_option()
-                    opt.background_color = np.asarray([0, 0, 0])
-                    added = False
-                live_pcd.points = o3d.utility.Vector3dVector(integ_pts)
-                live_pcd.colors = o3d.utility.Vector3dVector(integ_cols)
-                if not added:
-                    vis.add_geometry(live_pcd)
-                    # 初回のみカメラ姿勢を設定
-                    ctr = vis.get_view_control()
-                    front = np.asarray(
-                        getattr(config, "VIEWER_TOPDOWN_FRONT", [0.0, -1.0, 0.0])
-                    )
-                    up = np.asarray(
-                        getattr(config, "VIEWER_TOPDOWN_UP", [0.0, 0.0, 1.0])
-                    )
-                    # ロール回転（画面の回転）を up ベクトルに反映
-                    roll_deg = float(getattr(config, "VIEWER_ROLL_DEG", 0.0))
-                    if abs(roll_deg) > 1e-3:
-                        theta = np.deg2rad(roll_deg)
-                        # front 軸まわり回転（Rodrigues）
-                        f = front / (np.linalg.norm(front) + 1e-9)
-                        Kx = np.array(
-                            [[0, -f[2], f[1]], [f[2], 0, -f[0]], [-f[1], f[0], 0]],
-                            dtype=float,
-                        )
-                        Rf = (
-                            np.eye(3)
-                            + np.sin(theta) * Kx
-                            + (1 - np.cos(theta)) * (Kx @ Kx)
-                        )
-                        up = (Rf @ up.reshape(3, 1)).ravel()
-                    center = (
-                        np.mean(integ_pts, axis=0)
-                        if integ_pts.size > 0
-                        else np.array([0, 0, 0], dtype=float)
-                    )
-                    zoom = float(getattr(config, "VIEWER_TOPDOWN_ZOOM", 0.7))
-                    try:
-                        ctr.set_front(front)
-                        ctr.set_up(up)
-                        ctr.set_lookat(center)
-                        ctr.set_zoom(zoom)
-                    except Exception:
-                        pass
-                    added = True
-                else:
-                    vis.update_geometry(live_pcd)
-                vis.poll_events()
-                vis.update_renderer()
-            except Exception as e:
-                logging.warning(f"Streaming viewer update failed: {e}")
         last_integ_pts, last_integ_cols = integ_pts, integ_cols
 
     # --- 最終保存 ---
@@ -1499,23 +1131,7 @@ def run():
         if final_pcd and len(final_pcd.points) > 0:
             # 点群表示の制御（デフォルトは表示しない）
             show_point_cloud = getattr(config, "SHOW_POINT_CLOUD", False)
-            if getattr(config, "STREAMING_VIEWER", False) and show_point_cloud:
-                try:
-                    live_pcd.points = o3d.utility.Vector3dVector(
-                        np.asarray(final_pcd.points)
-                    )
-                    live_pcd.colors = o3d.utility.Vector3dVector(
-                        np.asarray(final_pcd.colors)
-                    )
-                    vis.update_geometry(live_pcd)
-                    logging.info(
-                        "Final cloud shown in streaming window. Close to exit."
-                    )
-                    vis.run()
-                    vis.destroy_window()
-                except Exception as e:
-                    logging.warning(f"Could not finalize streaming window: {e}")
-            elif show_point_cloud:
+            if show_point_cloud:
                 logging.info(
                     "Showing final integrated point cloud. Close the window to exit."
                 )

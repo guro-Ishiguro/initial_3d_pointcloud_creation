@@ -354,7 +354,6 @@ def _evaluate_cost_cuda(
     top_k_costs,
     adaptive_weight_sigma_color,
     zncc_epsilon,
-    use_median_top_k,
 ):
     h, w = ref_image_gray.shape
     half = patch_size // 2
@@ -467,26 +466,20 @@ def _evaluate_cost_cuda(
             if costs[i] > costs[j]:
                 costs[i], costs[j] = costs[j], costs[i]
     top_k = min(top_k_costs, num_neighbors)
-    # USE_MEDIAN_TOP_K による中央値/平均の切替
-    if use_median_top_k != 0:
-        # costs は昇順ソート済み（下で2重ループの後に並べ替えがあるため、こちらでも整列を担保）
-        # ただし上の2重ループは隣接要素の交換なのでコストが単調とは限らない。念のため再整列。
-        # 軽量なローカル選択のため単純な挿入ソートでもよいが、件数が少ないので再使用。
-        # 手動の簡易ソート（バブル）
-        for ii in range(num_neighbors):
-            for jj in range(ii + 1, num_neighbors):
-                if costs[ii] > costs[jj]:
-                    tmp = costs[ii]
-                    costs[ii] = costs[jj]
-                    costs[jj] = tmp
-        # 中央値（偶数なら下側の中間値）
-        mid = top_k // 2
-        return costs[mid]
-    else:
-        total_cost = 0.0
-        for i in range(top_k):
-            total_cost += costs[i]
-        return total_cost / top_k
+    # 常に中央値を使用（外れ値に強い集約方法）
+    # costs は昇順ソート済み（下で2重ループの後に並べ替えがあるため、こちらでも整列を担保）
+    # ただし上の2重ループは隣接要素の交換なのでコストが単調とは限らない。念のため再整列。
+    # 軽量なローカル選択のため単純な挿入ソートでもよいが、件数が少ないので再使用。
+    # 手動の簡易ソート（バブル）
+    for ii in range(num_neighbors):
+        for jj in range(ii + 1, num_neighbors):
+            if costs[ii] > costs[jj]:
+                tmp = costs[ii]
+                costs[ii] = costs[jj]
+                costs[jj] = tmp
+    # 中央値（偶数なら下側の中間値）
+    mid = top_k // 2
+    return costs[mid]
 
 
 @njit(fastmath=True)
@@ -559,9 +552,8 @@ def _evaluate_cost_jit(
 
     costs = np.sort(costs)
     top_k = min(top_k_costs, len(costs))
-    if getattr(config, "USE_MEDIAN_TOP_K", 0):
-        return np.median(costs[:top_k])
-    return np.mean(costs[:top_k])
+    # 常に中央値を使用（外れ値に強い集約方法）
+    return np.median(costs[:top_k])
 
 
 @cuda.jit
@@ -631,7 +623,6 @@ def _propagate_spatial_one_color_cuda(
             top_k_costs,
             adaptive_weight_sigma_color,
             zncc_epsilon,
-            np.int32(config.USE_MEDIAN_TOP_K),
         )
 
         if new_cost < cost_map[r, c]:
@@ -754,7 +745,6 @@ def _propagate_bucket_push_dir_cuda(
             top_k_costs,
             adaptive_weight_sigma_color,
             zncc_epsilon,
-            np.int32(config.USE_MEDIAN_TOP_K),
         )
 
         if new_cost < cost_map[nr, nc]:
@@ -853,7 +843,6 @@ def _propagate_bucket_push4_cuda(
                 top_k_costs,
                 adaptive_weight_sigma_color,
                 zncc_epsilon,
-                np.int32(config.USE_MEDIAN_TOP_K),
             )
 
             if new_cost < cost_map[nr, nc]:
@@ -1217,7 +1206,6 @@ def _random_search_cuda(
         top_k_costs,
         adaptive_weight_sigma_color,
         zncc_epsilon,
-        np.int32(config.USE_MEDIAN_TOP_K),
     )
     if new_cost < cost_map[r, c]:
         depth_map[r, c] = d_new
