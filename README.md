@@ -56,12 +56,14 @@ data/
       ├── images/
       │   ├── image_0/          # 左カメラ画像
       │   ├── image_1/          # 右カメラ画像
-      │   └── depth/            # 正解深度マップ（オプション、評価用）
+      │   └── depth/            # 正解深度マップ
       └── txt/
           ├── camera_params.csv      # カメラ内部パラメータ
           ├── left_camera_poses.csv  # 左カメラのポーズ情報
           └── right_camera_poses.csv # 右カメラのポーズ情報
 ```
+
+データセットは[Unityで開発された建設現場のシミュレータ](https://github.com/guro-Ishiguro/ConstructionSiteSimulator)を動かすと、このような構造のデータを取得することができる。
 
 ## 使用方法
 
