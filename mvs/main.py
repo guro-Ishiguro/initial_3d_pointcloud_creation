@@ -845,11 +845,7 @@ def run():
                     gt_depth = cv2.resize(
                         gt_depth, (w, h), interpolation=cv2.INTER_NEAREST
                     )
-                # 可視化PNGのみを保存
-                gt_vis_path = os.path.join(
-                    save_each_depth_dir, f"gt_depth_{idx:04d}.png"
-                )
-                save_depth_map_as_image(gt_depth, gt_vis_path)
+                # GT depthのPNG保存は_export_gt_depth_pngs_per_viewで統一して行うため、ここでは削除
 
         try:
             li_bgr = cv2.imread(left_path)

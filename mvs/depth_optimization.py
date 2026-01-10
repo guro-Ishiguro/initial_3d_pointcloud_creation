@@ -12,7 +12,6 @@ from numba import cuda, njit, prange
 from numba.cuda.random import create_xoroshiro128p_states
 from utils import (
     compute_depth_metrics,
-    save_depth_map_as_exr,
     save_depth_map_as_image,
     save_normal_map_as_image,
 )
@@ -1925,18 +1924,7 @@ class DepthOptimization:
         if gt_depth is not None and iteration_depths:
             all_iteration_depths.extend(iteration_depths)
 
-        # 深度マップをEXR形式で保存（絶対的な深度値が読み取れる形式）
-        if all_iteration_depths and save_each_depth_dir is not None:
-            # 初期深度をEXR形式で保存
-            save_depth_map_as_exr(
-                initial_depth,
-                os.path.join(save_each_depth_dir, "depth_initial.exr"),
-            )
-
-            # 各イテレーションの深度マップをEXR形式で保存
-            for i, depth in enumerate(iteration_depths, start=1):
-                exr_path = os.path.join(save_each_depth_dir, f"depth_iter_{i:02d}.exr")
-                save_depth_map_as_exr(depth, exr_path)
+        # 深度マップのEXR形式での保存はmain.pyで統一して行うため、ここでは削除
 
         # --- Debug: cost_map statistics and cost validation check on samples ---
         try:
