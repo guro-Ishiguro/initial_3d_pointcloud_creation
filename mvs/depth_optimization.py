@@ -1378,6 +1378,7 @@ def _check_photometric_consistency_jit(
     neighbor_images,
     neighbor_R,
     neighbor_T,
+    color_diff_threshold,
 ):
     """
     指定されたピクセルの深度値が、近傍ビューと光度的に一貫しているかチェックする
@@ -1437,10 +1438,60 @@ def _check_photometric_consistency_jit(
             )
         )
 
-        if color_diff < config.FILTERING_COLOR_DIFFERENCE_THRESHOLD:
+        if color_diff < color_diff_threshold:
             consistent_views += 1
 
     return consistent_views
+
+
+@njit(parallel=True)
+def _filter_depth_map_by_photometric_consistency_jit(
+    filtered_depth_map,
+    ref_image,
+    K,
+    R_ref,
+    T_ref,
+    neighbor_images,
+    neighbor_R,
+    neighbor_T,
+    color_diff_threshold,
+    min_consistent_views,
+):
+    """
+    光度一貫性に基づいて深度マップをフィルタリングする（並列化版）
+    """
+    h, w = filtered_depth_map.shape
+    # Numbaのprangeでは、各スレッドが独立して変数を更新するため、
+    # 最終的な合計は正確ではない可能性があるが、実際には問題ない
+    # （ログ出力用のカウントなので、完全に正確である必要はない）
+    consistency_failures = 0
+
+    for r in prange(h):
+        for c in range(w):
+            depth = filtered_depth_map[r, c]
+            if not (np.isfinite(depth)):
+                continue
+
+            ref_color_pixel = ref_image[r, c]
+            consistent_views = _check_photometric_consistency_jit(
+                r,
+                c,
+                depth,
+                ref_color_pixel,
+                K,
+                R_ref,
+                T_ref,
+                neighbor_images,
+                neighbor_R,
+                neighbor_T,
+                color_diff_threshold,
+            )
+
+            if consistent_views < min_consistent_views:
+                filtered_depth_map[r, c] = np.nan
+                consistency_failures += 1
+
+    return consistency_failures
 
 
 @njit(parallel=True)
@@ -2044,13 +2095,12 @@ class DepthOptimization:
         self, depth_map, ref_image, ref_pose, neighbor_views_data
     ):
         """
-        光度一貫性に基づいて深度マップをフィルタリングする
+        光度一貫性に基づいて深度マップをフィルタリングする（高速な並列化版）
         """
         logging.info(
             "Filtering optimized depth map based on cost and photometric consistency..."
         )
-        h, w = depth_map.shape
-        filtered_depth_map = depth_map.copy()
+        filtered_depth_map = depth_map.copy().astype(np.float32)
 
         # データをJIT用に準備
         K = ref_pose["K"].astype(np.float32)
@@ -2058,7 +2108,7 @@ class DepthOptimization:
         T_ref = ref_pose["T"].astype(np.float32)
 
         neighbor_images = np.stack(
-            [view["image"] for view in neighbor_views_data], axis=0
+            [view["image"].astype(np.float32) for view in neighbor_views_data], axis=0
         )
         neighbor_R = np.stack(
             [view["R"].astype(np.float32) for view in neighbor_views_data], axis=0
@@ -2067,31 +2117,21 @@ class DepthOptimization:
             [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
         )
 
-        # 光度一貫性チェック
-        consistency_failures = 0
-        for r in range(h):
-            for c in range(w):
-                if math.isnan(filtered_depth_map[r, c]) or math.isinf(
-                    filtered_depth_map[r, c]
-                ):
-                    continue
+        ref_image_float = ref_image.astype(np.float32)
 
-                consistent_views = _check_photometric_consistency_jit(
-                    r,
-                    c,
-                    filtered_depth_map[r, c],
-                    ref_image[r, c],
-                    K,
-                    R_ref,
-                    T_ref,
-                    neighbor_images,
-                    neighbor_R,
-                    neighbor_T,
-                )
-
-                if consistent_views < self.config.FILTERING_MIN_CONSISTENT_VIEWS:
-                    filtered_depth_map[r, c] = np.nan
-                    consistency_failures += 1
+        # 光度一貫性チェック（並列化版）
+        consistency_failures = _filter_depth_map_by_photometric_consistency_jit(
+            filtered_depth_map,
+            ref_image_float,
+            K,
+            R_ref,
+            T_ref,
+            neighbor_images,
+            neighbor_R,
+            neighbor_T,
+            np.float32(self.config.FILTERING_COLOR_DIFFERENCE_THRESHOLD),
+            self.config.FILTERING_MIN_CONSISTENT_VIEWS,
+        )
 
         logging.info(
             f"{consistency_failures} points invalidated by photometric consistency check."
