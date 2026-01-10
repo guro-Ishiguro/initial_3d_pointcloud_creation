@@ -316,10 +316,12 @@ def _export_gt_depth_pngs_per_view(
     indices: list,
     label_depth_dir: str,
     out_depth_dir: str,
+    all_pairs_data: dict,
 ):
     """
     Export GT depth EXR files to per-view folders as PNG visualizations.
     This can be expensive if run for all frames, so we allow passing only selected indices.
+    GT depth maps are saved in the same folders as the generated depth maps (using filename_stem).
     """
     if not label_depth_dir or not os.path.isdir(label_depth_dir):
         return 0
@@ -351,7 +353,14 @@ def _export_gt_depth_pngs_per_view(
         else:
             gt_resized = gt
 
-        save_each_depth_dir = os.path.join(out_depth_dir, f"{idx_int:04d}")
+        # 生成された深度マップと同じフォルダを使用（filename_stem）
+        if idx_int in all_pairs_data:
+            _, _, left_path, _, _ = all_pairs_data[idx_int]
+            filename_stem = Path(left_path).stem
+        else:
+            filename_stem = f"{idx_int:04d}"
+        
+        save_each_depth_dir = os.path.join(out_depth_dir, filename_stem)
         os.makedirs(save_each_depth_dir, exist_ok=True)
         save_depth_map_as_image(
             gt_resized, os.path.join(save_each_depth_dir, f"gt_depth_{idx_int:04d}.png")
@@ -532,6 +541,7 @@ def run():
                 indices=idxs,
                 label_depth_dir=getattr(config, "LABEL_DEPTH_IMAGE_DIR", ""),
                 out_depth_dir=config.DEPTH_IMAGE_DIR,
+                all_pairs_data=all_pairs_data,
             )
             logging.info(
                 f"Exported {exported} GT depth views into per-view folders under {config.DEPTH_IMAGE_DIR}"
