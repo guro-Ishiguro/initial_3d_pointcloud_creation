@@ -7,7 +7,7 @@ import time
 
 import cv2
 import numpy as np
-from logging_setup import log_ndarray_stats, time_block
+from logging_setup import time_block
 from numba import cuda, njit, prange
 from numba.cuda.random import create_xoroshiro128p_states
 from utils import (
@@ -888,7 +888,12 @@ def _random_search_cuda(
 
 @njit(fastmath=True)
 def _check_geometric_consistency_jit(
-    point_3d_world, neighbor_K_np, neighbor_R_np, neighbor_T_np, neighbor_depth_maps_np
+    point_3d_world,
+    neighbor_K_np,
+    neighbor_R_np,
+    neighbor_T_np,
+    neighbor_depth_maps_np,
+    error_threshold,
 ):
     """
     単一の3Dポイントが、近傍ビューの深度マップと幾何学的に一貫しているかチェックする
@@ -936,10 +941,58 @@ def _check_geometric_consistency_jit(
         # 幾何学的なエラーを計算 (相対深度差)
         relative_error = np.abs(d_proj_src - d_actual_src) / d_actual_src
 
-        if relative_error < config.GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD:
+        if relative_error < error_threshold:
             consistent_views += 1
 
     return consistent_views
+
+
+@njit(parallel=True)
+def _filter_depth_map_by_geometric_consistency_jit(
+    filtered_depth_map,
+    K_ref,
+    R_ref,
+    T_ref,
+    neighbor_K_np,
+    neighbor_R_np,
+    neighbor_T_np,
+    neighbor_depth_maps_np,
+    error_threshold,
+    min_consistent_views,
+):
+    """
+    幾何学的一貫性に基づいて深度マップをフィルタリングする（並列化版）
+    """
+    h, w = filtered_depth_map.shape
+    failures = 0
+
+    for r in prange(h):
+        for c in range(w):
+            d_ref = filtered_depth_map[r, c]
+            if not (np.isfinite(d_ref) and d_ref > 0):
+                continue
+
+            # 3Dポイントへの逆投影
+            x_cam_ref = (c - K_ref[0, 2]) * d_ref / K_ref[0, 0]
+            y_cam_ref = (r - K_ref[1, 2]) * d_ref / K_ref[1, 1]
+            point_3d_cam_ref = np.array([x_cam_ref, y_cam_ref, d_ref], dtype=np.float32)
+            point_3d_world = R_ref.T @ (point_3d_cam_ref - T_ref)
+
+            # 幾何学的一貫性をチェック
+            consistent_views = _check_geometric_consistency_jit(
+                point_3d_world,
+                neighbor_K_np,
+                neighbor_R_np,
+                neighbor_T_np,
+                neighbor_depth_maps_np,
+                error_threshold,
+            )
+
+            if consistent_views < min_consistent_views:
+                filtered_depth_map[r, c] = np.nan
+                failures += 1
+
+    return failures
 
 
 @njit(fastmath=True)
@@ -1183,7 +1236,6 @@ class DepthOptimization:
             )
             self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR = 10.0
 
-
     def _initialize_normals_gpu(self, depth_map, K):
         h, w = depth_map.shape
         d_depth_map = cuda.to_device(depth_map.astype(np.float32))
@@ -1368,7 +1420,7 @@ class DepthOptimization:
         filename_stem=None,
     ):
         logging.info(
-            f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] PatchMatch MVS深度最適化を開始..."
+            "Starting PatchMatch MVS depth refinement using checkerboard propagation..."
         )
 
         h, w = initial_depth.shape
@@ -1407,16 +1459,14 @@ class DepthOptimization:
             [view["T"].astype(np.float32) for view in neighbor_views_data], axis=0
         )
         cost_map = np.full((h, w), np.inf, dtype=np.float32)
-        
+
         # 初期コストをGPUで計算（CPU版より高速）
-        logging.info("-" * 80)
-        logging.info(f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] 初期コストマップをGPUで計算中...")
-        logging.info("-" * 80)
+        logging.info("Computing initial cost map on GPU...")
         threadsperblock = (16, 16)
         blockspergrid_x = (w + threadsperblock[0] - 1) // threadsperblock[0]
         blockspergrid_y = (h + threadsperblock[1] - 1) // threadsperblock[1]
         blockspergrid = (blockspergrid_x, blockspergrid_y)
-        
+
         # GPUデバイスにデータを転送
         d_depth_map = cuda.to_device(depth_map.astype(np.float32))
         d_normal_map = cuda.to_device(normal_map.astype(np.float32))
@@ -1430,7 +1480,7 @@ class DepthOptimization:
         d_src_K = cuda.to_device(np.ascontiguousarray(src_K))
         d_src_R = cuda.to_device(np.ascontiguousarray(src_R))
         d_src_T = cuda.to_device(np.ascontiguousarray(src_T))
-        
+
         # GPUで初期コストを計算
         _initialize_cost_map_cuda[blockspergrid, threadsperblock](
             d_depth_map,
@@ -1451,10 +1501,10 @@ class DepthOptimization:
             d_src_T,
         )
         cuda.synchronize()
-        
+
         # 結果をホストにコピー
         cost_map = d_cost_map.copy_to_host()
-        logging.info(f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] 初期コストマップ計算完了（GPU）")
+        logging.info("Initial cost map computation completed on GPU.")
 
         # Early-stop state will be managed on-the-fly without predeclared thresholds
 
@@ -1507,7 +1557,6 @@ class DepthOptimization:
                 src_R,
                 src_T,
                 ref_idx=ref_idx,
-                filename_stem=filename_stem,
                 save_per_iter=config.DEBUG_SAVE_DEPTH_MAPS,
                 save_dir=save_each_depth_dir,
                 save_normals_per_iter=self.config.DEBUG_SAVE_NORMAL_MAPS,
@@ -1648,33 +1697,19 @@ class DepthOptimization:
         neighbor_T_np = np.stack(neighbor_T_list)
         neighbor_depth_maps_np = np.stack(neighbor_depth_maps_list)
 
-        failures = 0
-        for r in range(h):
-            for c in range(w):
-                d_ref = filtered_depth_map[r, c]
-                if not np.isfinite(d_ref) or d_ref <= 0:
-                    continue
-
-                # 3Dポイントへの逆投影をループの外で一度だけ行う
-                x_cam_ref = (c - K_ref[0, 2]) * d_ref / K_ref[0, 0]
-                y_cam_ref = (r - K_ref[1, 2]) * d_ref / K_ref[1, 1]
-                point_3d_cam_ref = np.array(
-                    [x_cam_ref, y_cam_ref, d_ref], dtype=np.float32
-                )
-                point_3d_world = R_ref.T @ (point_3d_cam_ref - T_ref)
-
-                # NumPy配列をJIT関数に渡す
-                consistent_views = _check_geometric_consistency_jit(
-                    point_3d_world,
-                    neighbor_K_np,
-                    neighbor_R_np,
-                    neighbor_T_np,
-                    neighbor_depth_maps_np,
-                )
-
-                if consistent_views < self.config.GEOMETRIC_MIN_CONSISTENT_VIEWS:
-                    filtered_depth_map[r, c] = np.nan
-                    failures += 1
+        # 並列化されたJIT関数を使用して高速化
+        failures = _filter_depth_map_by_geometric_consistency_jit(
+            filtered_depth_map,
+            K_ref,
+            R_ref,
+            T_ref,
+            neighbor_K_np,
+            neighbor_R_np,
+            neighbor_T_np,
+            neighbor_depth_maps_np,
+            np.float32(self.config.GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD),
+            self.config.GEOMETRIC_MIN_CONSISTENT_VIEWS,
+        )
 
         logging.info(
             f"{failures} points ({failures/(h*w)*100:.2f}%) invalidated by geometric consistency check."
@@ -1745,7 +1780,6 @@ class DepthOptimization:
         src_R,
         src_T,
         ref_idx=0,
-        filename_stem=None,
         save_per_iter=False,
         save_dir=None,
         save_normals_per_iter=False,
@@ -1795,7 +1829,7 @@ class DepthOptimization:
                 first_iter_start_time = iter_start_time
 
             logging.info(
-                f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] PatchMatch GPU イテレーション {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
+                f"PatchMatch GPU Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
             )
 
             # Propagation (checkerboard)
@@ -1805,9 +1839,7 @@ class DepthOptimization:
                 d_neighbors_dr = cuda.to_device(neighbors_dr)
                 d_neighbors_dc = cuda.to_device(neighbors_dc)
                 for j in [0, 1]:
-                    _propagate_spatial_one_color_cuda[
-                        blockspergrid, threadsperblock
-                    ](
+                    _propagate_spatial_one_color_cuda[blockspergrid, threadsperblock](
                         d_depth_map,
                         d_normal_map,
                         d_cost_map,
@@ -1867,7 +1899,7 @@ class DepthOptimization:
                 self._gpu_cum_start_nojit = time.time()
 
             # Save depth per-iteration if requested (only on last iteration to reduce I/O overhead)
-            is_last_iter = (i + 1 == self.config.PATCHMATCH_ITERATIONS)
+            is_last_iter = i + 1 == self.config.PATCHMATCH_ITERATIONS
             if save_per_iter and save_dir is not None and is_last_iter:
                 depth_tmp = d_depth_map.copy_to_host()
                 save_path = os.path.join(save_dir, f"depth_iter_{i+1:02d}.png")
