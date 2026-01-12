@@ -15,10 +15,10 @@ import open3d as o3d
 matplotlib.use("Agg")  # headless save
 import matplotlib.pyplot as plt  # noqa: E402
 from depth_estimation import DepthEstimator  # noqa: E402
-from depth_optimization import (
+from depth_optimization import (  # noqa: E402
     DepthOptimization,
     _initialize_normals_from_depth_jit,
-)  # noqa: E402
+)
 from disparity_estimation import ImageProcessor  # noqa: E402
 from logging_setup import setup_logging  # noqa: E402
 from point_cloud_integrator import PointCloudIntegrator  # noqa: E402
@@ -237,7 +237,9 @@ def _compute_normals_from_depth(depth_map: np.ndarray, K: np.ndarray) -> np.ndar
     """
     深度マップから法線マップを計算する（高速なJITコンパイル版を使用）
     """
-    return _initialize_normals_from_depth_jit(depth_map.astype(np.float32), K.astype(np.float32))
+    return _initialize_normals_from_depth_jit(
+        depth_map.astype(np.float32), K.astype(np.float32)
+    )
 
 
 def _export_gt_depth_pngs_per_view(
@@ -288,7 +290,7 @@ def _export_gt_depth_pngs_per_view(
             filename_stem = Path(left_path).stem
         else:
             filename_stem = f"{idx_int:04d}"
-        
+
         save_each_depth_dir = os.path.join(out_depth_dir, filename_stem)
         os.makedirs(save_each_depth_dir, exist_ok=True)
         save_depth_map_as_image(
@@ -580,10 +582,10 @@ def run():
             )
             continue
         _, T_pos, left_path, right_path, R_mat = all_pairs_data[idx]
-        
+
         # ファイル名（拡張子なし）を取得してフォルダ名に使用
         filename_stem = Path(left_path).stem
-        
+
         # 処理開始のログ（区切り線付き）
         logging.info("=" * 80)
         logging.info(f"処理開始: 画像ペア {idx} (ファイル: {filename_stem})")
@@ -758,7 +760,9 @@ def run():
                 )
             )
             photo_elapsed = time.time() - photo_start
-            logging.info(f"[{filename_stem}] 光度フィルタリング完了 (経過時間: {photo_elapsed:.2f}秒)")
+            logging.info(
+                f"[{filename_stem}] 光度フィルタリング完了 (経過時間: {photo_elapsed:.2f}秒)"
+            )
             append_to_csv(time_csv_path, ["photometric", f"{photo_elapsed:.6f}"])
             logging.debug(
                 f"[{filename_stem}] 光度フィルタリング時間をtime.csvに保存しました: {time_csv_path}"
@@ -926,7 +930,6 @@ def run():
             #             flip_x=True,
             #         )
 
-
         except Exception as e:
             logging.error(f"Error in Step 1 for image pair {idx}: {e}", exc_info=True)
 
@@ -994,7 +997,9 @@ def run():
             )
             geo_elapsed = time.time() - geo_start
             append_to_csv(time_csv_path, ["geometric", f"{geo_elapsed:.6f}"])
-            logging.info(f"[{filename_stem}] 幾何学的一貫性フィルタリング完了 (経過時間: {geo_elapsed:.2f}秒)")
+            logging.info(
+                f"[{filename_stem}] 幾何学的一貫性フィルタリング完了 (経過時間: {geo_elapsed:.2f}秒)"
+            )
             logging.debug(
                 f"Saved geometric time ({geo_elapsed:.6f}s) to {time_csv_path}"
             )
@@ -1036,7 +1041,8 @@ def run():
             all_geometrically_filtered_depths[idx] = photometrically_filtered_depth
 
     # --- ステップ2.5: 深度マップをEXR形式で保存（絶対的な深度値が読み取れる形式） ---
-    if all_stage_depths:
+    # DEBUG_SAVE_DEPTH_MAPSがFalseの場合は保存しない
+    if config.DEBUG_SAVE_DEPTH_MAPS and all_stage_depths:
         logging.info("")
         logging.info("=" * 80)
         logging.info("ステップ2.5: 深度マップをEXR形式で保存")
@@ -1108,7 +1114,9 @@ def run():
         merged_cols_list.append(world_colors)
         pointcloud_elapsed = time.time() - pointcloud_start
         append_to_csv(time_csv_path, ["pointcloud", f"{pointcloud_elapsed:.6f}"])
-        logging.info(f"[{filename_stem}] 点群変換完了 (経過時間: {pointcloud_elapsed:.2f}秒, 点群数: {len(world_points):,}点)")
+        logging.info(
+            f"[{filename_stem}] 点群変換完了 (経過時間: {pointcloud_elapsed:.2f}秒, 点群数: {len(world_points):,}点)"
+        )
 
     # --- 全点群を一度だけ統合 ---
     if merged_pts_list:
@@ -1122,7 +1130,9 @@ def run():
             merged_pts_list, merged_cols_list, voxel_size=0.1
         )
         integ_elapsed = time.time() - integ_start
-        logging.info(f"点群統合完了 (経過時間: {integ_elapsed:.2f}秒, 統合点数: {len(integ_pts):,}点)")
+        logging.info(
+            f"点群統合完了 (経過時間: {integ_elapsed:.2f}秒, 統合点数: {len(integ_pts):,}点)"
+        )
         last_integ_pts, last_integ_cols = integ_pts, integ_cols
 
     # --- 最終保存 ---
@@ -1196,14 +1206,14 @@ def run():
     hours = int(total_elapsed // 3600)
     minutes = int((total_elapsed % 3600) // 60)
     seconds = total_elapsed % 60
-    
+
     if hours > 0:
         time_str = f"{hours}時間{minutes}分{seconds:.1f}秒"
     elif minutes > 0:
         time_str = f"{minutes}分{seconds:.1f}秒"
     else:
         time_str = f"{seconds:.1f}秒"
-    
+
     logging.info("")
     logging.info("=" * 80)
     logging.info(f"全体処理完了 (総経過時間: {time_str} / {total_elapsed:.2f}秒)")
