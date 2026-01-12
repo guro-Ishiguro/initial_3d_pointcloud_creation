@@ -271,9 +271,7 @@ class ConfigWidget(QWidget):
         )
         layout.addRow(
             QLabel(""),
-            QLabel(
-                "PatchMatchアルゴリズムの反復回数。多いほど精度が上がりますが時間がかかります。"
-            ),
+            QLabel("PatchMatchアルゴリズムの反復回数。多いほど精度が上がりますが時間がかかります。"),
         )
 
         # PATCHMATCH_PATCH_SIZE
@@ -282,14 +280,10 @@ class ConfigWidget(QWidget):
         self.config_widgets["PATCHMATCH_PATCH_SIZE"].setValue(
             self._get_int_value("PATCHMATCH_PATCH_SIZE", 7)
         )
-        layout.addRow(
-            QLabel("パッチサイズ:"), self.config_widgets["PATCHMATCH_PATCH_SIZE"]
-        )
+        layout.addRow(QLabel("パッチサイズ:"), self.config_widgets["PATCHMATCH_PATCH_SIZE"])
         layout.addRow(
             QLabel(""),
-            QLabel(
-                "マッチングに使用するパッチのサイズ（奇数）。大きいほど安定しますが計算コストが増えます。"
-            ),
+            QLabel("マッチングに使用するパッチのサイズ（奇数）。大きいほど安定しますが計算コストが増えます。"),
         )
 
         # ZNCC_EPSILON
@@ -323,9 +317,7 @@ class ConfigWidget(QWidget):
         layout.addRow(QLabel("減衰率:"), self.config_widgets["PATCHMATCH_DECAY_RATE"])
         layout.addRow(
             QLabel(""),
-            QLabel(
-                "ランダムサーチの探索範囲を減衰させる率。イテレーションごとに探索範囲が狭くなります。"
-            ),
+            QLabel("ランダムサーチの探索範囲を減衰させる率。イテレーションごとに探索範囲が狭くなります。"),
         )
 
         # PATCHMATCH_NORMAL_SEARCH_ANGLE
@@ -339,9 +331,7 @@ class ConfigWidget(QWidget):
             QLabel("法線探索角度:"),
             self.config_widgets["PATCHMATCH_NORMAL_SEARCH_ANGLE"],
         )
-        layout.addRow(
-            QLabel(""), QLabel("ランダムサーチで法線を探索する角度範囲（度）。")
-        )
+        layout.addRow(QLabel(""), QLabel("ランダムサーチで法線を探索する角度範囲（度）。"))
 
         # ADAPTIVE_WEIGHT_SIGMA_COLOR
         self.config_widgets["ADAPTIVE_WEIGHT_SIGMA_COLOR"] = QDoubleSpinBox()
@@ -356,9 +346,7 @@ class ConfigWidget(QWidget):
         )
         layout.addRow(
             QLabel(""),
-            QLabel(
-                "色差に基づく適応的重み付けのシグマ値。大きいほど色差の影響が小さくなります。"
-            ),
+            QLabel("色差に基づく適応的重み付けのシグマ値。大きいほど色差の影響が小さくなります。"),
         )
 
         scroll.setWidget(widget)
@@ -394,9 +382,7 @@ class ConfigWidget(QWidget):
             QLabel("最小一貫ビュー数（光度）:"),
             self.config_widgets["FILTERING_MIN_CONSISTENT_VIEWS"],
         )
-        layout.addRow(
-            QLabel(""), QLabel("光度一貫性チェックで必要な最小の一貫ビュー数。")
-        )
+        layout.addRow(QLabel(""), QLabel("光度一貫性チェックで必要な最小の一貫ビュー数。"))
 
         # GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD
         self.config_widgets["GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD"] = QDoubleSpinBox()
@@ -409,9 +395,7 @@ class ConfigWidget(QWidget):
             QLabel("幾何一貫性エラー閾値:"),
             self.config_widgets["GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD"],
         )
-        layout.addRow(
-            QLabel(""), QLabel("幾何学的な一貫性チェックでの相対深度差の閾値。")
-        )
+        layout.addRow(QLabel(""), QLabel("幾何学的な一貫性チェックでの相対深度差の閾値。"))
 
         # GEOMETRIC_MIN_CONSISTENT_VIEWS
         self.config_widgets["GEOMETRIC_MIN_CONSISTENT_VIEWS"] = QSpinBox()
@@ -423,9 +407,7 @@ class ConfigWidget(QWidget):
             QLabel("最小一貫ビュー数（幾何）:"),
             self.config_widgets["GEOMETRIC_MIN_CONSISTENT_VIEWS"],
         )
-        layout.addRow(
-            QLabel(""), QLabel("幾何学的な一貫性チェックで必要な最小の一貫ビュー数。")
-        )
+        layout.addRow(QLabel(""), QLabel("幾何学的な一貫性チェックで必要な最小の一貫ビュー数。"))
 
         scroll.setWidget(widget)
         scroll.setWidgetResizable(True)
@@ -443,14 +425,10 @@ class ConfigWidget(QWidget):
         self.config_widgets["FRAME_STRIDE"].setValue(
             self._get_int_value("FRAME_STRIDE", 15)
         )
-        layout.addRow(
-            QLabel("フレームストライド:"), self.config_widgets["FRAME_STRIDE"]
-        )
+        layout.addRow(QLabel("フレームストライド:"), self.config_widgets["FRAME_STRIDE"])
         layout.addRow(
             QLabel(""),
-            QLabel(
-                "処理するフレームの間隔。1なら全フレーム、15なら15フレームごとに処理します。"
-            ),
+            QLabel("処理するフレームの間隔。1なら全フレーム、15なら15フレームごとに処理します。"),
         )
 
         scroll.setWidget(widget)
@@ -481,9 +459,7 @@ class ConfigWidget(QWidget):
         layout.addRow(
             QLabel("近傍選択モード:"), self.config_widgets["NEIGHBOR_SELECTION_MODE"]
         )
-        layout.addRow(
-            QLabel(""), QLabel("nearest: 距離が近い順、keyframe: キーフレームベース。")
-        )
+        layout.addRow(QLabel(""), QLabel("nearest: 距離が近い順、keyframe: キーフレームベース。"))
 
         # NEIGHBOR_NEAREST_COUNT
         self.config_widgets["NEIGHBOR_NEAREST_COUNT"] = QSpinBox()
@@ -511,12 +487,8 @@ class ConfigWidget(QWidget):
         self.config_widgets["DEBUG_SAVE_DEPTH_MAPS"].setChecked(
             self._get_bool_value("DEBUG_SAVE_DEPTH_MAPS", True)
         )
-        layout.addRow(
-            QLabel("深度マップを保存:"), self.config_widgets["DEBUG_SAVE_DEPTH_MAPS"]
-        )
-        layout.addRow(
-            QLabel(""), QLabel("各イテレーションの深度マップをPNG形式で保存します。")
-        )
+        layout.addRow(QLabel("深度マップを保存:"), self.config_widgets["DEBUG_SAVE_DEPTH_MAPS"])
+        layout.addRow(QLabel(""), QLabel("各イテレーションの深度マップをPNG形式で保存します。"))
 
         # DEBUG_SAVE_NORMAL_MAPS
         self.config_widgets["DEBUG_SAVE_NORMAL_MAPS"] = QCheckBox()
@@ -526,9 +498,7 @@ class ConfigWidget(QWidget):
         layout.addRow(
             QLabel("法線マップを保存:"), self.config_widgets["DEBUG_SAVE_NORMAL_MAPS"]
         )
-        layout.addRow(
-            QLabel(""), QLabel("各イテレーションの法線マップをPNG形式で保存します。")
-        )
+        layout.addRow(QLabel(""), QLabel("各イテレーションの法線マップをPNG形式で保存します。"))
 
         scroll.setWidget(widget)
         scroll.setWidgetResizable(True)
@@ -583,34 +553,34 @@ class ConfigWidget(QWidget):
 
         # POSITION_ERROR_SCALE
         self.config_widgets["POSITION_ERROR_SCALE"] = QDoubleSpinBox()
-        self.config_widgets["POSITION_ERROR_SCALE"].setDecimals(6)
-        self.config_widgets["POSITION_ERROR_SCALE"].setRange(0.0, 1.0)
-        self.config_widgets["POSITION_ERROR_SCALE"].setSingleStep(0.000001)
+        self.config_widgets["POSITION_ERROR_SCALE"].setDecimals(4)
+        self.config_widgets["POSITION_ERROR_SCALE"].setRange(0.0, 10.0)
+        self.config_widgets["POSITION_ERROR_SCALE"].setSingleStep(0.01)
         self.config_widgets["POSITION_ERROR_SCALE"].setValue(
             self._get_float_value("POSITION_ERROR_SCALE", 0.0)
         )
         layout.addRow(
-            QLabel("位置エラースケール:"), self.config_widgets["POSITION_ERROR_SCALE"]
+            QLabel("位置エラースケール (m):"), self.config_widgets["POSITION_ERROR_SCALE"]
         )
         layout.addRow(
             QLabel(""),
-            QLabel("カメラ位置のエラースケール。0.0でエラーなし。"),
+            QLabel("カメラ位置の誤差の標準偏差（メートル単位）。0.0でエラーなし。例: 0.1m = 10cm"),
         )
 
         # ROTATION_ERROR_SCALE
         self.config_widgets["ROTATION_ERROR_SCALE"] = QDoubleSpinBox()
-        self.config_widgets["ROTATION_ERROR_SCALE"].setDecimals(6)
+        self.config_widgets["ROTATION_ERROR_SCALE"].setDecimals(4)
         self.config_widgets["ROTATION_ERROR_SCALE"].setRange(0.0, 1.0)
-        self.config_widgets["ROTATION_ERROR_SCALE"].setSingleStep(0.000001)
+        self.config_widgets["ROTATION_ERROR_SCALE"].setSingleStep(0.001)
         self.config_widgets["ROTATION_ERROR_SCALE"].setValue(
             self._get_float_value("ROTATION_ERROR_SCALE", 0.0)
         )
         layout.addRow(
-            QLabel("回転エラースケール:"), self.config_widgets["ROTATION_ERROR_SCALE"]
+            QLabel("回転エラースケール (rad):"), self.config_widgets["ROTATION_ERROR_SCALE"]
         )
         layout.addRow(
             QLabel(""),
-            QLabel("カメラ回転のエラースケール。0.0でエラーなし。"),
+            QLabel("カメラ回転の誤差の標準偏差（ラジアン単位）。0.0でエラーなし。例: 0.01rad ≈ 0.6度, 0.1rad ≈ 6度"),
         )
 
         scroll.setWidget(widget)

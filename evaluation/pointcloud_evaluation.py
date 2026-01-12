@@ -172,9 +172,7 @@ def load_mesh(
         return trimesh.load_mesh(str(mesh), process=True)
 
     if vertices is None or faces is None:
-        raise ValueError(
-            "`vertices` と `faces` の両方、または `mesh` を指定してください。"
-        )
+        raise ValueError("`vertices` と `faces` の両方、または `mesh` を指定してください。")
 
     return trimesh.Trimesh(
         vertices=np.asarray(vertices),
@@ -225,9 +223,7 @@ def crop_mesh_with_bbox(
     faces_keep = mesh.faces[faces_keep_mask]
 
     if faces_keep.size == 0:
-        raise ValueError(
-            "バウンディングボックスでクロップした結果、メッシュが空になりました。"
-        )
+        raise ValueError("バウンディングボックスでクロップした結果、メッシュが空になりました。")
 
     cropped = trimesh.Trimesh(vertices=v, faces=faces_keep, process=True)
     return cropped
@@ -335,9 +331,7 @@ def bidirectional_consistency_error(
     if show_progress and nn_Q.shape[0] > 50000:
         batch_size = 50000
         idx_P_back_list = []
-        with tqdm(
-            total=nn_Q.shape[0], desc="  BCE: Q→P最近傍を計算中", unit="点"
-        ) as pbar:
+        with tqdm(total=nn_Q.shape[0], desc="  BCE: Q→P最近傍を計算中", unit="点") as pbar:
             for i in range(0, nn_Q.shape[0], batch_size):
                 batch = nn_Q[i : i + batch_size]
                 _, batch_idx = tree_P.query(batch, k=1)
@@ -495,9 +489,7 @@ def _compute_point_to_mesh_and_outlier_ratio(
 
         # 符号付き距離を計算（バッチ処理でプログレスバーを表示）
         if show_progress and P.shape[0] > 50000:
-            batch_size = min(
-                200000, P.shape[0] // 5
-            )  # Open3Dは高速なので大きなバッチサイズを使用
+            batch_size = min(200000, P.shape[0] // 5)  # Open3Dは高速なので大きなバッチサイズを使用
             distances_list = []
             with tqdm(
                 total=P.shape[0],
@@ -528,9 +520,7 @@ def _compute_point_to_mesh_and_outlier_ratio(
 
         # 一度だけメッシュへの最近傍距離を計算
         if show_progress and P.shape[0] > 50000:
-            batch_size = min(
-                100000, P.shape[0] // 10
-            )  # 10バッチ程度に分割、最大100,000点
+            batch_size = min(100000, P.shape[0] // 10)  # 10バッチ程度に分割、最大100,000点
             distances_list = []
             with tqdm(
                 total=P.shape[0],
@@ -715,9 +705,7 @@ def outlier_ratio(
     if show_progress and P.shape[0] > 50000:
         batch_size = min(100000, P.shape[0] // 10)  # 10バッチ程度に分割、最大100,000点
         distances_list = []
-        with tqdm(
-            total=P.shape[0], desc="外れ値割合を計算中", unit="点", miniters=1000
-        ) as pbar:
+        with tqdm(total=P.shape[0], desc="外れ値割合を計算中", unit="点", miniters=1000) as pbar:
             for i in range(0, P.shape[0], batch_size):
                 batch = P[i : i + batch_size]
                 _, batch_distances, _ = mesh.nearest.on_surface(batch)

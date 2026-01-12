@@ -56,9 +56,7 @@ def merge_datasets(
 
     # 統合先ディレクトリが既に存在する場合は確認
     if os.path.exists(merged_dir):
-        response = input(
-            f"統合先ディレクトリ {merged_dir} が既に存在します。上書きしますか？ (y/N): "
-        )
+        response = input(f"統合先ディレクトリ {merged_dir} が既に存在します。上書きしますか？ (y/N): ")
         if response.lower() != "y":
             print("統合をキャンセルしました。")
             return False
@@ -96,9 +94,7 @@ def merge_datasets(
     for ds_idx, dataset_name in enumerate(source_datasets):
         source_dir = os.path.join(data_dir, dataset_name)
         if not os.path.isdir(source_dir):
-            print(
-                f"警告: データセット {dataset_name} が見つかりません。スキップします。"
-            )
+            print(f"警告: データセット {dataset_name} が見つかりません。スキップします。")
             continue
 
         source_images_dir = os.path.join(source_dir, "images")
@@ -110,9 +106,7 @@ def merge_datasets(
             dest_img_dir = os.path.join(merged_images_dir, img_type)
 
             if not os.path.isdir(source_img_dir):
-                print(
-                    f"警告: {dataset_name}/images/{img_type} が見つかりません。スキップします。"
-                )
+                print(f"警告: {dataset_name}/images/{img_type} が見つかりません。スキップします。")
                 continue
 
             # 画像ファイルを連番でコピー（ファイル名の数値でソート）
@@ -249,9 +243,7 @@ def merge_datasets(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="複数のデータセットを1つのデータセットに統合"
-    )
+    parser = argparse.ArgumentParser(description="複数のデータセットを1つのデータセットに統合")
     parser.add_argument(
         "datasets",
         nargs="*",
@@ -293,9 +285,7 @@ def main():
         for i, ds in enumerate(available_datasets, 1):
             print(f"  {i}) {ds}")
 
-        print(
-            "\n統合するデータセットを選択してください（カンマ区切りまたはスペース区切り）:"
-        )
+        print("\n統合するデータセットを選択してください（カンマ区切りまたはスペース区切り）:")
         choice = input("> ").strip()
         if not choice:
             print("データセットが選択されませんでした。")

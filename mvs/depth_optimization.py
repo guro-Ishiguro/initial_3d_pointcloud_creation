@@ -1521,34 +1521,37 @@ class DepthOptimization:
         if gt_depth is not None:
             all_iteration_depths.append(initial_depth.copy())
 
-        depth_map, normal_map, cost_map, iteration_depths = (
-            self._propagate_and_search_gpu(
-                depth_map,
-                normal_map,
-                cost_map,
-                initial_depth_error,
-                ref_image_gray,
-                ref_pose_K,
-                ref_pose_R,
-                ref_pose_T,
-                src_images_gray,
-                src_K,
-                src_R,
-                src_T,
-                ref_idx=ref_idx,
-                filename_stem=filename_stem,
-                save_per_iter=config.DEBUG_SAVE_DEPTH_MAPS,
-                save_dir=save_each_depth_dir,
-                save_normals_per_iter=self.config.DEBUG_SAVE_NORMAL_MAPS,
-                normal_save_dir=(
-                    os.path.join(config.NORMAL_IMAGE_DIR, depth_folder_name)
-                    if self.config.DEBUG_SAVE_NORMAL_MAPS
-                    else None
-                ),
-                gt_depth=gt_depth,
-                iter_times=iter_times_gpu,
-                csv_files=None,  # CSV書き込み処理は削除（評価は別スクリプトで実行）
-            )
+        (
+            depth_map,
+            normal_map,
+            cost_map,
+            iteration_depths,
+        ) = self._propagate_and_search_gpu(
+            depth_map,
+            normal_map,
+            cost_map,
+            initial_depth_error,
+            ref_image_gray,
+            ref_pose_K,
+            ref_pose_R,
+            ref_pose_T,
+            src_images_gray,
+            src_K,
+            src_R,
+            src_T,
+            ref_idx=ref_idx,
+            filename_stem=filename_stem,
+            save_per_iter=config.DEBUG_SAVE_DEPTH_MAPS,
+            save_dir=save_each_depth_dir,
+            save_normals_per_iter=self.config.DEBUG_SAVE_NORMAL_MAPS,
+            normal_save_dir=(
+                os.path.join(config.NORMAL_IMAGE_DIR, depth_folder_name)
+                if self.config.DEBUG_SAVE_NORMAL_MAPS
+                else None
+            ),
+            gt_depth=gt_depth,
+            iter_times=iter_times_gpu,
+            csv_files=None,  # CSV書き込み処理は削除（評価は別スクリプトで実行）
         )
 
         # すべてのイテレーションの深度マップを結合

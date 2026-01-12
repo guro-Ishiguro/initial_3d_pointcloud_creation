@@ -647,9 +647,7 @@ def run():
             initial_depth = depth_estimator.disparity_to_depth(disp)
             end_time_initial_depth = time.time()
             elapsed_initial = end_time_initial_depth - start_time_initial_depth
-            logging.info(
-                f"[{filename_stem}] 初期深度計算完了 (経過時間: {elapsed_initial:.2f}秒)"
-            )
+            logging.info(f"[{filename_stem}] 初期深度計算完了 (経過時間: {elapsed_initial:.2f}秒)")
 
             save_disparity_map_with_colorbar(
                 disp, os.path.join(config.DISPARITY_IMAGE_DIR, f"disp_{idx:04d}.png")
@@ -705,17 +703,18 @@ def run():
             logging.info(f"[{filename_stem}] ステップ2: PatchMatch MVS深度最適化")
             logging.info("-" * 80)
             refine_start = time.time()
-            optimized_depth, iter_times_gpu = (
-                depth_optimization.refine_depth_with_patchmatch(
-                    initial_depth=initial_depth,
-                    initial_depth_error=d_cost,
-                    ref_image=li_rgb,
-                    ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
-                    neighbor_views_data=neighbor_views_data,
-                    gt_depth=gt_depth,
-                    ref_idx=idx,
-                    filename_stem=filename_stem,
-                )
+            (
+                optimized_depth,
+                iter_times_gpu,
+            ) = depth_optimization.refine_depth_with_patchmatch(
+                initial_depth=initial_depth,
+                initial_depth_error=d_cost,
+                ref_image=li_rgb,
+                ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
+                neighbor_views_data=neighbor_views_data,
+                gt_depth=gt_depth,
+                ref_idx=idx,
+                filename_stem=filename_stem,
             )
             refine_elapsed = time.time() - refine_start
             logging.info(
@@ -753,9 +752,7 @@ def run():
                 )
             )
             photo_elapsed = time.time() - photo_start
-            logging.info(
-                f"[{filename_stem}] 光度フィルタリング完了 (経過時間: {photo_elapsed:.2f}秒)"
-            )
+            logging.info(f"[{filename_stem}] 光度フィルタリング完了 (経過時間: {photo_elapsed:.2f}秒)")
             append_to_csv(time_csv_path, ["photometric", f"{photo_elapsed:.6f}"])
             logging.debug(
                 f"[{filename_stem}] 光度フィルタリング時間をtime.csvに保存しました: {time_csv_path}"
@@ -1123,9 +1120,7 @@ def run():
             merged_pts_list, merged_cols_list, voxel_size=0.1
         )
         integ_elapsed = time.time() - integ_start
-        logging.info(
-            f"点群統合完了 (経過時間: {integ_elapsed:.2f}秒, 統合点数: {len(integ_pts):,}点)"
-        )
+        logging.info(f"点群統合完了 (経過時間: {integ_elapsed:.2f}秒, 統合点数: {len(integ_pts):,}点)")
         last_integ_pts, last_integ_cols = integ_pts, integ_cols
 
     # --- 最終保存 ---
@@ -1157,15 +1152,16 @@ def run():
             original_pts = merged_pts.copy()
             original_cols = merged_cols.copy()
 
-            merged_pts, merged_cols = (
-                point_cloud_integrator.filter_points_by_multi_view_visibility(
-                    merged_pts,
-                    merged_cols,
-                    all_poses,
-                    all_geometrically_filtered_depths,
-                    visibility_threshold=visibility_threshold,
-                    geometric_error_threshold=geometric_error_threshold,
-                )
+            (
+                merged_pts,
+                merged_cols,
+            ) = point_cloud_integrator.filter_points_by_multi_view_visibility(
+                merged_pts,
+                merged_cols,
+                all_poses,
+                all_geometrically_filtered_depths,
+                visibility_threshold=visibility_threshold,
+                geometric_error_threshold=geometric_error_threshold,
             )
 
             # フィルタリング後にポイントが0になった場合、フィルタリング前の点群を使用
@@ -1228,9 +1224,7 @@ def run():
             )
             logging.info(eval_cmd)
         else:
-            logging.warning(
-                "LABEL_DEPTH_IMAGE_DIRが設定されていないため、評価コマンドを生成できません。"
-            )
+            logging.warning("LABEL_DEPTH_IMAGE_DIRが設定されていないため、評価コマンドを生成できません。")
         logging.info("=" * 80)
         logging.info("")
 

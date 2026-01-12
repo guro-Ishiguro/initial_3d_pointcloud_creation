@@ -56,17 +56,45 @@ class DataLoader:
         return camera_data
 
     def _add_noise_to_pose(self, pos, quat, pos_scale, rot_scale):
-        pos_error = np.random.randn(3) * pos_scale
-        pos_with_error = (
-            pos[0] + pos_error[0],
-            pos[1] + pos_error[1],
-            pos[2] + pos_error[2],
-        )
-        rot_vec_error = np.random.randn(3) * rot_scale
-        error_rotation = Rotation.from_rotvec(rot_vec_error)
-        original_rotation = Rotation.from_quat(quat)
-        rotated_orientation = original_rotation * error_rotation
-        quat_with_error = rotated_orientation.as_quat()
+        """
+        カメラポーズに誤差を追加する。
+
+        Args:
+            pos: カメラ位置 (x, y, z) [メートル単位]
+            quat: カメラ回転 (qx, qy, qz, qw) [クォータニオン]
+            pos_scale: 位置誤差の標準偏差 [メートル単位]
+            rot_scale: 回転誤差の標準偏差 [ラジアン単位]
+
+        Returns:
+            pos_with_error: 誤差が追加された位置
+            quat_with_error: 誤差が追加された回転
+        """
+        # 位置誤差: 各軸に独立した正規分布の誤差を追加
+        # pos_scaleは標準偏差（メートル単位）
+        if pos_scale > 0:
+            pos_error = np.random.randn(3) * pos_scale
+            pos_with_error = (
+                pos[0] + pos_error[0],
+                pos[1] + pos_error[1],
+                pos[2] + pos_error[2],
+            )
+        else:
+            pos_with_error = pos
+
+        # 回転誤差: 回転ベクトル（axis-angle表現）に正規分布の誤差を追加
+        # rot_scaleは標準偏差（ラジアン単位）
+        # 注意: 1.0ラジアン ≈ 57度は非常に大きな誤差
+        # 実際のSfM誤差は通常0.01-0.1ラジアン（約0.6-6度）程度
+        if rot_scale > 0:
+            rot_vec_error = np.random.randn(3) * rot_scale
+            error_rotation = Rotation.from_rotvec(rot_vec_error)
+            original_rotation = Rotation.from_quat(quat)
+            # 誤差回転を元の回転に合成（右から掛ける）
+            rotated_orientation = original_rotation * error_rotation
+            quat_with_error = rotated_orientation.as_quat()
+        else:
+            quat_with_error = quat
+
         return pos_with_error, quat_with_error
 
     def _select_frame_indices(self):
