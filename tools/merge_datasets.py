@@ -16,7 +16,6 @@ import csv
 import os
 import shutil
 import sys
-from pathlib import Path
 
 
 def list_datasets(data_dir: str) -> list:
@@ -97,7 +96,9 @@ def merge_datasets(
     for ds_idx, dataset_name in enumerate(source_datasets):
         source_dir = os.path.join(data_dir, dataset_name)
         if not os.path.isdir(source_dir):
-            print(f"警告: データセット {dataset_name} が見つかりません。スキップします。")
+            print(
+                f"警告: データセット {dataset_name} が見つかりません。スキップします。"
+            )
             continue
 
         source_images_dir = os.path.join(source_dir, "images")
@@ -109,7 +110,9 @@ def merge_datasets(
             dest_img_dir = os.path.join(merged_images_dir, img_type)
 
             if not os.path.isdir(source_img_dir):
-                print(f"警告: {dataset_name}/images/{img_type} が見つかりません。スキップします。")
+                print(
+                    f"警告: {dataset_name}/images/{img_type} が見つかりません。スキップします。"
+                )
                 continue
 
             # 画像ファイルを連番でコピー（ファイル名の数値でソート）
@@ -169,7 +172,6 @@ def merge_datasets(
         if os.path.exists(left_poses_path):
             with open(left_poses_path, "r", newline="") as f:
                 reader = csv.DictReader(f)
-                fieldnames = reader.fieldnames
                 for row in reader:
                     if not row:
                         continue
@@ -291,7 +293,9 @@ def main():
         for i, ds in enumerate(available_datasets, 1):
             print(f"  {i}) {ds}")
 
-        print("\n統合するデータセットを選択してください（カンマ区切りまたはスペース区切り）:")
+        print(
+            "\n統合するデータセットを選択してください（カンマ区切りまたはスペース区切り）:"
+        )
         choice = input("> ").strip()
         if not choice:
             print("データセットが選択されませんでした。")
@@ -347,4 +351,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

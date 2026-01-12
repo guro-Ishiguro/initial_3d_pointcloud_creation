@@ -1211,6 +1211,29 @@ def run():
     logging.info("=" * 80)
     logging.info(f"全体処理完了 (総経過時間: {time_str} / {total_elapsed:.2f}秒)")
     logging.info("=" * 80)
+
+    # DEBUG_SAVE_DEPTH_MAPSがtrueの場合は評価コマンドを表示
+    if config.DEBUG_SAVE_DEPTH_MAPS:
+        logging.info("")
+        logging.info("=" * 80)
+        logging.info("深度画像の評価を実行するには、以下のコマンドを実行してください:")
+        logging.info("=" * 80)
+        pred_dir = config.DEPTH_IMAGE_DIR
+        gt_dir = getattr(config, "LABEL_DEPTH_IMAGE_DIR", "")
+        if gt_dir:
+            eval_cmd = (
+                f"python3 evaluation/depth_evaluate.py "
+                f"--pred-dir {pred_dir} "
+                f"--gt-dir {gt_dir}"
+            )
+            logging.info(eval_cmd)
+        else:
+            logging.warning(
+                "LABEL_DEPTH_IMAGE_DIRが設定されていないため、評価コマンドを生成できません。"
+            )
+        logging.info("=" * 80)
+        logging.info("")
+
     return 0
 
 

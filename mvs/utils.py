@@ -11,6 +11,7 @@ import numpy as np
 try:
     import Imath
     import OpenEXR
+
     EXR_AVAILABLE = True
 except ImportError as e:
     EXR_AVAILABLE = False
@@ -23,15 +24,18 @@ except ImportError as e:
 # mvs.configのインポート（条件付き）
 try:
     import mvs.config as config
+
     CONFIG_AVAILABLE = True
 except ImportError:
     CONFIG_AVAILABLE = False
+
     # ダミーのconfigオブジェクトを作成
     class DummyConfig:
         VIZ_DEPTH_MIN = 0.0
         VIZ_DEPTH_MAX = 50.0
         VIZ_CMAP = "jet"
         camera_height = 50.0
+
     config = DummyConfig()
 
 # ここでの basicConfig は削除（共通初期化は mvs.logging_setup.setup_logging 側に統一）
@@ -224,22 +228,24 @@ def save_depth_map_as_exr(depth_map, file_path):
         # NaNや無限大を0に変換（EXRではNaNを直接保存できないため）
         depth_clean = depth_map.copy()
         depth_clean[~np.isfinite(depth_clean)] = 0.0
-        
+
         # float32に変換
         depth_float = depth_clean.astype(np.float32)
-        
+
         # EXRヘッダーを設定
         header = OpenEXR.Header(w, h)
-        header["channels"] = {"R": Imath.Channel(Imath.PixelType(Imath.PixelType.FLOAT))}
-        
+        header["channels"] = {
+            "R": Imath.Channel(Imath.PixelType(Imath.PixelType.FLOAT))
+        }
+
         # データをバイト列に変換
         depth_bytes = depth_float.tobytes()
-        
+
         # EXRファイルを書き込み
         exr_file = OpenEXR.OutputFile(file_path, header)
         exr_file.writePixels({"R": depth_bytes})
         exr_file.close()
-        
+
         logging.info(f"Saved depth map as EXR to {file_path}")
     except Exception as e:
         logging.error(f"Failed to save depth map as EXR to {file_path}: {e}")
@@ -426,7 +432,7 @@ def write_stage_metrics_to_csv(
 ):
     """
     ステージごとの評価指標をresults.csvに書き込む。
-    
+
     Args:
         csv_path: results.csvのパス
         image_idx: 画像インデックス
@@ -463,7 +469,7 @@ def write_iteration_metrics_to_csv(
     """
     イテレーションごとの評価指標を各メトリクスごとのCSVに書き込む。
     時間列は含めない（image_idx, iter, valid_pixels, metric）。
-    
+
     Args:
         csv_files: メトリクスごとのCSVファイルパスの辞書
         image_idx: 画像インデックス
