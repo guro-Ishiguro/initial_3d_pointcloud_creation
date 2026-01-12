@@ -119,10 +119,18 @@ class PipelineThread(QThread):
                 try:
                     from app.settings import apply_env_overrides
 
-                    # 設定を環境変数に設定
+                    # 設定を環境変数に設定（ブール値は文字列に変換）
                     for key, value in self.config_dict.items():
                         if value is not None:
-                            os.environ[key] = str(value)
+                            # ブール値の場合は小文字の文字列に変換
+                            if isinstance(value, bool):
+                                os.environ[key] = "true" if value else "false"
+                            else:
+                                os.environ[key] = str(value)
+
+                    # 一時YAMLファイルのパスを環境変数に設定（mvs/config.pyが読み込む）
+                    os.environ["APP_MVS_CONFIG"] = temp_config_path
+
                     apply_env_overrides(temp_config_path)
                     self.log_signal.emit(f"設定を適用しました。")
                 except Exception as e:
@@ -537,9 +545,7 @@ class ConfigWidget(QWidget):
         self.config_widgets["SHOW_POINT_CLOUD"].setChecked(
             self._get_bool_value("SHOW_POINT_CLOUD", False)
         )
-        layout.addRow(
-            QLabel("点群を表示:"), self.config_widgets["SHOW_POINT_CLOUD"]
-        )
+        layout.addRow(QLabel("点群を表示:"), self.config_widgets["SHOW_POINT_CLOUD"])
         layout.addRow(
             QLabel(""),
             QLabel("処理完了後に点群を3Dビューアで表示します。"),
@@ -575,7 +581,37 @@ class ConfigWidget(QWidget):
         widget = QWidget()
         layout = QFormLayout(widget)
 
-        layout.addRow(QLabel("その他の設定項目は現在のデフォルト値が使用されます。"))
+        # POSITION_ERROR_SCALE
+        self.config_widgets["POSITION_ERROR_SCALE"] = QDoubleSpinBox()
+        self.config_widgets["POSITION_ERROR_SCALE"].setDecimals(6)
+        self.config_widgets["POSITION_ERROR_SCALE"].setRange(0.0, 1.0)
+        self.config_widgets["POSITION_ERROR_SCALE"].setSingleStep(0.000001)
+        self.config_widgets["POSITION_ERROR_SCALE"].setValue(
+            self._get_float_value("POSITION_ERROR_SCALE", 0.0)
+        )
+        layout.addRow(
+            QLabel("位置エラースケール:"), self.config_widgets["POSITION_ERROR_SCALE"]
+        )
+        layout.addRow(
+            QLabel(""),
+            QLabel("カメラ位置のエラースケール。0.0でエラーなし。"),
+        )
+
+        # ROTATION_ERROR_SCALE
+        self.config_widgets["ROTATION_ERROR_SCALE"] = QDoubleSpinBox()
+        self.config_widgets["ROTATION_ERROR_SCALE"].setDecimals(6)
+        self.config_widgets["ROTATION_ERROR_SCALE"].setRange(0.0, 1.0)
+        self.config_widgets["ROTATION_ERROR_SCALE"].setSingleStep(0.000001)
+        self.config_widgets["ROTATION_ERROR_SCALE"].setValue(
+            self._get_float_value("ROTATION_ERROR_SCALE", 0.0)
+        )
+        layout.addRow(
+            QLabel("回転エラースケール:"), self.config_widgets["ROTATION_ERROR_SCALE"]
+        )
+        layout.addRow(
+            QLabel(""),
+            QLabel("カメラ回転のエラースケール。0.0でエラーなし。"),
+        )
 
         scroll.setWidget(widget)
         scroll.setWidgetResizable(True)
