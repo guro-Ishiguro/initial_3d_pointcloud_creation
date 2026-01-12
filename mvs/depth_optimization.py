@@ -9,7 +9,11 @@ import cv2
 import numpy as np
 from numba import cuda, njit, prange
 from numba.cuda.random import create_xoroshiro128p_states
-from utils import save_depth_map_as_image, save_normal_map_as_image
+from utils import (
+    save_depth_map_as_exr,
+    save_depth_map_as_image,
+    save_normal_map_as_image,
+)
 
 import mvs.config as config
 
@@ -1867,17 +1871,22 @@ class DepthOptimization:
             if self._gpu_cum_start_nojit is None:
                 self._gpu_cum_start_nojit = time.time()
 
-            # Save depth per-iteration if requested (only on last iteration to reduce I/O overhead)
-            is_last_iter = i + 1 == self.config.PATCHMATCH_ITERATIONS
-            if save_per_iter and save_dir is not None and is_last_iter:
+            # Save depth per-iteration if requested (each iteration when DEBUG_SAVE_DEPTH_MAPS is true)
+            depth_tmp = None
+            if save_per_iter and save_dir is not None:
                 depth_tmp = d_depth_map.copy_to_host()
+                # PNG形式で保存
                 save_path = os.path.join(save_dir, f"depth_iter_{i+1:02d}.png")
                 logging.info(f"Saving depth map at iteration {i+1} to {save_path}")
                 save_depth_map_as_image(depth_tmp, save_path)
-            else:
-                depth_tmp = None
-            # Save normal per-iteration if requested (only on last iteration to reduce I/O overhead)
-            if save_normals_per_iter and normal_save_dir is not None and is_last_iter:
+                # EXR形式でも保存
+                save_path_exr = os.path.join(save_dir, f"depth_iter_{i+1:02d}.exr")
+                logging.info(
+                    f"Saving depth map as EXR at iteration {i+1} to {save_path_exr}"
+                )
+                save_depth_map_as_exr(depth_tmp, save_path_exr)
+            # Save normal per-iteration if requested (each iteration when DEBUG_SAVE_NORMAL_MAPS is true)
+            if save_normals_per_iter and normal_save_dir is not None:
                 normal_tmp = d_normal_map.copy_to_host()
                 save_path_n = os.path.join(
                     normal_save_dir, f"normal_iter_{i+1:02d}.png"
