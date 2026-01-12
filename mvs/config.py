@@ -198,3 +198,100 @@ try:
 except Exception:
     # YAML 読み込みに失敗した場合は、上位でのエラーハンドリングに委ねる
     pass
+
+
+# 環境変数からの設定読み込み（GUIから渡された設定を反映）
+# ブール値の文字列を適切に変換
+def _str_to_bool(s):
+    """文字列をブール値に変換"""
+    if isinstance(s, bool):
+        return s
+    if isinstance(s, str):
+        return s.lower() in ("true", "1", "yes", "on")
+    return bool(s)
+
+
+# 環境変数から設定を読み込む（YAMLで設定されていない場合のみ）
+g = globals()
+# 主要な設定項目のリスト（必要に応じて追加）
+_config_keys = [
+    "SHOW_POINT_CLOUD",
+    "POSITION_ERROR_SCALE",
+    "ROTATION_ERROR_SCALE",
+    "DEBUG_SAVE_DEPTH_MAPS",
+    "DEBUG_SAVE_NORMAL_MAPS",
+    "DEBUG_SAVE_GT_DEPTH_MAPS",
+    "PATCHMATCH_ITERATIONS",
+    "PATCHMATCH_PATCH_SIZE",
+    "ZNCC_EPSILON",
+    "TOP_K_COSTS",
+    "PATCHMATCH_DECAY_RATE",
+    "PATCHMATCH_NORMAL_SEARCH_ANGLE",
+    "ADAPTIVE_WEIGHT_SIGMA_COLOR",
+    "FILTERING_COLOR_DIFFERENCE_THRESHOLD",
+    "FILTERING_MIN_CONSISTENT_VIEWS",
+    "GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD",
+    "GEOMETRIC_MIN_CONSISTENT_VIEWS",
+    "FRAME_STRIDE",
+    "MAX_NEIGHBORS",
+    "NEIGHBOR_SELECTION_MODE",
+    "NEIGHBOR_NEAREST_COUNT",
+    "VIZ_DEPTH_MIN",
+    "VIZ_DEPTH_MAX",
+    "VIZ_CMAP",
+    "MULTI_VIEW_VISIBILITY_FILTER_ENABLED",
+    "MULTI_VIEW_VISIBILITY_THRESHOLD",
+    "MULTI_VIEW_GEOMETRIC_ERROR_THRESHOLD",
+]
+
+for key in _config_keys:
+    env_value = os.getenv(key)
+    if env_value is not None:
+        # 既にYAMLで設定されている場合はスキップ（YAMLが優先）
+        if key not in g or g[key] == getattr(__builtins__, key, None):
+            # ブール値の場合は文字列を変換
+            if key in (
+                "SHOW_POINT_CLOUD",
+                "DEBUG_SAVE_DEPTH_MAPS",
+                "DEBUG_SAVE_NORMAL_MAPS",
+                "DEBUG_SAVE_GT_DEPTH_MAPS",
+                "MULTI_VIEW_VISIBILITY_FILTER_ENABLED",
+            ):
+                g[key] = _str_to_bool(env_value)
+            # 数値の場合は型変換を試みる
+            elif key in (
+                "POSITION_ERROR_SCALE",
+                "ROTATION_ERROR_SCALE",
+                "ZNCC_EPSILON",
+                "PATCHMATCH_DECAY_RATE",
+                "PATCHMATCH_NORMAL_SEARCH_ANGLE",
+                "ADAPTIVE_WEIGHT_SIGMA_COLOR",
+                "FILTERING_COLOR_DIFFERENCE_THRESHOLD",
+                "GEOMETRIC_CONSISTENCY_ERROR_THRESHOLD",
+                "VIZ_DEPTH_MIN",
+                "VIZ_DEPTH_MAX",
+                "MULTI_VIEW_GEOMETRIC_ERROR_THRESHOLD",
+            ):
+                try:
+                    g[key] = float(env_value)
+                except (ValueError, TypeError):
+                    pass
+            # 整数の場合は型変換を試みる
+            elif key in (
+                "PATCHMATCH_ITERATIONS",
+                "PATCHMATCH_PATCH_SIZE",
+                "TOP_K_COSTS",
+                "FILTERING_MIN_CONSISTENT_VIEWS",
+                "GEOMETRIC_MIN_CONSISTENT_VIEWS",
+                "FRAME_STRIDE",
+                "MAX_NEIGHBORS",
+                "NEIGHBOR_NEAREST_COUNT",
+                "MULTI_VIEW_VISIBILITY_THRESHOLD",
+            ):
+                try:
+                    g[key] = int(env_value)
+                except (ValueError, TypeError):
+                    pass
+            # 文字列の場合はそのまま
+            else:
+                g[key] = env_value

@@ -1,12 +1,11 @@
 import argparse
 import pathlib
-from typing import Dict, Optional, Union, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 import numpy as np
 import trimesh
 from scipy.spatial import cKDTree
 from tqdm import tqdm
-
 
 ArrayNx3 = np.ndarray
 
@@ -14,7 +13,7 @@ ArrayNx3 = np.ndarray
 def save_point_cloud(points: ArrayNx3, file_path: Union[str, pathlib.Path]) -> None:
     """
     点群をPLY形式で保存する。
-    
+
     Open3Dを使用して高速に保存（利用可能な場合）。
 
     Parameters
@@ -34,6 +33,7 @@ def save_point_cloud(points: ArrayNx3, file_path: Union[str, pathlib.Path]) -> N
     # Open3Dを使用して保存（高速、バイナリ形式）
     try:
         import open3d as o3d
+
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         # バイナリ形式で保存（高速）
@@ -41,7 +41,7 @@ def save_point_cloud(points: ArrayNx3, file_path: Union[str, pathlib.Path]) -> N
         if success:
             print(f"点群を保存しました (Open3D): {file_path} ({len(points)}点)")
             return
-    except (ImportError, Exception):
+    except Exception:
         pass  # Open3Dが利用できない、またはエラーが発生した場合はフォールバック
 
     # フォールバック: ASCII形式で保存
@@ -82,13 +82,14 @@ def load_point_cloud(file_path: Union[str, pathlib.Path]) -> ArrayNx3:
     if file_path.suffix.lower() == ".ply":
         try:
             import open3d as o3d
+
             pcd = o3d.io.read_point_cloud(str(file_path))
             if pcd is not None and len(pcd.points) > 0:
                 points = np.asarray(pcd.points, dtype=np.float64)
                 return points
         except ImportError:
             pass  # open3dが利用できない場合はtrimeshにフォールバック
-        except Exception as e:
+        except Exception:
             # open3dで読み込めなかった場合、trimeshにフォールバック
             pass
 
@@ -171,9 +172,15 @@ def load_mesh(
         return trimesh.load_mesh(str(mesh), process=True)
 
     if vertices is None or faces is None:
-        raise ValueError("`vertices` と `faces` の両方、または `mesh` を指定してください。")
+        raise ValueError(
+            "`vertices` と `faces` の両方、または `mesh` を指定してください。"
+        )
 
-    return trimesh.Trimesh(vertices=np.asarray(vertices), faces=np.asarray(faces, dtype=np.int64), process=True)
+    return trimesh.Trimesh(
+        vertices=np.asarray(vertices),
+        faces=np.asarray(faces, dtype=np.int64),
+        process=True,
+    )
 
 
 def crop_mesh_with_bbox(
@@ -218,7 +225,9 @@ def crop_mesh_with_bbox(
     faces_keep = mesh.faces[faces_keep_mask]
 
     if faces_keep.size == 0:
-        raise ValueError("バウンディングボックスでクロップした結果、メッシュが空になりました。")
+        raise ValueError(
+            "バウンディングボックスでクロップした結果、メッシュが空になりました。"
+        )
 
     cropped = trimesh.Trimesh(vertices=v, faces=faces_keep, process=True)
     return cropped
@@ -271,7 +280,9 @@ def sample_points_from_mesh(
     return np.asarray(sampled, dtype=np.float64)
 
 
-def bidirectional_consistency_error(P: ArrayNx3, Q: ArrayNx3, show_progress: bool = True) -> float:
+def bidirectional_consistency_error(
+    P: ArrayNx3, Q: ArrayNx3, show_progress: bool = True
+) -> float:
     """
     Bidirectional Consistency Error (BCE) を計算する。
 
@@ -310,30 +321,32 @@ def bidirectional_consistency_error(P: ArrayNx3, Q: ArrayNx3, show_progress: boo
         idx_Q_list = []
         with tqdm(total=P.shape[0], desc="  BCE: P→Q最近傍を計算中", unit="点") as pbar:
             for i in range(0, P.shape[0], batch_size):
-                batch = P[i:i + batch_size]
+                batch = P[i : i + batch_size]
                 _, batch_idx = tree_Q.query(batch, k=1)
                 idx_Q_list.append(batch_idx)
                 pbar.update(len(batch))
         idx_Q = np.concatenate(idx_Q_list)
     else:
         _, idx_Q = tree_Q.query(P, k=1)
-    
+
     nn_Q = Q[idx_Q]  # shape: (N, 3)
 
     # さらに NN_Q(p) に対して NN_P(NN_Q(p)) を求める
     if show_progress and nn_Q.shape[0] > 50000:
         batch_size = 50000
         idx_P_back_list = []
-        with tqdm(total=nn_Q.shape[0], desc="  BCE: Q→P最近傍を計算中", unit="点") as pbar:
+        with tqdm(
+            total=nn_Q.shape[0], desc="  BCE: Q→P最近傍を計算中", unit="点"
+        ) as pbar:
             for i in range(0, nn_Q.shape[0], batch_size):
-                batch = nn_Q[i:i + batch_size]
+                batch = nn_Q[i : i + batch_size]
                 _, batch_idx = tree_P.query(batch, k=1)
                 idx_P_back_list.append(batch_idx)
                 pbar.update(len(batch))
         idx_P_back = np.concatenate(idx_P_back_list)
     else:
         _, idx_P_back = tree_P.query(nn_Q, k=1)
-    
+
     nn_P_back = P[idx_P_back]  # shape: (N, 3)
 
     # p と NN_P(NN_Q(p)) の距離
@@ -343,7 +356,9 @@ def bidirectional_consistency_error(P: ArrayNx3, Q: ArrayNx3, show_progress: boo
     return float(dists.mean())
 
 
-def point_to_mesh_distance(P: ArrayNx3, mesh: trimesh.Trimesh, show_progress: bool = True) -> float:
+def point_to_mesh_distance(
+    P: ArrayNx3, mesh: trimesh.Trimesh, show_progress: bool = True
+) -> float:
     """
     点群 P から真値メッシュ M への最短距離の平均 d_{p->m} を計算する。
 
@@ -375,9 +390,11 @@ def point_to_mesh_distance(P: ArrayNx3, mesh: trimesh.Trimesh, show_progress: bo
         # 大量の点の場合は大きなバッチサイズを使用
         batch_size = min(100000, P.shape[0] // 10)  # 10バッチ程度に分割、最大100,000点
         distances_list = []
-        with tqdm(total=P.shape[0], desc="点群→メッシュ距離を計算中", unit="点", miniters=1000) as pbar:
+        with tqdm(
+            total=P.shape[0], desc="点群→メッシュ距離を計算中", unit="点", miniters=1000
+        ) as pbar:
             for i in range(0, P.shape[0], batch_size):
-                batch = P[i:i + batch_size]
+                batch = P[i : i + batch_size]
                 _, batch_distances, _ = mesh.nearest.on_surface(batch)
                 distances_list.append(batch_distances)
                 pbar.update(len(batch))
@@ -385,7 +402,7 @@ def point_to_mesh_distance(P: ArrayNx3, mesh: trimesh.Trimesh, show_progress: bo
         distances = np.concatenate(distances_list)
     else:
         _, distances, _ = mesh.nearest.on_surface(P)
-    
+
     # `distances` は各点に対応する距離
     return float(np.asarray(distances, dtype=np.float64).mean())
 
@@ -400,7 +417,7 @@ def _compute_point_to_mesh_and_outlier_ratio(
 ) -> Union[Tuple[float, float], Tuple[float, float, ArrayNx3]]:
     """
     点群→メッシュ距離と外れ値割合を同時に計算する（効率化のため）。
-    
+
     Open3DのRaycastingSceneを使用して高速化（利用可能な場合）。
     メッシュファイルパスが指定されている場合、Open3Dで直接読み込んで変換をスキップ。
 
@@ -436,7 +453,7 @@ def _compute_point_to_mesh_and_outlier_ratio(
     # Open3DのRaycastingSceneを使用（高速化のため）
     try:
         import open3d as o3d
-        
+
         # メッシュファイルパスが指定されている場合、Open3Dで直接読み込む（変換をスキップ）
         if mesh_file_path is not None:
             try:
@@ -464,25 +481,32 @@ def _compute_point_to_mesh_and_outlier_ratio(
             # trimeshのメッシュをOpen3DのTriangleMeshに変換
             vertices = np.asarray(mesh.vertices, dtype=np.float32)
             faces = np.asarray(mesh.faces, dtype=np.int32)
-            
+
             # Open3Dのレガシー形式のメッシュを作成
             o3d_mesh = o3d.geometry.TriangleMesh()
             o3d_mesh.vertices = o3d.utility.Vector3dVector(vertices)
             o3d_mesh.triangles = o3d.utility.Vector3iVector(faces)
             o3d_mesh.compute_triangle_normals()
-            
+
             # RaycastingSceneにメッシュを登録
             scene = o3d.t.geometry.RaycastingScene()
             tmesh = o3d.t.geometry.TriangleMesh.from_legacy(o3d_mesh)
             _ = scene.add_triangles(tmesh)
-        
+
         # 符号付き距離を計算（バッチ処理でプログレスバーを表示）
         if show_progress and P.shape[0] > 50000:
-            batch_size = min(200000, P.shape[0] // 5)  # Open3Dは高速なので大きなバッチサイズを使用
+            batch_size = min(
+                200000, P.shape[0] // 5
+            )  # Open3Dは高速なので大きなバッチサイズを使用
             distances_list = []
-            with tqdm(total=P.shape[0], desc="点群→メッシュ距離を計算中 (Open3D)", unit="点", miniters=1000) as pbar:
+            with tqdm(
+                total=P.shape[0],
+                desc="点群→メッシュ距離を計算中 (Open3D)",
+                unit="点",
+                miniters=1000,
+            ) as pbar:
                 for i in range(0, P.shape[0], batch_size):
-                    batch = P[i:i + batch_size].astype(np.float32)
+                    batch = P[i : i + batch_size].astype(np.float32)
                     query = o3d.core.Tensor(batch, dtype=o3d.core.Dtype.Float32)
                     signed_dist = scene.compute_signed_distance(query).numpy().flatten()
                     # 符号付き距離の絶対値を取る（距離は常に正）
@@ -496,19 +520,26 @@ def _compute_point_to_mesh_and_outlier_ratio(
             query = o3d.core.Tensor(points, dtype=o3d.core.Dtype.Float32)
             signed_dist = scene.compute_signed_distance(query).numpy().flatten()
             distances = np.abs(signed_dist).astype(np.float64)
-        
+
     except (ImportError, AttributeError, RuntimeError) as e:
         # Open3Dが利用できない、またはエラーが発生した場合はtrimeshにフォールバック
         if show_progress:
             print(f"  Open3Dが利用できないため、trimeshを使用します: {e}")
-        
+
         # 一度だけメッシュへの最近傍距離を計算
         if show_progress and P.shape[0] > 50000:
-            batch_size = min(100000, P.shape[0] // 10)  # 10バッチ程度に分割、最大100,000点
+            batch_size = min(
+                100000, P.shape[0] // 10
+            )  # 10バッチ程度に分割、最大100,000点
             distances_list = []
-            with tqdm(total=P.shape[0], desc="点群→メッシュ距離を計算中 (trimesh)", unit="点", miniters=1000) as pbar:
+            with tqdm(
+                total=P.shape[0],
+                desc="点群→メッシュ距離を計算中 (trimesh)",
+                unit="点",
+                miniters=1000,
+            ) as pbar:
                 for i in range(0, P.shape[0], batch_size):
-                    batch = P[i:i + batch_size]
+                    batch = P[i : i + batch_size]
                     _, batch_distances, _ = mesh.nearest.on_surface(batch)
                     distances_list.append(batch_distances)
                     pbar.update(len(batch))
@@ -516,20 +547,20 @@ def _compute_point_to_mesh_and_outlier_ratio(
             distances = np.concatenate(distances_list)
         else:
             _, distances, _ = mesh.nearest.on_surface(P)
-        
+
         distances = np.asarray(distances, dtype=np.float64)
-    
+
     # 平均距離
     d_pm = float(distances.mean())
-    
+
     # 外れ値割合
     num_outliers = np.count_nonzero(distances > threshold)
     r_out = num_outliers / float(P.shape[0])
-    
+
     if return_distances:
         return d_pm, float(r_out), distances
     else:
-            return d_pm, float(r_out)
+        return d_pm, float(r_out)
 
 
 def visualize_point_cloud_with_distances(
@@ -555,26 +586,26 @@ def visualize_point_cloud_with_distances(
     """
     try:
         import open3d as o3d
-        
+
         points = np.asarray(points, dtype=np.float64)
         distances = np.asarray(distances, dtype=np.float64)
-        
+
         if points.shape[0] != distances.shape[0]:
             raise ValueError("点群と距離の数が一致しません。")
-        
+
         # 距離に応じて色を設定（ヒートマップ: 青→緑→黄→赤）
         # 距離が小さい（良い）→ 青、距離が大きい（悪い）→ 赤
         dist_min = distances.min()
         dist_max = distances.max()
         dist_range = dist_max - dist_min
-        
+
         if dist_range < 1e-10:
             # 距離がほぼ一定の場合、すべて青にする
             colors = np.tile([0.0, 0.0, 1.0], (len(points), 1))
         else:
             # 正規化（0〜1）
             normalized = (distances - dist_min) / dist_range
-            
+
             # カラーマップ: 青(0.0) → シアン(0.33) → 緑(0.5) → 黄(0.67) → 赤(1.0)
             colors = np.zeros((len(points), 3))
             # 青からシアンへ
@@ -583,36 +614,36 @@ def visualize_point_cloud_with_distances(
             colors[mask1, 0] = 0.0
             colors[mask1, 1] = t1
             colors[mask1, 2] = 1.0
-            
+
             # シアンから緑へ
             mask2 = (normalized >= 0.33) & (normalized < 0.5)
             t2 = (normalized[mask2] - 0.33) / 0.17
             colors[mask2, 0] = 0.0
             colors[mask2, 1] = 1.0
             colors[mask2, 2] = 1.0 - t2
-            
+
             # 緑から黄へ
             mask3 = (normalized >= 0.5) & (normalized < 0.67)
             t3 = (normalized[mask3] - 0.5) / 0.17
             colors[mask3, 0] = t3
             colors[mask3, 1] = 1.0
             colors[mask3, 2] = 0.0
-            
+
             # 黄から赤へ
             mask4 = normalized >= 0.67
             t4 = (normalized[mask4] - 0.67) / 0.33
             colors[mask4, 0] = 1.0
             colors[mask4, 1] = 1.0 - t4
             colors[mask4, 2] = 0.0
-        
+
         # Open3Dの推定点群を作成（距離に応じて色分け）
         pcd_pred = o3d.geometry.PointCloud()
         pcd_pred.points = o3d.utility.Vector3dVector(points)
         pcd_pred.colors = o3d.utility.Vector3dVector(colors)
-        
+
         # 可視化するオブジェクトのリスト
         geometries = [pcd_pred]
-        
+
         # 真値点群も表示する場合
         if gt_points is not None:
             try:
@@ -624,7 +655,7 @@ def visualize_point_cloud_with_distances(
                 geometries.append(pcd_gt)
             except Exception:
                 pass  # 真値点群の変換に失敗した場合はスキップ
-        
+
         # 可視化
         print(f"\n可視化ウィンドウを表示しています...")
         print(f"  推定点群: 距離に応じて色分け（青（距離小）→ 緑 → 黄 → 赤（距離大））")
@@ -632,7 +663,7 @@ def visualize_point_cloud_with_distances(
             print(f"  真値点群: 白色で表示")
         print(f"  距離範囲: {dist_min:.4f} 〜 {dist_max:.4f} [m]")
         print(f"  ウィンドウを閉じると処理が続行されます。")
-        
+
         o3d.visualization.draw_geometries(
             geometries,
             window_name=title,
@@ -640,14 +671,19 @@ def visualize_point_cloud_with_distances(
             height=720,
             mesh_show_back_face=True,
         )
-        
+
     except ImportError:
         print("  Open3Dが利用できないため、可視化をスキップします。")
     except Exception as e:
         print(f"  可視化中にエラーが発生しました: {e}")
 
 
-def outlier_ratio(P: ArrayNx3, mesh: trimesh.Trimesh, threshold: float = 0.1, show_progress: bool = True) -> float:
+def outlier_ratio(
+    P: ArrayNx3,
+    mesh: trimesh.Trimesh,
+    threshold: float = 0.1,
+    show_progress: bool = True,
+) -> float:
     """
     点群 P のうち、真値メッシュ M からの距離が閾値 T を超える外れ値の割合 r を計算する。
 
@@ -679,9 +715,11 @@ def outlier_ratio(P: ArrayNx3, mesh: trimesh.Trimesh, threshold: float = 0.1, sh
     if show_progress and P.shape[0] > 50000:
         batch_size = min(100000, P.shape[0] // 10)  # 10バッチ程度に分割、最大100,000点
         distances_list = []
-        with tqdm(total=P.shape[0], desc="外れ値割合を計算中", unit="点", miniters=1000) as pbar:
+        with tqdm(
+            total=P.shape[0], desc="外れ値割合を計算中", unit="点", miniters=1000
+        ) as pbar:
             for i in range(0, P.shape[0], batch_size):
-                batch = P[i:i + batch_size]
+                batch = P[i : i + batch_size]
                 _, batch_distances, _ = mesh.nearest.on_surface(batch)
                 distances_list.append(batch_distances)
                 pbar.update(len(batch))
@@ -689,7 +727,7 @@ def outlier_ratio(P: ArrayNx3, mesh: trimesh.Trimesh, threshold: float = 0.1, sh
         distances = np.concatenate(distances_list)
     else:
         _, distances, _ = mesh.nearest.on_surface(P)
-    
+
     distances = np.asarray(distances, dtype=np.float64)
     num_outliers = np.count_nonzero(distances > threshold)
     r = num_outliers / float(P.shape[0])
@@ -760,18 +798,28 @@ def evaluate_point_cloud(
             raise ValueError("`gt_points` は形状 (N, 3) の配列である必要があります。")
         print(f"真値点群を読み込みました: {Q.shape[0]}点")
     else:
-            Q = sample_points_from_mesh(mesh, num_points=P.shape[0]*10, random_state=random_state, show_progress=True)
+        Q = sample_points_from_mesh(
+            mesh,
+            num_points=P.shape[0] * 10,
+            random_state=random_state,
+            show_progress=True,
+        )
 
     # 4. 各種指標を計算
     print("\n評価指標を計算しています...")
     bce = bidirectional_consistency_error(P, Q, show_progress=True)
-    
+
     # point_to_mesh_distanceとoutlier_ratioは同じ計算を使用するため、一度だけ計算して再利用
     print("点群→メッシュ距離を計算中（外れ値割合も同時に計算）...")
     # メッシュファイルパスを渡すことで、Open3Dで直接読み込んで変換をスキップ
     mesh_file_path = gt_mesh if isinstance(gt_mesh, (str, pathlib.Path)) else None
     d_pm, r_out, distances = _compute_point_to_mesh_and_outlier_ratio(
-        P, mesh, threshold, show_progress=True, mesh_file_path=mesh_file_path, return_distances=True
+        P,
+        mesh,
+        threshold,
+        show_progress=True,
+        mesh_file_path=mesh_file_path,
+        return_distances=True,
     )
 
     result = {
@@ -779,12 +827,12 @@ def evaluate_point_cloud(
         "point_to_mesh": d_pm,
         "outlier_ratio": r_out,
     }
-    
+
     # サンプリングされた真値点群も返す（保存用）
     result["gt_points"] = Q
     # 距離情報も返す（可視化用）
     result["distances"] = distances
-    
+
     return result
 
 
@@ -857,7 +905,7 @@ if __name__ == "__main__":
         pred_points[:, 1] *= -1.0
         print("  Y軸を反転しました")
     print(f"  読み込んだ点数: {pred_points.shape[0]}")
-    
+
     # 推定点群を保存（指定されている場合）
     if args.save_pred_pointcloud is not None:
         save_point_cloud(pred_points, args.save_pred_pointcloud)
@@ -890,7 +938,7 @@ if __name__ == "__main__":
         if k not in ("gt_points", "distances"):  # 点群データと距離データは表示しない
             print(f"  {k:20s}: {v:.6f}")
     print("=" * 50)
-    
+
     # 距離に応じて色分けした点群を可視化（デフォルトで実行）
     if "distances" in metrics and "gt_points" in metrics:
         # 推定点群と真値点群の両方を表示
@@ -900,5 +948,3 @@ if __name__ == "__main__":
             gt_points=metrics["gt_points"],
             title="推定点群と真値点群の比較",
         )
-
-

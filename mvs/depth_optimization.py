@@ -10,7 +10,7 @@ import numpy as np
 from numba import cuda, njit, prange
 from numba.cuda.random import create_xoroshiro128p_states
 from utils import (
-    compute_depth_metrics,
+    save_depth_map_as_exr,
     save_depth_map_as_image,
     save_normal_map_as_image,
 )
@@ -1871,17 +1871,22 @@ class DepthOptimization:
             if self._gpu_cum_start_nojit is None:
                 self._gpu_cum_start_nojit = time.time()
 
-            # Save depth per-iteration if requested (only on last iteration to reduce I/O overhead)
-            is_last_iter = i + 1 == self.config.PATCHMATCH_ITERATIONS
-            if save_per_iter and save_dir is not None and is_last_iter:
+            # Save depth per-iteration if requested (each iteration when DEBUG_SAVE_DEPTH_MAPS is true)
+            depth_tmp = None
+            if save_per_iter and save_dir is not None:
                 depth_tmp = d_depth_map.copy_to_host()
+                # PNG形式で保存
                 save_path = os.path.join(save_dir, f"depth_iter_{i+1:02d}.png")
                 logging.info(f"Saving depth map at iteration {i+1} to {save_path}")
                 save_depth_map_as_image(depth_tmp, save_path)
-            else:
-                depth_tmp = None
-            # Save normal per-iteration if requested (only on last iteration to reduce I/O overhead)
-            if save_normals_per_iter and normal_save_dir is not None and is_last_iter:
+                # EXR形式でも保存
+                save_path_exr = os.path.join(save_dir, f"depth_iter_{i+1:02d}.exr")
+                logging.info(
+                    f"Saving depth map as EXR at iteration {i+1} to {save_path_exr}"
+                )
+                save_depth_map_as_exr(depth_tmp, save_path_exr)
+            # Save normal per-iteration if requested (each iteration when DEBUG_SAVE_NORMAL_MAPS is true)
+            if save_normals_per_iter and normal_save_dir is not None:
                 normal_tmp = d_normal_map.copy_to_host()
                 save_path_n = os.path.join(
                     normal_save_dir, f"normal_iter_{i+1:02d}.png"
@@ -1908,30 +1913,31 @@ class DepthOptimization:
             if first_iter_start_time is not None:
                 cum_time = time.time() - first_iter_start_time
                 cum_txt = f", 累積: {cum_time:.2f}秒"
-            if gt_depth is not None:
-                if depth_tmp is None:
-                    depth_host = d_depth_map.copy_to_host()
-                else:
-                    depth_host = depth_tmp
-                try:
-                    metrics = compute_depth_metrics(depth_host, gt_depth)
-                    logging.info(
-                        f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] イテレーション {i+1}/{self.config.PATCHMATCH_ITERATIONS} "
-                        f"(経過時間: {iter_duration:.2f}秒{cum_txt}) | "
-                        f"MAE={metrics['mae']:.4f}, AbsRel={metrics['abs_rel']:.4f}, SqRel={metrics['sq_rel']:.4f}, "
-                        f"RMSE={metrics['rmse']:.4f}, RMSElog={metrics['rmse_log']:.4f}, "
-                        f"d1={metrics['delta1']:.4f}, d2={metrics['delta2']:.4f}, d3={metrics['delta3']:.4f}"
-                    )
-                    # CSV書き込み処理は削除（評価は別スクリプトで実行）
-                except Exception as e:
-                    logging.warning(
-                        f"[GPU] Could not compute metrics at iter {i+1}: {e}"
-                    )
-            else:
-                logging.info(
-                    f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] イテレーション {i+1}/{self.config.PATCHMATCH_ITERATIONS} "
-                    f"(経過時間: {iter_duration:.2f}秒{cum_txt})"
-                )
+            # メトリクス計算と出力は無効化（評価は別スクリプトで実行）
+            # if gt_depth is not None:
+            #     if depth_tmp is None:
+            #         depth_host = d_depth_map.copy_to_host()
+            #     else:
+            #         depth_host = depth_tmp
+            #     try:
+            #         metrics = compute_depth_metrics(depth_host, gt_depth)
+            #         logging.info(
+            #             f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] イテレーション {i+1}/{self.config.PATCHMATCH_ITERATIONS} "
+            #             f"(経過時間: {iter_duration:.2f}秒{cum_txt}) | "
+            #             f"MAE={metrics['mae']:.4f}, AbsRel={metrics['abs_rel']:.4f}, SqRel={metrics['sq_rel']:.4f}, "
+            #             f"RMSE={metrics['rmse']:.4f}, RMSElog={metrics['rmse_log']:.4f}, "
+            #             f"d1={metrics['delta1']:.4f}, d2={metrics['delta2']:.4f}, d3={metrics['delta3']:.4f}"
+            #         )
+            #         # CSV書き込み処理は削除（評価は別スクリプトで実行）
+            #     except Exception as e:
+            #         logging.warning(
+            #             f"[GPU] Could not compute metrics at iter {i+1}: {e}"
+            #         )
+            # else:
+            logging.info(
+                f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] イテレーション {i+1}/{self.config.PATCHMATCH_ITERATIONS} "
+                f"(経過時間: {iter_duration:.2f}秒{cum_txt})"
+            )
 
             # Early convergence check disabled
             # depth_curr = d_depth_map.copy_to_host()
