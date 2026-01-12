@@ -220,6 +220,7 @@ _config_keys = [
     "ROTATION_ERROR_SCALE",
     "DEBUG_SAVE_DEPTH_MAPS",
     "DEBUG_SAVE_NORMAL_MAPS",
+    "DEBUG_SAVE_GT_DEPTH_MAPS",
     "PATCHMATCH_ITERATIONS",
     "PATCHMATCH_PATCH_SIZE",
     "ZNCC_EPSILON",
@@ -253,6 +254,7 @@ for key in _config_keys:
                 "SHOW_POINT_CLOUD",
                 "DEBUG_SAVE_DEPTH_MAPS",
                 "DEBUG_SAVE_NORMAL_MAPS",
+                "DEBUG_SAVE_GT_DEPTH_MAPS",
                 "MULTI_VIEW_VISIBILITY_FILTER_ENABLED",
             ):
                 g[key] = _str_to_bool(env_value)
