@@ -189,7 +189,10 @@ python3 evaluation/depth_evaluate.py \
 生成された点群の品質を評価する。点群の評価には[シミュレータから取得されたオブジェクトの真値メッシュ](https://github.com/guro-Ishiguro/ConstructionSiteSimulator?tab=readme-ov-file#%E7%9C%9F%E5%80%A4%E3%83%A1%E3%83%83%E3%82%B7%E3%83%A5ground-truth-mesh%E3%81%AE%E5%87%BA%E5%8A%9B%E6%96%B9%E6%B3%95)があることを前提とする。
 
 ```bash
-python evaluation/pointcloud_evaluation.py --predicted <predicted.ply> --ground_truth <ground_truth.ply>
+# 推定点群と真値メッシュを指定して評価
+python3 evaluation/pointcloud_evaluation.py \
+  --pred_pointcloud output/<dataset_name>/point_cloud/output.ply \
+  --gt_mesh <真値メッシュのパス>
 ```
 
 ## 出力

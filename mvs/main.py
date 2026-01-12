@@ -1234,6 +1234,23 @@ def run():
         logging.info("=" * 80)
         logging.info("")
 
+    # 点群が生成された場合は点群評価コマンドを表示
+    if merged_pts_list and os.path.exists(config.POINT_CLOUD_FILE_PATH):
+        logging.info("")
+        logging.info("=" * 80)
+        logging.info("点群の評価を実行するには、以下のコマンドを実行してください:")
+        logging.info("=" * 80)
+        pred_pointcloud = config.POINT_CLOUD_FILE_PATH
+        # 真値メッシュのパスは設定から取得できないため、プレースホルダーとして表示
+        eval_cmd = (
+            f"python3 evaluation/pointcloud_evaluation.py "
+            f"--pred_pointcloud {pred_pointcloud} "
+            f"--gt_mesh <真値メッシュのパス>"
+        )
+        logging.info(eval_cmd)
+        logging.info("=" * 80)
+        logging.info("")
+
     return 0
 
 
