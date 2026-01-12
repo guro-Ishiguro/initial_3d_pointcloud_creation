@@ -170,11 +170,10 @@ python tools/aggregate.py --csv_dir output/<dataset_name>/csv --output result.cs
 推定深度と真値深度を比較し、評価指標を計算してCSVファイルに保存する。深度画像の評価には[シミュレータから取得されたEXR形式の真値深度画像](https://github.com/guro-Ishiguro/ConstructionSiteSimulator?tab=readme-ov-file#%E9%9D%99%E7%9A%84%E3%83%9E%E3%83%83%E3%83%97%E3%81%AE%E3%81%9F%E3%82%81%E3%81%AE%E5%8B%95%E7%94%BB%E5%83%8F%E3%81%AE%E5%8F%96%E5%BE%97%E6%96%B9%E6%B3%95)があることを前提とする。
 
 ```bash
-# データセットを指定して評価
-python evaluation/depth_evaluate.py --dataset <dataset_name>
-
-# 出力ディレクトリを指定
-python evaluation/depth_evaluate.py --output_dir output/<dataset_name>
+# 推定深度ディレクトリと真値深度ディレクトリを指定して評価
+python3 evaluation/depth_evaluate.py \
+  --pred-dir output/<dataset_name>/depth \
+  --gt-dir data/<dataset_name>/images/depth
 ```
 
 評価指標:
@@ -207,7 +206,7 @@ python evaluation/pointcloud_evaluation.py --predicted <predicted.ply> --ground_
 
 1. **初期深度推定**: ステレオ画像ペアから視差を計算し、深度マップを生成
 2. **PatchMatch最適化**: GPUを使用したPatchMatch MVSアルゴリズムで深度マップを最適化
-3. **フィルタリング**: 
+3. **フィルタリング**:
    - 光度一貫性フィルタリング
    - 幾何学的一貫性フィルタリング
 4. **点群生成**: 深度マップから3D点群を生成
@@ -260,4 +259,3 @@ initial_3d_pointcloud_creation/
 
 - 出力ディレクトリの書き込み権限を確認する
 - ログでエラーメッセージを確認する
-
