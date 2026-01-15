@@ -194,8 +194,9 @@ def main():
         description="Aggregate evaluation metrics from CSV files"
     )
     parser.add_argument(
-        "csv_dir",
+        "--csv_dir",
         type=str,
+        required=True,
         help="Directory path containing subdirectories with metric CSV files",
     )
 

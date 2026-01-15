@@ -555,6 +555,18 @@ def run():
     all_images = {}
     all_gt_depths = {}
 
+    # 各ステップの処理時間を累積するための辞書
+    total_times = {
+        "disparity_generation": 0.0,  # 視差画像の生成
+        "disparity_to_depth": 0.0,  # 視差から深度への変換
+        "depth_refinement": 0.0,  # 深度画像の改善
+        "photometric_filtering": 0.0,  # Photometric Consistencyフィルタリング
+        "geometric_filtering": 0.0,  # Geometric Consistencyフィルタリング
+        "pointcloud_generation": 0.0,  # 三次元点群の生成
+        "pointcloud_integration": 0.0,  # 三次元点群の統合
+        "pointcloud_filtering": 0.0,  # 点群のフィルタリング
+    }
+
     for idx in target_indices:
         if idx not in loaded_images:
             logging.warning(f"Image for index {idx} could not be loaded. Skipping.")
@@ -643,11 +655,21 @@ def run():
             logging.info(f"[{filename_stem}] ステップ1: 初期深度マップの計算")
             logging.info("-" * 80)
             start_time_initial_depth = time.time()
+            # 視差画像の生成
+            disp_start = time.time()
             disp = image_processor.create_disparity(li_gray, ri_gray)
+            disp_elapsed = time.time() - disp_start
+            total_times["disparity_generation"] += disp_elapsed
+            # 視差から深度への変換
+            depth_conv_start = time.time()
             initial_depth = depth_estimator.disparity_to_depth(disp)
+            depth_conv_elapsed = time.time() - depth_conv_start
+            total_times["disparity_to_depth"] += depth_conv_elapsed
             end_time_initial_depth = time.time()
             elapsed_initial = end_time_initial_depth - start_time_initial_depth
-            logging.info(f"[{filename_stem}] 初期深度計算完了 (経過時間: {elapsed_initial:.2f}秒)")
+            logging.info(
+                f"[{filename_stem}] 初期深度計算完了 (経過時間: {elapsed_initial:.2f}秒)"
+            )
 
             save_disparity_map_with_colorbar(
                 disp, os.path.join(config.DISPARITY_IMAGE_DIR, f"disp_{idx:04d}.png")
@@ -717,6 +739,7 @@ def run():
                 filename_stem=filename_stem,
             )
             refine_elapsed = time.time() - refine_start
+            total_times["depth_refinement"] += refine_elapsed
             logging.info(
                 f"[{filename_stem}] PatchMatch最適化完了 (経過時間: {refine_elapsed:.2f}秒)"
             )
@@ -752,7 +775,10 @@ def run():
                 )
             )
             photo_elapsed = time.time() - photo_start
-            logging.info(f"[{filename_stem}] 光度フィルタリング完了 (経過時間: {photo_elapsed:.2f}秒)")
+            total_times["photometric_filtering"] += photo_elapsed
+            logging.info(
+                f"[{filename_stem}] 光度フィルタリング完了 (経過時間: {photo_elapsed:.2f}秒)"
+            )
             append_to_csv(time_csv_path, ["photometric", f"{photo_elapsed:.6f}"])
             logging.debug(
                 f"[{filename_stem}] 光度フィルタリング時間をtime.csvに保存しました: {time_csv_path}"
@@ -986,6 +1012,7 @@ def run():
                 )
             )
             geo_elapsed = time.time() - geo_start
+            total_times["geometric_filtering"] += geo_elapsed
             append_to_csv(time_csv_path, ["geometric", f"{geo_elapsed:.6f}"])
             logging.info(
                 f"[{filename_stem}] 幾何学的一貫性フィルタリング完了 (経過時間: {geo_elapsed:.2f}秒)"
@@ -1103,6 +1130,7 @@ def run():
         merged_pts_list.append(world_points)
         merged_cols_list.append(world_colors)
         pointcloud_elapsed = time.time() - pointcloud_start
+        total_times["pointcloud_generation"] += pointcloud_elapsed
         append_to_csv(time_csv_path, ["pointcloud", f"{pointcloud_elapsed:.6f}"])
         logging.info(
             f"[{filename_stem}] 点群変換完了 (経過時間: {pointcloud_elapsed:.2f}秒, 点群数: {len(world_points):,}点)"
@@ -1120,7 +1148,10 @@ def run():
             merged_pts_list, merged_cols_list, voxel_size=0.1
         )
         integ_elapsed = time.time() - integ_start
-        logging.info(f"点群統合完了 (経過時間: {integ_elapsed:.2f}秒, 統合点数: {len(integ_pts):,}点)")
+        total_times["pointcloud_integration"] += integ_elapsed
+        logging.info(
+            f"点群統合完了 (経過時間: {integ_elapsed:.2f}秒, 統合点数: {len(integ_pts):,}点)"
+        )
         last_integ_pts, last_integ_cols = integ_pts, integ_cols
 
     # --- 最終保存 ---
@@ -1140,6 +1171,7 @@ def run():
         )
 
         # 複数ビュー可視性フィルタリング（デフォルト: 有効）
+        filter_start = time.time()
         if getattr(config, "MULTI_VIEW_VISIBILITY_FILTER_ENABLED", True):
             logging.info("-" * 80)
             logging.info("複数ビュー可視性フィルタリングを適用中...")
@@ -1175,6 +1207,8 @@ def run():
         final_pcd = point_cloud_integrator.process_and_save_final_point_cloud(
             merged_pts, merged_cols, config.POINT_CLOUD_FILE_PATH
         )
+        filter_elapsed = time.time() - filter_start
+        total_times["pointcloud_filtering"] += filter_elapsed
         if final_pcd and len(final_pcd.points) > 0:
             # 点群表示の制御（デフォルトは表示しない）
             show_point_cloud = getattr(config, "SHOW_POINT_CLOUD", False)
@@ -1208,6 +1242,52 @@ def run():
     logging.info(f"全体処理完了 (総経過時間: {time_str} / {total_elapsed:.2f}秒)")
     logging.info("=" * 80)
 
+    # 各ステップの処理時間の集計を表示
+    logging.info("")
+    logging.info("=" * 80)
+    logging.info("各ステップの処理時間集計（全画像合計）")
+    logging.info("=" * 80)
+    step_names = {
+        "disparity_generation": "視差画像の生成",
+        "disparity_to_depth": "視差から深度への変換",
+        "depth_refinement": "深度画像の改善",
+        "photometric_filtering": "Photometric Consistencyフィルタリング",
+        "geometric_filtering": "Geometric Consistencyフィルタリング",
+        "pointcloud_generation": "三次元点群の生成",
+        "pointcloud_integration": "三次元点群の統合",
+        "pointcloud_filtering": "点群のフィルタリング",
+    }
+
+    total_measured_time = sum(total_times.values())
+    for key, name in step_names.items():
+        elapsed = total_times[key]
+        percentage = (
+            (elapsed / total_measured_time * 100) if total_measured_time > 0 else 0.0
+        )
+        hours = int(elapsed // 3600)
+        minutes = int((elapsed % 3600) // 60)
+        seconds = elapsed % 60
+        if hours > 0:
+            time_str = f"{hours}時間{minutes}分{seconds:.1f}秒"
+        elif minutes > 0:
+            time_str = f"{minutes}分{seconds:.1f}秒"
+        else:
+            time_str = f"{seconds:.2f}秒"
+        logging.info(f"  {name}: {time_str} ({elapsed:.2f}秒, {percentage:.1f}%)")
+
+    logging.info("-" * 80)
+    total_hours = int(total_measured_time // 3600)
+    total_minutes = int((total_measured_time % 3600) // 60)
+    total_seconds = total_measured_time % 60
+    if total_hours > 0:
+        total_time_str = f"{total_hours}時間{total_minutes}分{total_seconds:.1f}秒"
+    elif total_minutes > 0:
+        total_time_str = f"{total_minutes}分{total_seconds:.1f}秒"
+    else:
+        total_time_str = f"{total_seconds:.1f}秒"
+    logging.info(f"  合計（測定対象）: {total_time_str} ({total_measured_time:.2f}秒)")
+    logging.info("=" * 80)
+
     # DEBUG_SAVE_DEPTH_MAPSがtrueの場合は評価コマンドを表示
     if config.DEBUG_SAVE_DEPTH_MAPS:
         logging.info("")
@@ -1224,7 +1304,9 @@ def run():
             )
             logging.info(eval_cmd)
         else:
-            logging.warning("LABEL_DEPTH_IMAGE_DIRが設定されていないため、評価コマンドを生成できません。")
+            logging.warning(
+                "LABEL_DEPTH_IMAGE_DIRが設定されていないため、評価コマンドを生成できません。"
+            )
         logging.info("=" * 80)
         logging.info("")
 

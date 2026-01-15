@@ -157,7 +157,11 @@ def save_depth_map_as_image(
             if viz_cmap is not None
             else str(getattr(config, "VIZ_CMAP", "jet"))
         )
-        colored_map = cv2.applyColorMap(vis_map, _resolve_cmap_code(cmap_name))
+        cmap_code = _resolve_cmap_code(cmap_name)
+        logging.debug(
+            f"Using colormap: {cmap_name} (code: {cmap_code}) for {file_path}"
+        )
+        colored_map = cv2.applyColorMap(vis_map, cmap_code)
         colored_map[~valid_mask] = [0, 0, 0]
 
         # サイドバー無しでそのまま保存

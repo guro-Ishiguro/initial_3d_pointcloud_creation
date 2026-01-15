@@ -195,9 +195,18 @@ try:
             for k, v in _cfg.items():
                 if v is not None:
                     g[k] = v
-except Exception:
+            # VIZ_CMAPが設定された場合、ログに出力
+            if "VIZ_CMAP" in _cfg:
+                import logging
+
+                logging.info(
+                    f"VIZ_CMAP loaded from YAML: {_cfg['VIZ_CMAP']} (file: {mvs_yaml_path})"
+                )
+except Exception as e:
     # YAML 読み込みに失敗した場合は、上位でのエラーハンドリングに委ねる
-    pass
+    import logging
+
+    logging.warning(f"Failed to load YAML config from {mvs_yaml_path}: {e}")
 
 
 # 環境変数からの設定読み込み（GUIから渡された設定を反映）
