@@ -15,10 +15,6 @@ from typing import Dict, Optional, Tuple
 import cv2
 import numpy as np
 
-# mvsモジュールをインポートする前に、非対話モードを設定
-# これにより、mvs/config.pyの対話的データセット選択をスキップ
-os.environ["SKIP_DATASET_SELECTION"] = "1"
-
 # mvsモジュールをインポートするためのパス設定
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 mvs_dir = os.path.join(project_root, "mvs")
@@ -38,10 +34,28 @@ from mvs.utils import (  # noqa: E402
 
 def setup_logging():
     """ログ設定"""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-    )
+    # 既存のハンドラをクリアしてから再設定
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(logging.INFO)
+
+    # 標準出力ハンドラを追加
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
+
+    # basicConfigを呼ぶ（forceパラメータはPython 3.8以降で利用可能）
+    try:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(levelname)s - %(message)s",
+            force=True,  # 既存の設定を上書き
+        )
+    except TypeError:
+        # Python 3.7以前ではforceパラメータが使えないので、手動で設定
+        pass
 
 
 def find_gt_depth_file(gt_dir: str, filename_stem: str) -> Optional[str]:
