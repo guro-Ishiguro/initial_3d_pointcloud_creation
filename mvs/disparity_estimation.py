@@ -10,11 +10,11 @@ class ImageProcessor:
     def create_disparity(self, image_L, image_R):
         """ステレオ画像から視差マップを生成する"""
         stereo = cv2.StereoSGBM_create(
-            minDisparity=self.config.min_disp,
-            numDisparities=self.config.num_disp,
-            blockSize=self.config.window_size,
-            P1=8 * 3 * self.config.window_size**2,
-            P2=16 * 3 * self.config.window_size**2,
+            minDisparity=self.config.MIN_DISP,
+            numDisparities=self.config.NUM_DISP,
+            blockSize=self.config.WINDOW_SIZE,
+            P1=8 * 3 * self.config.WINDOW_SIZE**2,
+            P2=16 * 3 * self.config.WINDOW_SIZE**2,
             disp12MaxDiff=1,
             uniquenessRatio=10,
             speckleWindowSize=100,

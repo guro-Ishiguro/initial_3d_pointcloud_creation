@@ -677,7 +677,7 @@ def run():
 
             # 深度誤差コストを計算
             d_cost = depth_estimator.compute_depth_error_cost(
-                disp, initial_depth, config.window_size
+                disp, initial_depth, config.WINDOW_SIZE
             )
 
             # 境界領域や無効な深度をNaNでマスク

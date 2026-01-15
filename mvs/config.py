@@ -143,38 +143,55 @@ scene_width = 2.0 * camera_height * np.tan(np.deg2rad(fov_h) / 2.0)
 scene_height = 2.0 * camera_height * np.tan(np.deg2rad(fov_v) / 2.0)
 pixel_size = scene_width / float(width)
 
-window_size, min_disp, num_disp = 7, 0, 216
-
-# 可視化のデフォルト設定（YAMLで上書き可能）
-VIZ_DEPTH_MIN = 0.0
-VIZ_DEPTH_MAX = float(camera_height)
-VIZ_CMAP = "viridis"
-
-# YAML(app/mvs.yaml もしくは APP_MVS_CONFIG) による MVS パラメータの上書き
-try:
-    mvs_yaml_path = os.getenv(
-        "APP_MVS_CONFIG", os.path.join(DEFAULT_HOME, "app", "mvs.yaml")
+# YAML(app/mvs.yaml もしくは APP_MVS_CONFIG) による MVS パラメータの読み込み（必須）
+# 視差推定パラメータと可視化パラメータはYAMLから読み込まれる
+mvs_yaml_path = os.getenv(
+    "APP_MVS_CONFIG", os.path.join(DEFAULT_HOME, "app", "mvs.yaml")
+)
+if not yaml:
+    raise ImportError(
+        "PyYAML is required to load configuration. Please install: pip install PyYAML"
     )
-    if yaml and os.path.exists(mvs_yaml_path):
-        with open(mvs_yaml_path, "r") as f:
-            _cfg = yaml.safe_load(f) or {}
-        if isinstance(_cfg, dict):
-            g = globals()
-            for k, v in _cfg.items():
-                if v is not None:
-                    g[k] = v
-            # VIZ_CMAPが設定された場合、ログに出力
-            if "VIZ_CMAP" in _cfg:
-                import logging
+if not os.path.exists(mvs_yaml_path):
+    raise FileNotFoundError(
+        f"Configuration file not found: {mvs_yaml_path}. "
+        "Please ensure app/mvs.yaml exists or set APP_MVS_CONFIG environment variable."
+    )
 
-                logging.info(
-                    f"VIZ_CMAP loaded from YAML: {_cfg['VIZ_CMAP']} (file: {mvs_yaml_path})"
-                )
-except Exception as e:
-    # YAML 読み込みに失敗した場合は、上位でのエラーハンドリングに委ねる
+with open(mvs_yaml_path, "r") as f:
+    _cfg = yaml.safe_load(f) or {}
+
+if not isinstance(_cfg, dict):
+    raise ValueError(f"Invalid YAML configuration format in {mvs_yaml_path}")
+
+# 必須パラメータのチェック
+_required_params = [
+    "WINDOW_SIZE",
+    "MIN_DISP",
+    "NUM_DISP",
+    "VIZ_DEPTH_MIN",
+    "VIZ_DEPTH_MAX",
+    "VIZ_CMAP",
+]
+_missing_params = [p for p in _required_params if p not in _cfg or _cfg[p] is None]
+if _missing_params:
+    raise ValueError(
+        f"Missing required parameters in {mvs_yaml_path}: {', '.join(_missing_params)}"
+    )
+
+# グローバル変数に設定を反映
+g = globals()
+for k, v in _cfg.items():
+    if v is not None:
+        g[k] = v
+
+# VIZ_CMAPが設定された場合、ログに出力
+if "VIZ_CMAP" in _cfg:
     import logging
 
-    logging.warning(f"Failed to load YAML config from {mvs_yaml_path}: {e}")
+    logging.info(
+        f"VIZ_CMAP loaded from YAML: {_cfg['VIZ_CMAP']} (file: {mvs_yaml_path})"
+    )
 
 
 # 環境変数からの設定読み込み（GUIから渡された設定を反映）
@@ -188,9 +205,9 @@ def _str_to_bool(s):
     return bool(s)
 
 
-# 環境変数から設定を読み込む（YAMLで設定されていない場合のみ）
+# 環境変数から設定を読み込む
 g = globals()
-# 主要な設定項目のリスト（必要に応じて追加）
+# 主要な設定項目のリスト
 _config_keys = [
     "SHOW_POINT_CLOUD",
     "POSITION_ERROR_SCALE",
