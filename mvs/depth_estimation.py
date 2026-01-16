@@ -134,19 +134,35 @@ class DepthEstimator:
         return ortho_depth_map, ortho_color_map
 
     @staticmethod
-    def depth_to_world(depth_map, color_image, K, R, T):
+    def depth_to_world(depth_map, color_image, K, R, T, normal_map=None):
         """
         透視投影深度マップを直接ワールド座標の点群に変換する。
         オルソ投影を経由せずに、カメラ座標→ワールド座標へ直接変換する。
+
+        Args:
+            depth_map: 深度マップ (H, W)
+            color_image: カラー画像 (H, W, 3)
+            K: カメラ内部パラメータ (3, 3)
+            R: 回転行列 (3, 3) - world->camera
+            T: 並進ベクトル (3,) - world->camera
+            normal_map: 法線マップ (H, W, 3) - カメラ座標系、オプション
+
+        Returns:
+            world_points: ワールド座標の点群 (N, 3)
+            world_colors: 色情報 (N, 3)
+            world_normals: ワールド座標の法線 (N, 3) - normal_mapが渡された場合のみ
         """
         h, w = depth_map.shape
         u, v = np.meshgrid(np.arange(w), np.arange(h))
         valid_mask = np.isfinite(depth_map) & (depth_map > 0)
 
         if not np.any(valid_mask):
-            return np.empty((0, 3), dtype=np.float32), np.empty(
-                (0, 3), dtype=np.float32
-            )
+            empty_points = np.empty((0, 3), dtype=np.float32)
+            empty_colors = np.empty((0, 3), dtype=np.float32)
+            if normal_map is not None:
+                empty_normals = np.empty((0, 3), dtype=np.float32)
+                return empty_points, empty_colors, empty_normals
+            return empty_points, empty_colors
 
         fx, fy = K[0, 0], K[1, 1]
         cx, cy = K[0, 2], K[1, 2]
@@ -171,7 +187,23 @@ class DepthEstimator:
         # 色を抽出
         colors = color_image.reshape(-1, 3)[valid_mask.flatten()] / 255.0
 
-        return pts_world.astype(np.float32), colors.astype(np.float32)
+        # 法線を変換（normal_mapが渡された場合）
+        if normal_map is not None:
+            # カメラ座標系の法線を抽出
+            normals_cam = normal_map.reshape(-1, 3)[valid_mask.flatten()]  # (N, 3)
+            # カメラ座標系からワールド座標系へ変換（R.T @ normal）
+            normals_world = (R.T @ normals_cam.T).T  # (N, 3)
+            # 正規化（念のため）
+            norms = np.linalg.norm(normals_world, axis=1, keepdims=True)
+            norms = np.where(norms > 1e-6, norms, 1.0)
+            normals_world = normals_world / norms
+            return (
+                pts_world.astype(np.float32),
+                colors.astype(np.float32),
+                normals_world.astype(np.float32),
+            )
+        else:
+            return pts_world.astype(np.float32), colors.astype(np.float32)
 
     @staticmethod
     def ortho_depth_to_world(depth_map, color_image, R, T, pixel_size):

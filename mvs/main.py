@@ -548,6 +548,7 @@ def run():
     logging.info("=" * 80)
     logging.info("")
     all_optimized_depths = {}
+    all_optimized_normals = {}  # 最適化された法線マップを保存
     # 各ステージの深度マップを保存（エラーマップの統一スケール用）
     all_stage_depths = {}
     # 各画像のポーズ情報を保存（幾何学的一貫性フィルタリング用）
@@ -727,6 +728,7 @@ def run():
             refine_start = time.time()
             (
                 optimized_depth,
+                optimized_normal,
                 iter_times_gpu,
             ) = depth_optimization.refine_depth_with_patchmatch(
                 initial_depth=initial_depth,
@@ -816,6 +818,8 @@ def run():
                 )
 
             all_optimized_depths[idx] = photometrically_filtered_depth
+            if optimized_normal is not None:
+                all_optimized_normals[idx] = optimized_normal  # 最適化された法線を保存
             all_poses[idx] = {"R": R_mat, "T": T_pos, "K": config.K}
             all_images[idx] = li_rgb
             if gt_depth is not None:
@@ -1100,7 +1104,9 @@ def run():
     logging.info("=" * 80)
     logging.info("")
     merged_pts_list, merged_cols_list = [], []
+    merged_normals_list = []  # 法線リストを追加
     last_integ_pts, last_integ_cols = None, None
+    last_integ_normals = None
 
     for idx in target_indices:
         if idx not in all_geometrically_filtered_depths:
@@ -1111,6 +1117,9 @@ def run():
         li_rgb = all_images[idx]
         R_mat = ref_pose["R"]
         T_pos = ref_pose["T"]
+
+        # 最適化された法線を取得（存在する場合）
+        optimized_normal = all_optimized_normals.get(idx)
 
         # time.csvのパスを取得
         if idx in all_pairs_data:
@@ -1124,9 +1133,20 @@ def run():
         # 透視投影深度マップから直接ワールド座標の点群に変換（オルソ投影をスキップ）
         logging.info(f"[{filename_stem}] 点群への変換中...")
         pointcloud_start = time.time()
-        world_points, world_colors = depth_estimator.depth_to_world(
-            geometrically_filtered_depth, li_rgb, config.K, R_mat, T_pos
-        )
+        if optimized_normal is not None:
+            world_points, world_colors, world_normals = depth_estimator.depth_to_world(
+                geometrically_filtered_depth,
+                li_rgb,
+                config.K,
+                R_mat,
+                T_pos,
+                normal_map=optimized_normal,
+            )
+            merged_normals_list.append(world_normals)
+        else:
+            world_points, world_colors = depth_estimator.depth_to_world(
+                geometrically_filtered_depth, li_rgb, config.K, R_mat, T_pos
+            )
         merged_pts_list.append(world_points)
         merged_cols_list.append(world_colors)
         pointcloud_elapsed = time.time() - pointcloud_start
@@ -1144,9 +1164,24 @@ def run():
         logging.info(f"統合対象: {len(merged_pts_list)}個の点群")
         logging.info("-" * 80)
         integ_start = time.time()
-        integ_pts, integ_cols = point_cloud_integrator.integrate_depth_maps_median(
-            merged_pts_list, merged_cols_list, voxel_size=0.1
+        # 法線リストが存在する場合のみ統合に含める
+        normals_list_for_integration = (
+            merged_normals_list if merged_normals_list else None
         )
+        if normals_list_for_integration:
+            integ_pts, integ_cols, integ_normals = (
+                point_cloud_integrator.integrate_depth_maps_median(
+                    merged_pts_list,
+                    merged_cols_list,
+                    normals_list=normals_list_for_integration,
+                    voxel_size=0.1,
+                )
+            )
+            last_integ_normals = integ_normals
+        else:
+            integ_pts, integ_cols = point_cloud_integrator.integrate_depth_maps_median(
+                merged_pts_list, merged_cols_list, voxel_size=0.1
+            )
         integ_elapsed = time.time() - integ_start
         total_times["pointcloud_integration"] += integ_elapsed
         logging.info(
@@ -1204,8 +1239,19 @@ def run():
                 merged_pts = original_pts
                 merged_cols = original_cols
 
+        # 統合された法線がある場合は使用、なければNone
+        merged_normals = None
+        if last_integ_normals is not None:
+            merged_normals = last_integ_normals
+        elif merged_normals_list:
+            # 統合されていない場合は結合
+            merged_normals = np.vstack(merged_normals_list)
+
         final_pcd = point_cloud_integrator.process_and_save_final_point_cloud(
-            merged_pts, merged_cols, config.POINT_CLOUD_FILE_PATH
+            merged_pts,
+            merged_cols,
+            config.POINT_CLOUD_FILE_PATH,
+            normals_list=merged_normals,
         )
         filter_elapsed = time.time() - filter_start
         total_times["pointcloud_filtering"] += filter_elapsed
@@ -1217,10 +1263,7 @@ def run():
                     "Showing final integrated point cloud. Close the window to exit."
                 )
                 o3d.visualization.draw_geometries([final_pcd])
-            else:
-                logging.info(
-                    f"Point cloud saved to {config.POINT_CLOUD_FILE_PATH} (display disabled)"
-                )
+            # 保存完了のログは write_ply 内で出力されるため、ここでは出力しない
     else:
         logging.warning("No point clouds were generated.")
 
