@@ -1637,6 +1637,7 @@ class DepthOptimization:
 
         logging.info("PatchMatch MVS refinement finished.")
         final_depth_map = depth_map.copy()
+        final_normal_map = normal_map.copy()
 
         # Save per-iteration timing plot (optional)
         try:
@@ -1658,7 +1659,7 @@ class DepthOptimization:
         except Exception as e:
             logging.debug(f"Skip plotting GPU iteration time: {e}")
 
-        return final_depth_map, iter_times_gpu
+        return final_depth_map, final_normal_map, iter_times_gpu
 
     def filter_depth_map_by_geometric_consistency(
         self, ref_depth_map, ref_pose, neighbor_views_data, all_optimized_depths

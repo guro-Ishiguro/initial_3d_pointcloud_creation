@@ -10,24 +10,48 @@ class PointCloudIntegrator:
     def __init__(self, config):
         self.config = config
 
-    def integrate_depth_maps_median(self, points_list, colors_list, voxel_size=0.1):
+    def integrate_depth_maps_median(
+        self, points_list, colors_list, normals_list=None, voxel_size=0.1
+    ):
         """
         複数の深度マップから生成された点群を統合し、ボクセルグリッド内でメディアンを計算する。
+
+        Args:
+            points_list: 点群のリスト
+            colors_list: 色のリスト
+            normals_list: 法線のリスト（オプション）
+            voxel_size: ボクセルサイズ
+
+        Returns:
+            med_pts: 統合された点群
+            med_cols: 統合された色
+            med_normals: 統合された法線（normals_listが渡された場合のみ）
         """
         if not points_list:
             logging.warning("No points to integrate.")
+            if normals_list is not None:
+                return np.array([]), np.array([]), np.array([])
             return np.array([]), np.array([])
 
         all_pts = np.vstack(points_list)
         all_cols = np.vstack(colors_list)
+        has_normals = normals_list is not None and len(normals_list) > 0
+        if has_normals:
+            all_normals = np.vstack(normals_list)
 
         # NaNや無限大の点を除去
         valid = np.isfinite(all_pts).all(axis=1)
+        if has_normals:
+            valid = valid & np.isfinite(all_normals).all(axis=1)
         pts = all_pts[valid]
         cols = all_cols[valid]
+        if has_normals:
+            normals = all_normals[valid]
 
         if pts.shape[0] == 0:
             logging.warning("No valid points after filtering for integration.")
+            if has_normals:
+                return np.array([]), np.array([]), np.array([])
             return np.array([]), np.array([])
 
         # 各点を対応するボクセルIDに割り当てる
@@ -38,14 +62,31 @@ class PointCloudIntegrator:
             voxel_dict.setdefault(vid, []).append(i)
 
         med_pts, med_cols = [], []
+        med_normals = [] if has_normals else None
         for idxs in voxel_dict.values():
             voxel_pts = pts[idxs]
             voxel_cols = cols[idxs]
             # 各ボクセル内の点のメディアンを計算
             med_pts.append(np.median(voxel_pts, axis=0))
             med_cols.append(np.median(voxel_cols, axis=0))
+            if has_normals:
+                # 法線は平均化して正規化
+                voxel_normals = normals[idxs]
+                avg_normal = np.mean(voxel_normals, axis=0)
+                norm = np.linalg.norm(avg_normal)
+                if norm > 1e-6:
+                    avg_normal = avg_normal / norm
+                else:
+                    avg_normal = np.array([0.0, 0.0, 1.0])
+                med_normals.append(avg_normal)
 
         logging.info(f"Integrated {len(med_pts)} points from multiple depth maps.")
+        if has_normals:
+            return (
+                np.array(med_pts),
+                np.array(med_cols),
+                np.array(med_normals),
+            )
         return np.array(med_pts), np.array(med_cols)
 
     def filter_points_by_multi_view_visibility(
@@ -122,7 +163,9 @@ class PointCloudIntegrator:
 
         return filtered_points, filtered_colors
 
-    def process_and_save_final_point_cloud(self, points_list, colors_list, file_path):
+    def process_and_save_final_point_cloud(
+        self, points_list, colors_list, file_path, normals_list=None
+    ):
         """最終的な点群を処理し、PLYファイルとして保存する"""
         if points_list is None or points_list.size == 0:
             logging.warning("No point clouds to process.")
@@ -131,6 +174,13 @@ class PointCloudIntegrator:
         # リストを結合して単一の配列にする
         points = np.vstack(points_list)
         colors = np.vstack(colors_list)
+        has_normals = normals_list is not None
+        if has_normals:
+            # normals_listが配列の場合はそのまま使用、リストの場合は結合
+            if isinstance(normals_list, np.ndarray):
+                normals = normals_list
+            else:
+                normals = np.vstack(normals_list)
 
         if points.shape[0] == 0:
             logging.warning("No points to process for final point cloud.")
@@ -139,43 +189,89 @@ class PointCloudIntegrator:
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         pcd.colors = o3d.utility.Vector3dVector(colors)
+        if has_normals:
+            pcd.normals = o3d.utility.Vector3dVector(normals)
 
         logging.info(f"Initial merged point cloud size: {len(pcd.points)}")
 
-        # 外れ値除去
-        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=4.0)
-        logging.info(f"Point cloud size after outlier removal: {len(pcd.points)}")
+        # 外れ値除去（インデックスを取得）
+        pcd_filtered, inlier_indices = pcd.remove_statistical_outlier(
+            nb_neighbors=50, std_ratio=4.0
+        )
+        logging.info(
+            f"Point cloud size after outlier removal: {len(pcd_filtered.points)} "
+            f"(removed {len(pcd.points) - len(pcd_filtered.points)} points)"
+        )
+
+        # 外れ値除去後の法線を取得
+        has_normals_after = False
+        if has_normals:
+            # インデックスを使って法線もフィルタリング
+            inlier_indices_np = np.asarray(inlier_indices)
+            normals_filtered = normals[inlier_indices_np]
+            pcd_filtered.normals = o3d.utility.Vector3dVector(normals_filtered)
+            has_normals_after = True
 
         # PLYファイルとして保存
-        self.write_ply(file_path, np.asarray(pcd.points), np.asarray(pcd.colors))
+        if has_normals_after:
+            self.write_ply(
+                file_path,
+                np.asarray(pcd_filtered.points),
+                np.asarray(pcd_filtered.colors),
+                np.asarray(pcd_filtered.normals),
+            )
+        else:
+            self.write_ply(
+                file_path,
+                np.asarray(pcd_filtered.points),
+                np.asarray(pcd_filtered.colors),
+            )
 
         return pcd
 
     @staticmethod
-    def write_ply(filename, vertices, colors):
+    def write_ply(filename, vertices, colors, normals=None):
         """点群データをPLYファイルとして書き込む"""
         assert (
             vertices.shape[0] == colors.shape[0]
         ), "Vertices and colors must have the same number of points."
+        if normals is not None:
+            assert (
+                vertices.shape[0] == normals.shape[0]
+            ), "Vertices and normals must have the same number of points."
 
         colors_uchar = (colors * 255).astype(np.uint8)
 
-        header = f"""ply
-format ascii 1.0
-element vertex {len(vertices)}
-property float x
-property float y
-property float z
-property uchar red
-property uchar green
-property uchar blue
-end_header
-"""
-        data = np.hstack((vertices, colors_uchar))
+        # ヘッダーを構築
+        header_lines = [
+            "ply",
+            "format ascii 1.0",
+            f"element vertex {len(vertices)}",
+            "property float x",
+            "property float y",
+            "property float z",
+            "property uchar red",
+            "property uchar green",
+            "property uchar blue",
+        ]
+        if normals is not None:
+            header_lines.extend(
+                ["property float nx", "property float ny", "property float nz"]
+            )
+        header_lines.append("end_header")
+        header = "\n".join(header_lines) + "\n"
+
+        # データを構築
+        if normals is not None:
+            data = np.hstack((vertices, colors_uchar, normals))
+            fmt = "%f %f %f %d %d %d %f %f %f"
+        else:
+            data = np.hstack((vertices, colors_uchar))
+            fmt = "%f %f %f %d %d %d"
 
         with open(filename, "w") as f:
             f.write(header)
-            np.savetxt(f, data, fmt="%f %f %f %d %d %d")
+            np.savetxt(f, data, fmt=fmt)
         logging.info(f"Final point cloud saved to {filename}")
 
 
