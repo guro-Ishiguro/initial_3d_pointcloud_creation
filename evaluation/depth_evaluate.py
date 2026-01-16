@@ -410,6 +410,22 @@ def main():
                             )
 
     logging.info(f"Evaluation complete. Results saved to {output_csv_dir}")
+    logging.info("")
+    logging.info("=" * 80)
+    logging.info("評価結果を集計するには、以下のコマンドを実行してください:")
+    logging.info("=" * 80)
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    aggregate_script = os.path.join(project_root, "tools", "aggregate.py")
+    if os.path.exists(aggregate_script):
+        aggregate_cmd = f"python3 {aggregate_script} --csv_dir {output_csv_dir}"
+        logging.info(aggregate_cmd)
+    else:
+        logging.warning(
+            f"Aggregate script not found at {aggregate_script}. "
+            "Please check the path."
+        )
+    logging.info("=" * 80)
+    logging.info("")
 
 
 if __name__ == "__main__":
