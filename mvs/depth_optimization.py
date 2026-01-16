@@ -1977,7 +1977,6 @@ class DepthOptimization:
                 depth_tmp = d_depth_map.copy_to_host()
                 # PNG形式で保存
                 save_path = os.path.join(save_dir, f"depth_iter_{i+1:02d}.png")
-                logging.info(f"Saving depth map at iteration {i+1} to {save_path}")
                 save_depth_map_as_image(depth_tmp, save_path)
                 # EXR形式でも保存
                 save_path_exr = os.path.join(save_dir, f"depth_iter_{i+1:02d}.exr")
