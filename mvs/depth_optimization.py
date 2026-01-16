@@ -759,120 +759,146 @@ def _random_search_cuda(
 
     if r >= h or c >= w:
         return
+
+    # 現在の状態を取得
     d_current = depth_map[r, c]
+    n_current = normal_map[r, c]
+    current_cost = cost_map[r, c]
+
     if math.isnan(d_current) or math.isinf(d_current) or d_current <= 0:
         return
-    d_range = depth_range_map[r, c]
-    if math.isnan(d_range) or math.isinf(d_range) or d_range <= 0:
-        return
-    d_new = (
-        d_current
-        + (cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) * 2 - 1)
-        * d_range
-    )
-    if d_new <= 0:
-        return
 
-    n_current = normal_map[r, c]
-    angle_rad = (
-        (
-            (
+    # -----------------------------------------------------------------
+    # フェーズ1: 深度のみ更新 (Depth Refinement)
+    # 法線は固定して、深度だけを動かしてみる
+    # -----------------------------------------------------------------
+    d_range = depth_range_map[r, c]
+    if not (math.isnan(d_range) or math.isinf(d_range) or d_range <= 0):
+        d_new = (
+            d_current
+            + (
                 cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) * 2
                 - 1
             )
-            * normal_search_angle
-            * (decay_rate**iteration)
+            * d_range
         )
-        * math.pi
-        / 180.0
-    )
 
-    rand_axis_x = cuda.random.xoroshiro128p_normal_float32(random_states, thread_id)
-    rand_axis_y = cuda.random.xoroshiro128p_normal_float32(random_states, thread_id)
-    rand_axis_z = cuda.random.xoroshiro128p_normal_float32(random_states, thread_id)
-    norm = (rand_axis_x**2 + rand_axis_y**2 + rand_axis_z**2) ** 0.5
-    rand_axis_x /= norm
-    rand_axis_y /= norm
-    rand_axis_z /= norm
+        if d_new > 0:
+            # 法線はそのまま使用
+            cost_depth_only = _evaluate_cost_cuda(
+                r,
+                c,
+                d_new,
+                n_current[0],
+                n_current[1],
+                n_current[2],
+                patch_size,
+                ref_image_gray,
+                ref_pose_K,
+                ref_pose_R,
+                ref_pose_T,
+                src_images_gray,
+                src_K,
+                src_R,
+                src_T,
+                top_k_costs,
+                adaptive_weight_sigma_color,
+                zncc_epsilon,
+            )
 
-    cos_a = math.cos(angle_rad)
-    sin_a = math.sin(angle_rad)
-    one_minus_cos_a = 1.0 - cos_a
+            if cost_depth_only < current_cost:
+                depth_map[r, c] = d_new
+                current_cost = cost_depth_only
+                d_current = d_new  # 次の法線探索のために現在値を更新
+                cost_map[r, c] = current_cost  # グローバルメモリも更新
 
-    dot_product = (
-        rand_axis_x * n_current[0]
-        + rand_axis_y * n_current[1]
-        + rand_axis_z * n_current[2]
-    )
+    # -----------------------------------------------------------------
+    # フェーズ2: 法線のみ更新 (Normal Refinement)
+    # 深度は固定(またはフェーズ1で更新された値)して、法線だけを動かす
+    # 加法ノイズ方式を使用（ロドリゲスの回転公式より高速でロバスト）
+    # -----------------------------------------------------------------
 
-    cross_product_x = rand_axis_y * n_current[2] - rand_axis_z * n_current[1]
-    cross_product_y = rand_axis_z * n_current[0] - rand_axis_x * n_current[2]
-    cross_product_z = rand_axis_x * n_current[1] - rand_axis_y * n_current[0]
+    # 現在の法線をローカル変数にコピー
+    n_curr_x = n_current[0]
+    n_curr_y = n_current[1]
+    n_curr_z = n_current[2]
 
-    n_new_x = (
-        n_current[0] * cos_a
-        + cross_product_x * sin_a
-        + rand_axis_x * dot_product * one_minus_cos_a
-    )
-    n_new_y = (
-        n_current[1] * cos_a
-        + cross_product_y * sin_a
-        + rand_axis_y * dot_product * one_minus_cos_a
-    )
-    n_new_z = (
-        n_current[2] * cos_a
-        + cross_product_z * sin_a
-        + rand_axis_z * dot_product * one_minus_cos_a
-    )
-
-    # If current normal is invalid, start from a random unit vector around Z
+    # 無効な法線の場合はリセット
     if (
-        math.isnan(n_current[0])
-        or math.isinf(n_current[0])
-        or math.isnan(n_current[1])
-        or math.isinf(n_current[1])
-        or math.isnan(n_current[2])
-        or math.isinf(n_current[2])
+        math.isnan(n_curr_x)
+        or math.isinf(n_curr_x)
+        or math.isnan(n_curr_y)
+        or math.isinf(n_curr_y)
+        or math.isnan(n_curr_z)
+        or math.isinf(n_curr_z)
     ):
-        n_current[0] = 0.0
-        n_current[1] = 0.0
-        n_current[2] = 1.0
-    norm_new = (n_new_x**2 + n_new_y**2 + n_new_z**2) ** 0.5
-    n_new_x /= norm_new
-    n_new_y /= norm_new
-    n_new_z /= norm_new
+        n_curr_x = 0.0
+        n_curr_y = 0.0
+        n_curr_z = 1.0
 
-    n_new = cuda.local.array(3, dtype=np.float32)
-    n_new[0] = n_new_x
-    n_new[1] = n_new_y
-    n_new[2] = n_new_z
+    # 探索スケール（ノイズの大きさ）を決定
+    # normal_search_angle(度数法)をラジアン換算し、さらに減衰させる
+    # 角度θの変化は、単位ベクトルに対して長さ 2*sin(θ/2) 程度のノイズを加えることに相当
+    # 近似的に angle_rad をそのままスケールとして使っても機能します
+    scale = (normal_search_angle * (decay_rate**iteration)) * (math.pi / 180.0)
 
-    new_cost = _evaluate_cost_cuda(
-        r,
-        c,
-        d_new,
-        n_new[0],
-        n_new[1],
-        n_new[2],
-        patch_size,
-        ref_image_gray,
-        ref_pose_K,
-        ref_pose_R,
-        ref_pose_T,
-        src_images_gray,
-        src_K,
-        src_R,
-        src_T,
-        top_k_costs,
-        adaptive_weight_sigma_color,
-        zncc_epsilon,
+    # [-0.5, 0.5] の一様乱数を生成してスケールを掛ける
+    rand_x = (
+        (cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) - 0.5)
+        * 2.0
+        * scale
     )
-    if new_cost < cost_map[r, c]:
-        depth_map[r, c] = d_new
-        normal_map[r, c, 0] = n_new[0]
-        normal_map[r, c, 1] = n_new[1]
-        normal_map[r, c, 2] = n_new[2]
-        cost_map[r, c] = new_cost
+    rand_y = (
+        (cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) - 0.5)
+        * 2.0
+        * scale
+    )
+    rand_z = (
+        (cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) - 0.5)
+        * 2.0
+        * scale
+    )
+
+    # 現在の法線にノイズを加える
+    n_new_x = n_curr_x + rand_x
+    n_new_y = n_curr_y + rand_y
+    n_new_z = n_curr_z + rand_z
+
+    # 正規化（単位ベクトルに戻す）
+    norm_new = math.sqrt(n_new_x**2 + n_new_y**2 + n_new_z**2)
+    if norm_new > 1e-6:
+        n_new_x /= norm_new
+        n_new_y /= norm_new
+        n_new_z /= norm_new
+
+        # コスト計算（深度は固定または更新済みの値を使用）
+        cost_normal_only = _evaluate_cost_cuda(
+            r,
+            c,
+            d_current,  # フェーズ1で更新された値
+            n_new_x,
+            n_new_y,
+            n_new_z,
+            patch_size,
+            ref_image_gray,
+            ref_pose_K,
+            ref_pose_R,
+            ref_pose_T,
+            src_images_gray,
+            src_K,
+            src_R,
+            src_T,
+            top_k_costs,
+            adaptive_weight_sigma_color,
+            zncc_epsilon,
+        )
+
+        # 法線単独でコストが下がれば更新
+        if cost_normal_only < current_cost:
+            normal_map[r, c, 0] = n_new_x
+            normal_map[r, c, 1] = n_new_y
+            normal_map[r, c, 2] = n_new_z
+            cost_map[r, c] = cost_normal_only
 
 
 @njit(fastmath=True)
