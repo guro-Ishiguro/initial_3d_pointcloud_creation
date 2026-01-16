@@ -409,7 +409,7 @@ def _process_single_view_cpu(
         # 近傍ビューのデータを準備
         neighbor_views_data = []
         neighbor_frames = _neighbors_for_ref(idx)
-        _log_selected_neighbors(idx, neighbor_frames)
+        # ログ出力はメインループで行うため、ここでは呼び出さない
         for fr in neighbor_frames:
             nv = _get_neighbor_view(idx, fr)
             if nv is not None:
@@ -835,6 +835,10 @@ def run():
         logging.info("=" * 80)
         logging.info(f"処理開始: 画像ペア {idx} (ファイル: {filename_stem})")
         logging.info("=" * 80)
+
+        # 近傍ビューのログ出力（GPU処理部分で一度だけ）
+        neighbor_frames = _neighbors_for_ref(idx)
+        _log_selected_neighbors(idx, neighbor_frames)
 
         # 初期深度の有効ピクセル数をログ出力
         valid_pixels_initial = np.sum(np.isfinite(initial_depth))

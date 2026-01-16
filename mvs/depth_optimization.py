@@ -75,47 +75,54 @@ def _compute_homography_cuda(
     plane_normal_0,
     plane_normal_1,
     plane_normal_2,
+    R_ref_inv,  # 事前計算済みのR_ref_invを引数として受け取る
+    K_inv,  # 事前計算済みのK_invを引数として受け取る
 ):
-    R_ref_inv = cuda.local.array((3, 3), dtype=np.float32)
-    for i in range(3):
-        for j in range(3):
-            R_ref_inv[i, j] = R_ref[j, i]
+    # R_ref_invとK_invは事前計算済みなので、ここでは計算しない
 
+    # T_ref_invの計算（R_ref_invを使用）
+    # 共通の計算をまとめて最適化
+    T_ref_0 = T_ref[0]
+    T_ref_1 = T_ref[1]
+    T_ref_2 = T_ref[2]
     T_ref_inv_0 = -(
-        R_ref_inv[0, 0] * T_ref[0]
-        + R_ref_inv[0, 1] * T_ref[1]
-        + R_ref_inv[0, 2] * T_ref[2]
+        R_ref_inv[0, 0] * T_ref_0
+        + R_ref_inv[0, 1] * T_ref_1
+        + R_ref_inv[0, 2] * T_ref_2
     )
     T_ref_inv_1 = -(
-        R_ref_inv[1, 0] * T_ref[0]
-        + R_ref_inv[1, 1] * T_ref[1]
-        + R_ref_inv[1, 2] * T_ref[2]
+        R_ref_inv[1, 0] * T_ref_0
+        + R_ref_inv[1, 1] * T_ref_1
+        + R_ref_inv[1, 2] * T_ref_2
     )
     T_ref_inv_2 = -(
-        R_ref_inv[2, 0] * T_ref[0]
-        + R_ref_inv[2, 1] * T_ref[1]
-        + R_ref_inv[2, 2] * T_ref[2]
+        R_ref_inv[2, 0] * T_ref_0
+        + R_ref_inv[2, 1] * T_ref_1
+        + R_ref_inv[2, 2] * T_ref_2
     )
 
+    # ワールド座標からカメラ座標への変換（R_refとT_refを使用）
+    # 共通の計算をまとめて最適化
     p_ref_0 = (
         R_ref[0, 0] * plane_point_3d_0
         + R_ref[0, 1] * plane_point_3d_1
         + R_ref[0, 2] * plane_point_3d_2
-        + T_ref[0]
+        + T_ref_0
     )
     p_ref_1 = (
         R_ref[1, 0] * plane_point_3d_0
         + R_ref[1, 1] * plane_point_3d_1
         + R_ref[1, 2] * plane_point_3d_2
-        + T_ref[1]
+        + T_ref_1
     )
     p_ref_2 = (
         R_ref[2, 0] * plane_point_3d_0
         + R_ref[2, 1] * plane_point_3d_1
         + R_ref[2, 2] * plane_point_3d_2
-        + T_ref[2]
+        + T_ref_2
     )
 
+    # 法線の変換（R_refを使用）
     n_ref_0 = (
         R_ref[0, 0] * plane_normal_0
         + R_ref[0, 1] * plane_normal_1
@@ -132,13 +139,17 @@ def _compute_homography_cuda(
         + R_ref[2, 2] * plane_normal_2
     )
 
+    # 相対回転行列の計算（R_src @ R_ref_inv）
     R_rel = cuda.local.array((3, 3), dtype=np.float32)
     for i in range(3):
         for j in range(3):
-            R_rel[i, j] = 0
-            for k in range(3):
-                R_rel[i, j] += R_src[i, k] * R_ref_inv[k, j]
+            R_rel[i, j] = (
+                R_src[i, 0] * R_ref_inv[0, j]
+                + R_src[i, 1] * R_ref_inv[1, j]
+                + R_src[i, 2] * R_ref_inv[2, j]
+            )
 
+    # 相対並進ベクトルの計算（R_src @ T_ref_inv + T_src）
     T_rel_0 = (
         R_src[0, 0] * T_ref_inv_0
         + R_src[0, 1] * T_ref_inv_1
@@ -172,31 +183,19 @@ def _compute_homography_cuda(
         return
 
     H = cuda.local.array((3, 3), dtype=np.float32)
-    H[0, 0] = R_rel[0, 0] + T_rel_0 * n_ref_0 / d
-    H[0, 1] = R_rel[0, 1] + T_rel_0 * n_ref_1 / d
-    H[0, 2] = R_rel[0, 2] + T_rel_0 * n_ref_2 / d
-    H[1, 0] = R_rel[1, 0] + T_rel_1 * n_ref_0 / d
-    H[1, 1] = R_rel[1, 1] + T_rel_1 * n_ref_1 / d
-    H[1, 2] = R_rel[1, 2] + T_rel_1 * n_ref_2 / d
-    H[2, 0] = R_rel[2, 0] + T_rel_2 * n_ref_0 / d
-    H[2, 1] = R_rel[2, 1] + T_rel_2 * n_ref_1 / d
-    H[2, 2] = R_rel[2, 2] + T_rel_2 * n_ref_2 / d
+    # dの逆数を事前計算して除算回数を削減
+    d_inv = 1.0 / d
+    H[0, 0] = R_rel[0, 0] + T_rel_0 * n_ref_0 * d_inv
+    H[0, 1] = R_rel[0, 1] + T_rel_0 * n_ref_1 * d_inv
+    H[0, 2] = R_rel[0, 2] + T_rel_0 * n_ref_2 * d_inv
+    H[1, 0] = R_rel[1, 0] + T_rel_1 * n_ref_0 * d_inv
+    H[1, 1] = R_rel[1, 1] + T_rel_1 * n_ref_1 * d_inv
+    H[1, 2] = R_rel[1, 2] + T_rel_1 * n_ref_2 * d_inv
+    H[2, 0] = R_rel[2, 0] + T_rel_2 * n_ref_0 * d_inv
+    H[2, 1] = R_rel[2, 1] + T_rel_2 * n_ref_1 * d_inv
+    H[2, 2] = R_rel[2, 2] + T_rel_2 * n_ref_2 * d_inv
 
-    K_inv = cuda.local.array((3, 3), dtype=np.float32)
-    fx = K_ref[0, 0]
-    fy = K_ref[1, 1]
-    cx = K_ref[0, 2]
-    cy = K_ref[1, 2]
-    # Inverse of intrinsics [[fx,0,cx],[0,fy,cy],[0,0,1]]
-    K_inv[0, 0] = 1.0 / fx
-    K_inv[0, 1] = 0.0
-    K_inv[0, 2] = -cx / fx
-    K_inv[1, 0] = 0.0
-    K_inv[1, 1] = 1.0 / fy
-    K_inv[1, 2] = -cy / fy
-    K_inv[2, 0] = 0.0
-    K_inv[2, 1] = 0.0
-    K_inv[2, 2] = 1.0
+    # K_invは事前計算済みなので、ここでは計算しない
 
     temp_mat = cuda.local.array((3, 3), dtype=np.float32)
     # temp_mat = K_src @ H
@@ -353,35 +352,48 @@ def _evaluate_cost_cuda(
     top_k_costs,
     adaptive_weight_sigma_color,
     zncc_epsilon,
+    R_ref_inv,  # 事前計算済みのR_ref_invを引数として受け取る
+    K_inv,  # 事前計算済みのK_invを引数として受け取る
 ):
     h, w = ref_image_gray.shape
     half = patch_size // 2
     if r - half < 0 or r + half + 1 > h or c - half < 0 or c + half + 1 > w:
         return 1.0
-    x_cam = (c - ref_pose_K[0, 2]) * depth / ref_pose_K[0, 0]
-    y_cam = (r - ref_pose_K[1, 2]) * depth / ref_pose_K[1, 1]
+
+    # カメラ座標の計算（K_invを使用して最適化）
+    fx_inv = K_inv[0, 0]
+    fy_inv = K_inv[1, 1]
+    cx = ref_pose_K[0, 2]
+    cy = ref_pose_K[1, 2]
+    x_cam = (c - cx) * depth * fx_inv
+    y_cam = (r - cy) * depth * fy_inv
     point_3d_cam_0 = x_cam
     point_3d_cam_1 = y_cam
     point_3d_cam_2 = depth
-    R_ref_inv = cuda.local.array((3, 3), dtype=np.float32)
-    for i in range(3):
-        for j in range(3):
-            R_ref_inv[i, j] = ref_pose_R[j, i]
+
+    # R_ref_invは事前計算済みなので、ここでは計算しない
+    # ワールド座標への変換
+    point_3d_cam_T_0 = point_3d_cam_0 - ref_pose_T[0]
+    point_3d_cam_T_1 = point_3d_cam_1 - ref_pose_T[1]
+    point_3d_cam_T_2 = point_3d_cam_2 - ref_pose_T[2]
+
     point_3d_world_0 = (
-        R_ref_inv[0, 0] * (point_3d_cam_0 - ref_pose_T[0])
-        + R_ref_inv[0, 1] * (point_3d_cam_1 - ref_pose_T[1])
-        + R_ref_inv[0, 2] * (point_3d_cam_2 - ref_pose_T[2])
+        R_ref_inv[0, 0] * point_3d_cam_T_0
+        + R_ref_inv[0, 1] * point_3d_cam_T_1
+        + R_ref_inv[0, 2] * point_3d_cam_T_2
     )
     point_3d_world_1 = (
-        R_ref_inv[1, 0] * (point_3d_cam_0 - ref_pose_T[0])
-        + R_ref_inv[1, 1] * (point_3d_cam_1 - ref_pose_T[1])
-        + R_ref_inv[1, 2] * (point_3d_cam_2 - ref_pose_T[2])
+        R_ref_inv[1, 0] * point_3d_cam_T_0
+        + R_ref_inv[1, 1] * point_3d_cam_T_1
+        + R_ref_inv[1, 2] * point_3d_cam_T_2
     )
     point_3d_world_2 = (
-        R_ref_inv[2, 0] * (point_3d_cam_0 - ref_pose_T[0])
-        + R_ref_inv[2, 1] * (point_3d_cam_1 - ref_pose_T[1])
-        + R_ref_inv[2, 2] * (point_3d_cam_2 - ref_pose_T[2])
+        R_ref_inv[2, 0] * point_3d_cam_T_0
+        + R_ref_inv[2, 1] * point_3d_cam_T_1
+        + R_ref_inv[2, 2] * point_3d_cam_T_2
     )
+
+    # 法線のワールド座標への変換
     normal_world_0 = (
         R_ref_inv[0, 0] * normal_0
         + R_ref_inv[0, 1] * normal_1
@@ -421,6 +433,8 @@ def _evaluate_cost_cuda(
             normal_world_0,
             normal_world_1,
             normal_world_2,
+            R_ref_inv,  # 事前計算済みのR_ref_invを渡す
+            K_inv,  # 事前計算済みのK_invを渡す
         )
         # Guard invalid H
         invalid_H = False
@@ -622,6 +636,8 @@ def _propagate_spatial_one_color_cuda(
     src_K,
     src_R,
     src_T,
+    R_ref_inv,  # 事前計算済みのR_ref_inv
+    K_inv,  # 事前計算済みのK_inv
 ):
     c, r = cuda.grid(2)
     h, w = depth_map.shape
@@ -666,6 +682,8 @@ def _propagate_spatial_one_color_cuda(
             top_k_costs,
             adaptive_weight_sigma_color,
             zncc_epsilon,
+            R_ref_inv,  # 事前計算済みのR_ref_invを渡す
+            K_inv,  # 事前計算済みのK_invを渡す
         )
 
         if new_cost < cost_map[r, c]:
@@ -693,6 +711,8 @@ def _initialize_cost_map_cuda(
     src_K,
     src_R,
     src_T,
+    R_ref_inv,  # 事前計算済みのR_ref_inv
+    K_inv,  # 事前計算済みのK_inv
 ):
     """
     GPUで全ピクセルに対して並列に初期コストを計算する
@@ -726,6 +746,8 @@ def _initialize_cost_map_cuda(
         top_k_costs,
         adaptive_weight_sigma_color,
         zncc_epsilon,
+        R_ref_inv,  # 事前計算済みのR_ref_invを渡す
+        K_inv,  # 事前計算済みのK_invを渡す
     )
     cost_map[r, c] = cost
 
@@ -752,6 +774,8 @@ def _random_search_cuda(
     adaptive_weight_sigma_color,
     depth_range_map,
     random_states,
+    R_ref_inv,  # 事前計算済みのR_ref_inv
+    K_inv,  # 事前計算済みのK_inv
 ):
     c, r = cuda.grid(2)
     h, w = depth_map.shape
@@ -804,6 +828,8 @@ def _random_search_cuda(
                 top_k_costs,
                 adaptive_weight_sigma_color,
                 zncc_epsilon,
+                R_ref_inv,  # 事前計算済みのR_ref_invを渡す
+                K_inv,  # 事前計算済みのK_invを渡す
             )
 
             if cost_depth_only < current_cost:
@@ -865,11 +891,13 @@ def _random_search_cuda(
     n_new_z = n_curr_z + rand_z
 
     # 正規化（単位ベクトルに戻す）
-    norm_new = math.sqrt(n_new_x**2 + n_new_y**2 + n_new_z**2)
-    if norm_new > 1e-6:
-        n_new_x /= norm_new
-        n_new_y /= norm_new
-        n_new_z /= norm_new
+    # 逆平方根を使用して除算を削減（精度は維持）
+    norm_sq = n_new_x * n_new_x + n_new_y * n_new_y + n_new_z * n_new_z
+    if norm_sq > 1e-12:  # 1e-6の2乗
+        norm_inv = 1.0 / math.sqrt(norm_sq)
+        n_new_x *= norm_inv
+        n_new_y *= norm_inv
+        n_new_z *= norm_inv
 
         # コスト計算（深度は固定または更新済みの値を使用）
         cost_normal_only = _evaluate_cost_cuda(
@@ -891,6 +919,8 @@ def _random_search_cuda(
             top_k_costs,
             adaptive_weight_sigma_color,
             zncc_epsilon,
+            R_ref_inv,  # 事前計算済みのR_ref_invを渡す
+            K_inv,  # 事前計算済みのK_invを渡す
         )
 
         # 法線単独でコストが下がれば更新
@@ -1475,6 +1505,21 @@ class DepthOptimization:
         blockspergrid_y = (h + threadsperblock[1] - 1) // threadsperblock[1]
         blockspergrid = (blockspergrid_x, blockspergrid_y)
 
+        # R_ref_invとK_invを事前計算（CPU側で一度だけ計算）
+        R_ref_inv = ref_pose_R.T.astype(np.float32)  # 転置行列
+        fx = ref_pose_K[0, 0]
+        fy = ref_pose_K[1, 1]
+        cx = ref_pose_K[0, 2]
+        cy = ref_pose_K[1, 2]
+        K_inv = np.array(
+            [
+                [1.0 / fx, 0.0, -cx / fx],
+                [0.0, 1.0 / fy, -cy / fy],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=np.float32,
+        )
+
         # GPUデバイスにデータを転送
         d_depth_map = cuda.to_device(depth_map.astype(np.float32))
         d_normal_map = cuda.to_device(normal_map.astype(np.float32))
@@ -1487,6 +1532,8 @@ class DepthOptimization:
         d_src_K = cuda.to_device(np.ascontiguousarray(src_K))
         d_src_R = cuda.to_device(np.ascontiguousarray(src_R))
         d_src_T = cuda.to_device(np.ascontiguousarray(src_T))
+        d_R_ref_inv = cuda.to_device(R_ref_inv)
+        d_K_inv = cuda.to_device(K_inv)
 
         # GPUで初期コストを計算
         _initialize_cost_map_cuda[blockspergrid, threadsperblock](
@@ -1505,6 +1552,8 @@ class DepthOptimization:
             d_src_K,
             d_src_R,
             d_src_T,
+            d_R_ref_inv,  # 事前計算済みのR_ref_invを渡す
+            d_K_inv,  # 事前計算済みのK_invを渡す
         )
         cuda.synchronize()
 
@@ -1808,6 +1857,21 @@ class DepthOptimization:
         blockspergrid_y = (h + threadsperblock[1] - 1) // threadsperblock[1]
         blockspergrid = (blockspergrid_x, blockspergrid_y)
 
+        # R_ref_invとK_invを事前計算（CPU側で一度だけ計算）
+        R_ref_inv = ref_pose_R.T.astype(np.float32)  # 転置行列
+        fx = ref_pose_K[0, 0]
+        fy = ref_pose_K[1, 1]
+        cx = ref_pose_K[0, 2]
+        cy = ref_pose_K[1, 2]
+        K_inv = np.array(
+            [
+                [1.0 / fx, 0.0, -cx / fx],
+                [0.0, 1.0 / fy, -cy / fy],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=np.float32,
+        )
+
         # Device arrays
         d_depth_map = cuda.to_device(depth_map)
         d_normal_map = cuda.to_device(normal_map)
@@ -1820,6 +1884,8 @@ class DepthOptimization:
         d_src_K = cuda.to_device(np.ascontiguousarray(src_K))
         d_src_R = cuda.to_device(np.ascontiguousarray(src_R))
         d_src_T = cuda.to_device(np.ascontiguousarray(src_T))
+        d_R_ref_inv = cuda.to_device(R_ref_inv)
+        d_K_inv = cuda.to_device(K_inv)
         d_depth_range_map = cuda.device_array_like(depth_map)
         rng_states = create_xoroshiro128p_states(
             threadsperblock[0] * threadsperblock[1] * blockspergrid_x * blockspergrid_y,
@@ -1865,6 +1931,8 @@ class DepthOptimization:
                     d_src_K,
                     d_src_R,
                     d_src_T,
+                    d_R_ref_inv,  # 事前計算済みのR_ref_invを渡す
+                    d_K_inv,  # 事前計算済みのK_invを渡す
                 )
 
             # Random Search
@@ -1894,6 +1962,8 @@ class DepthOptimization:
                 self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
                 d_depth_range_map,
                 rng_states,
+                d_R_ref_inv,  # 事前計算済みのR_ref_invを渡す
+                d_K_inv,  # 事前計算済みのK_invを渡す
             )
             cuda.synchronize()
 
