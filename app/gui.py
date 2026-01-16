@@ -593,26 +593,6 @@ class ConfigWidget(QWidget):
             QLabel("処理完了後に点群を3Dビューアで表示します。"),
         )
 
-        # VIZ_DEPTH_MIN
-        self.config_widgets["VIZ_DEPTH_MIN"] = QDoubleSpinBox()
-        self.config_widgets["VIZ_DEPTH_MIN"].setDecimals(1)
-        self.config_widgets["VIZ_DEPTH_MIN"].setRange(0.0, 1000.0)
-        self.config_widgets["VIZ_DEPTH_MIN"].setValue(
-            self._get_float_value("VIZ_DEPTH_MIN", 17.0)
-        )
-        layout.addRow(QLabel("可視化深度最小値:"), self.config_widgets["VIZ_DEPTH_MIN"])
-        layout.addRow(QLabel(""), QLabel("深度マップ可視化時の最小深度値。"))
-
-        # VIZ_DEPTH_MAX
-        self.config_widgets["VIZ_DEPTH_MAX"] = QDoubleSpinBox()
-        self.config_widgets["VIZ_DEPTH_MAX"].setDecimals(1)
-        self.config_widgets["VIZ_DEPTH_MAX"].setRange(0.0, 1000.0)
-        self.config_widgets["VIZ_DEPTH_MAX"].setValue(
-            self._get_float_value("VIZ_DEPTH_MAX", 36.0)
-        )
-        layout.addRow(QLabel("可視化深度最大値:"), self.config_widgets["VIZ_DEPTH_MAX"])
-        layout.addRow(QLabel(""), QLabel("深度マップ可視化時の最大深度値。"))
-
         # VIZ_CMAP
         self.config_widgets["VIZ_CMAP"] = QComboBox()
         cmap_options = [

@@ -169,8 +169,6 @@ _required_params = [
     "WINDOW_SIZE",
     "MIN_DISP",
     "NUM_DISP",
-    "VIZ_DEPTH_MIN",
-    "VIZ_DEPTH_MAX",
     "VIZ_CMAP",
 ]
 _missing_params = [p for p in _required_params if p not in _cfg or _cfg[p] is None]
@@ -184,6 +182,25 @@ g = globals()
 for k, v in _cfg.items():
     if v is not None:
         g[k] = v
+
+if "VIZ_DEPTH_MIN" not in _cfg or _cfg["VIZ_DEPTH_MIN"] is None:
+    VIZ_DEPTH_MIN = 0
+    g["VIZ_DEPTH_MIN"] = VIZ_DEPTH_MIN
+    import logging
+
+    logging.info(
+        f"VIZ_DEPTH_MIN auto-calculated from camera_height: {VIZ_DEPTH_MIN:.2f} (camera_height={camera_height:.2f} * 0.5)"
+    )
+
+if "VIZ_DEPTH_MAX" not in _cfg or _cfg["VIZ_DEPTH_MAX"] is None:
+    # カメラ高度の1.0倍を最大値とする
+    VIZ_DEPTH_MAX = camera_height * 1.0
+    g["VIZ_DEPTH_MAX"] = VIZ_DEPTH_MAX
+    import logging
+
+    logging.info(
+        f"VIZ_DEPTH_MAX auto-calculated from camera_height: {VIZ_DEPTH_MAX:.2f} (camera_height={camera_height:.2f} * 1.0)"
+    )
 
 # VIZ_CMAPが設定された場合、ログに出力
 if "VIZ_CMAP" in _cfg:
