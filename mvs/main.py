@@ -345,7 +345,7 @@ def run():
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
     if not all_pairs_data:
         logging.error(
-            "No valid image pairs found. Check images under images/image_0 & image_1 and the txt/drone_image_log.txt."
+            "No valid image pairs found. Check images under images/image_0 & image_1 and the txt/camera_params.csv."
         )
         return 1
 
