@@ -5,6 +5,7 @@ import csv
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import cv2
@@ -240,6 +241,202 @@ def _compute_normals_from_depth(depth_map: np.ndarray, K: np.ndarray) -> np.ndar
     return _initialize_normals_from_depth_jit(
         depth_map.astype(np.float32), K.astype(np.float32)
     )
+
+
+def _process_single_view_cpu(
+    idx: int,
+    all_pairs_data: dict,
+    loaded_images: dict,
+    image_processor,
+    depth_estimator,
+    depth_optimization,
+    _neighbors_for_ref,
+    _get_neighbor_view,
+    _log_selected_neighbors,
+    _compute_normals_from_depth,
+):
+    """
+    単一ビューのCPU処理部分を実行する（並列化可能）。
+
+    この関数は、データ読み込み、視差推定、深度変換、光度フィルタリングまでを実行し、
+    GPU処理（PatchMatch）に必要なデータを準備する。
+
+    Returns:
+        dict: 処理結果を含む辞書。キーは以下の通り:
+            - 'idx': 画像インデックス
+            - 'success': 処理が成功したかどうか
+            - 'initial_depth': 初期深度マップ
+            - 'd_cost': 深度誤差コスト
+            - 'li_rgb': 左画像（RGB）
+            - 'ref_pose': 参照ビューのポーズ
+            - 'neighbor_views_data': 近傍ビューのデータ
+            - 'gt_depth': 真値深度（存在する場合）
+            - 'filename_stem': ファイル名（拡張子なし）
+            - 'save_each_depth_dir': 深度マップ保存ディレクトリ
+            - 'save_each_normal_dir': 法線マップ保存ディレクトリ
+            - 'time_csv_path': time.csvのパス
+            - 'view_metrics': 評価メトリクス
+            - 'error': エラーメッセージ（失敗した場合）
+    """
+    result = {
+        "idx": idx,
+        "success": False,
+        "initial_depth": None,
+        "d_cost": None,
+        "li_rgb": None,
+        "ref_pose": None,
+        "neighbor_views_data": None,
+        "gt_depth": None,
+        "filename_stem": None,
+        "save_each_depth_dir": None,
+        "save_each_normal_dir": None,
+        "time_csv_path": None,
+        "view_metrics": {"image_index": idx},
+        "error": None,
+    }
+
+    try:
+        if idx not in loaded_images:
+            result["error"] = f"Image for index {idx} could not be loaded"
+            return result
+
+        if idx not in all_pairs_data:
+            result["error"] = f"Pair data for index {idx} not found"
+            return result
+
+        _, T_pos, left_path, right_path, R_mat = all_pairs_data[idx]
+        filename_stem = Path(left_path).stem
+
+        # ディレクトリの準備
+        save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, filename_stem)
+        os.makedirs(save_each_depth_dir, exist_ok=True)
+        clear_folder(save_each_depth_dir)
+
+        save_each_normal_dir = os.path.join(config.NORMAL_IMAGE_DIR, filename_stem)
+        os.makedirs(save_each_normal_dir, exist_ok=True)
+        clear_folder(save_each_normal_dir)
+
+        # time.csvを初期化
+        csv_subdir = os.path.join(config.CSV_DIR, filename_stem)
+        os.makedirs(csv_subdir, exist_ok=True)
+        time_csv_path = os.path.join(csv_subdir, "time.csv")
+        if os.path.exists(time_csv_path):
+            os.remove(time_csv_path)
+        initialize_csv(time_csv_path, ["stage", "time"])
+
+        # Ground Truth Depthの読み込み
+        gt_depth_path = os.path.join(
+            config.LABEL_DEPTH_IMAGE_DIR, f"depth_{idx:06d}.exr"
+        )
+        if not os.path.exists(gt_depth_path):
+            alt_path = os.path.join(config.LABEL_DEPTH_IMAGE_DIR, f"{idx:06d}.exr")
+            gt_depth_path = alt_path if os.path.exists(alt_path) else ""
+
+        gt_depth = None
+        if gt_depth_path and os.path.exists(gt_depth_path):
+            gt_depth = read_exr_depth(gt_depth_path)
+            if gt_depth is not None:
+                h, w, _ = loaded_images[idx].shape
+                if gt_depth.shape != (h, w):
+                    gt_depth = cv2.resize(
+                        gt_depth, (w, h), interpolation=cv2.INTER_NEAREST
+                    )
+                if (
+                    bool(getattr(config, "DEBUG_SAVE_GT_DEPTH_MAPS", True))
+                    and config.DEBUG_SAVE_DEPTH_MAPS
+                ):
+                    gt_png_path = os.path.join(
+                        save_each_depth_dir, f"gt_depth_{idx:04d}.png"
+                    )
+                    save_depth_map_as_image(gt_depth, gt_png_path)
+
+        # 画像の読み込み
+        li_bgr = cv2.imread(left_path)
+        ri_bgr = cv2.imread(right_path)
+        if li_bgr is None or ri_bgr is None:
+            result["error"] = f"Failed to load images for index {idx}"
+            return result
+
+        li_rgb = loaded_images[idx]
+        li_gray = cv2.cvtColor(li_bgr, cv2.COLOR_BGR2GRAY)
+        ri_gray = cv2.cvtColor(ri_bgr, cv2.COLOR_BGR2GRAY)
+
+        # 視差画像の生成
+        disp_start = time.time()
+        disp = image_processor.create_disparity(li_gray, ri_gray)
+        disp_elapsed = time.time() - disp_start
+
+        # 視差から深度への変換
+        depth_conv_start = time.time()
+        initial_depth = depth_estimator.disparity_to_depth(disp)
+        depth_conv_elapsed = time.time() - depth_conv_start
+
+        # 深度誤差コストを計算
+        d_cost = depth_estimator.compute_depth_error_cost(
+            disp, initial_depth, config.WINDOW_SIZE
+        )
+
+        # 境界領域や無効な深度をNaNでマスク
+        valid_mask = np.isfinite(initial_depth)
+        bmask = valid_mask & (
+            ~np.roll(valid_mask, 10, 0)
+            | ~np.roll(valid_mask, -10, 0)
+            | ~np.roll(valid_mask, 10, 1)
+            | ~np.roll(valid_mask, -10, 1)
+        )
+        initial_depth[bmask] = np.nan
+        d_cost[bmask] = np.nan
+        d_cost[np.isnan(d_cost)] = 1.0
+
+        # 初期深度を保存
+        if config.DEBUG_SAVE_DEPTH_MAPS:
+            save_initial_depth_path = os.path.join(
+                save_each_depth_dir, f"depth_iter_00.png"
+            )
+            save_depth_map_as_image(initial_depth, save_initial_depth_path)
+        if getattr(config, "DEBUG_SAVE_NORMAL_MAPS", False):
+            init_normals = _compute_normals_from_depth(initial_depth, config.K)
+            save_initial_normal_path = os.path.join(
+                save_each_normal_dir, f"normal_iter_00.png"
+            )
+            save_normal_map_as_image(init_normals, save_initial_normal_path)
+
+        # 視差マップを保存
+        save_disparity_map_with_colorbar(
+            disp, os.path.join(config.DISPARITY_IMAGE_DIR, f"disp_{idx:04d}.png")
+        )
+
+        # 近傍ビューのデータを準備
+        neighbor_views_data = []
+        neighbor_frames = _neighbors_for_ref(idx)
+        _log_selected_neighbors(idx, neighbor_frames)
+        for fr in neighbor_frames:
+            nv = _get_neighbor_view(idx, fr)
+            if nv is not None:
+                neighbor_views_data.append(nv)
+
+        # 結果を保存
+        result["success"] = True
+        result["initial_depth"] = initial_depth
+        result["d_cost"] = d_cost
+        result["li_rgb"] = li_rgb
+        result["ref_pose"] = {"R": R_mat, "T": T_pos, "K": config.K}
+        result["neighbor_views_data"] = neighbor_views_data
+        result["gt_depth"] = gt_depth
+        result["filename_stem"] = filename_stem
+        result["save_each_depth_dir"] = save_each_depth_dir
+        result["save_each_normal_dir"] = save_each_normal_dir
+        result["time_csv_path"] = time_csv_path
+        result["disp_elapsed"] = disp_elapsed
+        result["depth_conv_elapsed"] = depth_conv_elapsed
+
+    except Exception as e:
+        result["error"] = str(e)
+        logging.error(
+            f"Error in CPU processing for image pair {idx}: {e}", exc_info=True
+        )
+
+    return result
 
 
 def _export_gt_depth_pngs_per_view(
@@ -568,160 +765,83 @@ def run():
         "pointcloud_filtering": 0.0,  # 点群のフィルタリング
     }
 
+    # マルチスレッド並列化の設定
+    max_workers = getattr(config, "MAX_WORKERS", 4)
+    logging.info(f"Using ThreadPoolExecutor with max_workers={max_workers}")
+
+    # CPU処理を並列実行（データ読み込み、視差推定、深度変換まで）
+    cpu_results = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 各ビューのCPU処理を並列実行
+        future_to_idx = {
+            executor.submit(
+                _process_single_view_cpu,
+                idx,
+                all_pairs_data,
+                loaded_images,
+                image_processor,
+                depth_estimator,
+                depth_optimization,
+                _neighbors_for_ref,
+                _get_neighbor_view,
+                _log_selected_neighbors,
+                _compute_normals_from_depth,
+            ): idx
+            for idx in target_indices
+        }
+
+        # 完了したタスクから順に処理
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                result = future.result()
+                cpu_results[idx] = result
+            except Exception as e:
+                logging.error(
+                    f"Error in CPU processing for image pair {idx}: {e}", exc_info=True
+                )
+                cpu_results[idx] = {
+                    "idx": idx,
+                    "success": False,
+                    "error": str(e),
+                }
+
+    # GPU処理（PatchMatch）と光度フィルタリングは順次実行（GPUリソースの競合を避けるため）
     for idx in target_indices:
-        if idx not in loaded_images:
-            logging.warning(f"Image for index {idx} could not be loaded. Skipping.")
+        if idx not in cpu_results:
             continue
 
-        if idx not in all_pairs_data:
-            logging.warning(
-                f"Pair data for index {idx} not found (skipped/missing). Skipping."
-            )
+        result = cpu_results[idx]
+        if not result.get("success", False):
+            if result.get("error"):
+                logging.warning(
+                    f"Skipping image pair {idx} due to CPU processing error: {result['error']}"
+                )
             continue
-        _, T_pos, left_path, right_path, R_mat = all_pairs_data[idx]
 
-        # ファイル名（拡張子なし）を取得してフォルダ名に使用
-        filename_stem = Path(left_path).stem
+        filename_stem = result["filename_stem"]
+        initial_depth = result["initial_depth"]
+        d_cost = result["d_cost"]
+        li_rgb = result["li_rgb"]
+        ref_pose = result["ref_pose"]
+        neighbor_views_data = result["neighbor_views_data"]
+        gt_depth = result["gt_depth"]
+        save_each_depth_dir = result["save_each_depth_dir"]
+        save_each_normal_dir = result["save_each_normal_dir"]
+        time_csv_path = result["time_csv_path"]
+        view_metrics = result["view_metrics"]
 
-        # 処理開始のログ（区切り線付き）
+        # 処理開始のログ
         logging.info("=" * 80)
         logging.info(f"処理開始: 画像ペア {idx} (ファイル: {filename_stem})")
-        logging.info(f"  左画像: {left_path}")
-        logging.info(f"  右画像: {right_path}")
         logging.info("=" * 80)
 
-        view_metrics = {"image_index": idx}
-        save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, filename_stem)
-        os.makedirs(save_each_depth_dir, exist_ok=True)
-        clear_folder(save_each_depth_dir)
-
-        save_each_normal_dir = os.path.join(config.NORMAL_IMAGE_DIR, filename_stem)
-        os.makedirs(save_each_normal_dir, exist_ok=True)
-        clear_folder(save_each_normal_dir)
-
-        # time.csvを初期化
-        csv_subdir = os.path.join(config.CSV_DIR, filename_stem)
-        os.makedirs(csv_subdir, exist_ok=True)
-        time_csv_path = os.path.join(csv_subdir, "time.csv")
-        if os.path.exists(time_csv_path):
-            os.remove(time_csv_path)
-        initialize_csv(time_csv_path, ["stage", "time"])
-        logging.info(f"Initialized time.csv at {time_csv_path}")
-
-        # --- Ground Truth Depthの読み込み ---
-        # depth_######.exr と ######.exr の両方に対応
-        gt_depth_path = os.path.join(
-            config.LABEL_DEPTH_IMAGE_DIR, f"depth_{idx:06d}.exr"
-        )
-        if not os.path.exists(gt_depth_path):
-            alt_path = os.path.join(config.LABEL_DEPTH_IMAGE_DIR, f"{idx:06d}.exr")
-            gt_depth_path = alt_path if os.path.exists(alt_path) else ""
-
-        if not gt_depth_path or not os.path.exists(gt_depth_path):
-            logging.warning(
-                f"Ground truth depth file not found for index {idx}, skipping evaluation for this view."
-            )
-            gt_depth = None
-        else:
-            gt_depth = read_exr_depth(gt_depth_path)
-            if gt_depth is not None:
-                h, w, _ = loaded_images[idx].shape
-                if gt_depth.shape != (h, w):
-                    gt_depth = cv2.resize(
-                        gt_depth, (w, h), interpolation=cv2.INTER_NEAREST
-                    )
-                # GT depthのPNG保存（clear_folderの後に保存するため、ここで実行）
-                if (
-                    bool(getattr(config, "DEBUG_SAVE_GT_DEPTH_MAPS", True))
-                    and config.DEBUG_SAVE_DEPTH_MAPS
-                ):
-                    gt_png_path = os.path.join(
-                        save_each_depth_dir, f"gt_depth_{idx:04d}.png"
-                    )
-                    save_depth_map_as_image(gt_depth, gt_png_path)
-                    logging.info(f"Saved GT depth map to {gt_png_path}")
+        # 初期深度の有効ピクセル数をログ出力
+        valid_pixels_initial = np.sum(np.isfinite(initial_depth))
+        logging.info(f"[Initial Depth] Valid pixels: {valid_pixels_initial}")
 
         try:
-            li_bgr = cv2.imread(left_path)
-            ri_bgr = cv2.imread(right_path)
-            if li_bgr is None or ri_bgr is None:
-                continue
-
-            li_rgb = loaded_images[idx]
-            li_gray = cv2.cvtColor(li_bgr, cv2.COLOR_BGR2GRAY)
-            ri_gray = cv2.cvtColor(ri_bgr, cv2.COLOR_BGR2GRAY)
-
-            # 初期深度マップと深度誤差コストを計算
-            logging.info("-" * 80)
-            logging.info(f"[{filename_stem}] ステップ1: 初期深度マップの計算")
-            logging.info("-" * 80)
-            start_time_initial_depth = time.time()
-            # 視差画像の生成
-            disp_start = time.time()
-            disp = image_processor.create_disparity(li_gray, ri_gray)
-            disp_elapsed = time.time() - disp_start
-            total_times["disparity_generation"] += disp_elapsed
-            # 視差から深度への変換
-            depth_conv_start = time.time()
-            initial_depth = depth_estimator.disparity_to_depth(disp)
-            depth_conv_elapsed = time.time() - depth_conv_start
-            total_times["disparity_to_depth"] += depth_conv_elapsed
-            end_time_initial_depth = time.time()
-            elapsed_initial = end_time_initial_depth - start_time_initial_depth
-            logging.info(
-                f"[{filename_stem}] 初期深度計算完了 (経過時間: {elapsed_initial:.2f}秒)"
-            )
-
-            save_disparity_map_with_colorbar(
-                disp, os.path.join(config.DISPARITY_IMAGE_DIR, f"disp_{idx:04d}.png")
-            )
-
-            # 深度誤差コストを計算
-            d_cost = depth_estimator.compute_depth_error_cost(
-                disp, initial_depth, config.WINDOW_SIZE
-            )
-
-            # 境界領域や無効な深度をNaNでマスク
-            valid_mask = np.isfinite(initial_depth)
-            bmask = valid_mask & (
-                ~np.roll(valid_mask, 10, 0)
-                | ~np.roll(valid_mask, -10, 0)
-                | ~np.roll(valid_mask, 10, 1)
-                | ~np.roll(valid_mask, -10, 1)
-            )
-            initial_depth[bmask] = np.nan
-            d_cost[bmask] = np.nan
-            d_cost[np.isnan(d_cost)] = 1.0
-
-            # 初期深度を保存
-            if config.DEBUG_SAVE_DEPTH_MAPS:
-                save_initial_depth_path = os.path.join(
-                    save_each_depth_dir, f"depth_iter_00.png"
-                )
-                logging.info(f"Saving initial depth map to {save_initial_depth_path}")
-                save_depth_map_as_image(initial_depth, save_initial_depth_path)
-            if getattr(config, "DEBUG_SAVE_NORMAL_MAPS", False):
-                init_normals = _compute_normals_from_depth(initial_depth, config.K)
-                save_initial_normal_path = os.path.join(
-                    save_each_normal_dir, f"normal_iter_00.png"
-                )
-                logging.info(f"Saving initial normal map to {save_initial_normal_path}")
-                save_normal_map_as_image(init_normals, save_initial_normal_path)
-
-            # 初期深度の有効ピクセル数をログ出力
-            valid_pixels_initial = np.sum(np.isfinite(initial_depth))
-            logging.info(f"[Initial Depth] Valid pixels: {valid_pixels_initial}")
-
-            # PatchMatchによる深度マップの最適化
-            neighbor_views_data = []
-            neighbor_frames = _neighbors_for_ref(idx)
-            _log_selected_neighbors(idx, neighbor_frames)
-            for fr in neighbor_frames:
-                nv = _get_neighbor_view(idx, fr)
-                if nv is not None:
-                    neighbor_views_data.append(nv)
-
-            # PatchMatchを実行（全体計測とイテレーション内計測は関数側で行う）
+            # PatchMatchを実行（GPU処理は順次実行）
             logging.info("-" * 80)
             logging.info(f"[{filename_stem}] ステップ2: PatchMatch MVS深度最適化")
             logging.info("-" * 80)
@@ -734,13 +854,15 @@ def run():
                 initial_depth=initial_depth,
                 initial_depth_error=d_cost,
                 ref_image=li_rgb,
-                ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
+                ref_pose=ref_pose,
                 neighbor_views_data=neighbor_views_data,
                 gt_depth=gt_depth,
                 ref_idx=idx,
                 filename_stem=filename_stem,
             )
             refine_elapsed = time.time() - refine_start
+            total_times["disparity_generation"] += result.get("disp_elapsed", 0.0)
+            total_times["disparity_to_depth"] += result.get("depth_conv_elapsed", 0.0)
             total_times["depth_refinement"] += refine_elapsed
             logging.info(
                 f"[{filename_stem}] PatchMatch最適化完了 (経過時間: {refine_elapsed:.2f}秒)"
@@ -772,7 +894,7 @@ def run():
                 depth_optimization.filter_depth_map_by_photometric_consistency(
                     optimized_depth,
                     li_rgb,
-                    {"R": R_mat, "T": T_pos, "K": config.K},
+                    ref_pose,
                     neighbor_views_data,
                 )
             )
@@ -782,9 +904,7 @@ def run():
                 f"[{filename_stem}] 光度フィルタリング完了 (経過時間: {photo_elapsed:.2f}秒)"
             )
             append_to_csv(time_csv_path, ["photometric", f"{photo_elapsed:.6f}"])
-            logging.debug(
-                f"[{filename_stem}] 光度フィルタリング時間をtime.csvに保存しました: {time_csv_path}"
-            )
+
             if getattr(config, "DEBUG_SAVE_NORMAL_MAPS", False):
                 normals_photo = _compute_normals_from_depth(
                     photometrically_filtered_depth, config.K
@@ -819,8 +939,8 @@ def run():
 
             all_optimized_depths[idx] = photometrically_filtered_depth
             if optimized_normal is not None:
-                all_optimized_normals[idx] = optimized_normal  # 最適化された法線を保存
-            all_poses[idx] = {"R": R_mat, "T": T_pos, "K": config.K}
+                all_optimized_normals[idx] = optimized_normal
+            all_poses[idx] = ref_pose
             all_images[idx] = li_rgb
             if gt_depth is not None:
                 all_gt_depths[idx] = gt_depth
@@ -840,118 +960,10 @@ def run():
             logging.info("=" * 80)
             logging.info("")
 
-            # --- 幾何学的一貫性フィルタリングは全画像処理後に実行（コメントアウト） ---
-            # try:
-            #     geometrically_filtered_depth = (
-            #         depth_optimization.filter_depth_map_by_geometric_consistency(
-            #             ref_depth_map=photometrically_filtered_depth,
-            #             ref_pose={"R": R_mat, "T": T_pos, "K": config.K},
-            #             neighbor_views_data=neighbor_views_data,
-            #             all_optimized_depths=all_optimized_depths,
-            #         )
-            #     )
-            #     if gt_depth is not None:
-            #         valid_pixels_after_geo = np.sum(
-            #             np.isfinite(geometrically_filtered_depth)
-            #         )
-            #         pixels_filtered_geo = (
-            #             valid_pixels_after_photo - valid_pixels_after_geo
-            #         )
-            #         metrics = compute_depth_metrics(
-            #             geometrically_filtered_depth, gt_depth
-            #         )
-            #         logging.info(
-            #             f"  [Geometric Filtered] Valid pixels: {valid_pixels_after_geo} "
-            #             f"({pixels_filtered_geo} filtered, {pixels_filtered_geo/valid_pixels_after_photo*100:.2f}%), "
-            #             f"MAE: {metrics['mae']:.4f}, "
-            #             f"AbsRel: {metrics['abs_rel']:.4f}, SqRel: {metrics['sq_rel']:.4f}, "
-            #             f"RMSE: {metrics['rmse']:.4f}, RMSElog: {metrics['rmse_log']:.4f}, "
-            #             f"d1: {metrics['delta1']:.4f}, d2: {metrics['delta2']:.4f}, "
-            #             f"d3: {metrics['delta3']:.4f}"
-            #         )
-            #         save_error_map_as_image(
-            #             geometrically_filtered_depth,
-            #             gt_depth,
-            #             os.path.join(save_each_depth_dir, "error_map_geometric.png"),
-            #         )
-            #         append_to_csv(
-            #             results_csv_path,
-            #             [
-            #                 idx,
-            #                 "geometric",
-            #                 metrics["mae"],
-            #                 metrics["abs_rel"],
-            #                 metrics["sq_rel"],
-            #                 metrics["rmse"],
-            #                 metrics["rmse_log"],
-            #                 metrics["delta1"],
-            #                 metrics["delta2"],
-            #                 metrics["delta3"],
-            #             ],
-            #         )
-            #     if config.DEBUG_SAVE_DEPTH_MAPS:
-            #         save_geometrically_filtered_depth_path = os.path.join(
-            #             save_each_depth_dir, f"geometrically_filtered_depth.png"
-            #         )
-            #         logging.info(
-            #             f"Saving geometrically filtered depth map to {save_geometrically_filtered_depth_path}"
-            #         )
-            #         save_depth_map_as_image(
-            #             geometrically_filtered_depth,
-            #             save_geometrically_filtered_depth_path,
-            #         )
-            #     if getattr(config, "DEBUG_SAVE_NORMAL_MAPS", False):
-            #         normals_geo = _compute_normals_from_depth(
-            #             geometrically_filtered_depth, config.K
-            #         )
-            #         save_normal_map_as_image(
-            #             normals_geo,
-            #             os.path.join(
-            #                 save_each_normal_dir, "geometrically_filtered_normal.png"
-            #             ),
-            #         )
-            # except Exception as e:
-            #     logging.warning(
-            #         f"Geometric consistency filtering skipped for {idx}: {e}"
-            #     )
-            #     geometrically_filtered_depth = photometrically_filtered_depth
-
-            # --- 点群への変換と統合は全画像処理後に実行（コメントアウト） ---
-            # # 透視投影深度マップから直接ワールド座標の点群に変換（オルソ投影をスキップ）
-            # world_points, world_colors = depth_estimator.depth_to_world(
-            #     geometrically_filtered_depth, li_rgb, config.K, R_mat, T_pos
-            # )
-            # # オルソ投影を経由する旧方式（コメントアウト）
-            # # (
-            # #     ortho_depth_map,
-            # #     ortho_color_map,
-            # # ) = depth_estimator.to_orthographic_projection(
-            # #     geometrically_filtered_depth, li_rgb, config.camera_height
-            # # )
-            # # if config.DEBUG_SAVE_DEPTH_MAPS:
-            # #     save_ortho_depth_path = os.path.join(
-            # #         save_each_depth_dir, f"ortho_depth.png"
-            # #     )
-            # #     logging.info(f"Saving ortho depth map to {save_ortho_depth_path}")
-            # #     save_depth_map_as_image(ortho_depth_map, save_ortho_depth_path)
-            # # world_points, world_colors = depth_estimator.ortho_depth_to_world(
-            # #     ortho_depth_map, ortho_color_map, R_mat, T_pos, config.pixel_size
-            # # )
-            # merged_pts_list.append(world_points)
-            # merged_cols_list.append(world_colors)
-
-            #             os.path.join(
-            #                 config.DEPTH_IMAGE_DIR,
-            #                 f"depth_{idx:04d}",
-            #                 "fused_ortho_running.png",
-            #             ),
-            #             swap_axes=True,
-            #             flip_y=True,
-            #             flip_x=True,
-            #         )
-
         except Exception as e:
-            logging.error(f"Error in Step 1 for image pair {idx}: {e}", exc_info=True)
+            logging.error(
+                f"Error in GPU processing for image pair {idx}: {e}", exc_info=True
+            )
 
         evaluation_results.append(view_metrics)
 
