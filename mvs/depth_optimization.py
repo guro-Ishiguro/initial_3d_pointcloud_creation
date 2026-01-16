@@ -759,21 +759,65 @@ def _random_search_cuda(
 
     if r >= h or c >= w:
         return
+
+    # 現在の状態を取得
     d_current = depth_map[r, c]
+    n_current = normal_map[r, c]
+    current_cost = cost_map[r, c]
+
     if math.isnan(d_current) or math.isinf(d_current) or d_current <= 0:
         return
-    d_range = depth_range_map[r, c]
-    if math.isnan(d_range) or math.isinf(d_range) or d_range <= 0:
-        return
-    d_new = (
-        d_current
-        + (cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) * 2 - 1)
-        * d_range
-    )
-    if d_new <= 0:
-        return
 
-    n_current = normal_map[r, c]
+    # -----------------------------------------------------------------
+    # フェーズ1: 深度のみ更新 (Depth Refinement)
+    # 法線は固定して、深度だけを動かしてみる
+    # -----------------------------------------------------------------
+    d_range = depth_range_map[r, c]
+    if not (math.isnan(d_range) or math.isinf(d_range) or d_range <= 0):
+        d_new = (
+            d_current
+            + (
+                cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) * 2
+                - 1
+            )
+            * d_range
+        )
+
+        if d_new > 0:
+            # 法線はそのまま使用
+            cost_depth_only = _evaluate_cost_cuda(
+                r,
+                c,
+                d_new,
+                n_current[0],
+                n_current[1],
+                n_current[2],
+                patch_size,
+                ref_image_gray,
+                ref_pose_K,
+                ref_pose_R,
+                ref_pose_T,
+                src_images_gray,
+                src_K,
+                src_R,
+                src_T,
+                top_k_costs,
+                adaptive_weight_sigma_color,
+                zncc_epsilon,
+            )
+
+            if cost_depth_only < current_cost:
+                depth_map[r, c] = d_new
+                current_cost = cost_depth_only
+                d_current = d_new  # 次の法線探索のために現在値を更新
+                cost_map[r, c] = current_cost  # グローバルメモリも更新
+
+    # -----------------------------------------------------------------
+    # フェーズ2: 法線のみ更新 (Normal Refinement)
+    # 深度は固定(またはフェーズ1で更新された値)して、法線だけを動かす
+    # -----------------------------------------------------------------
+
+    # 探索角度の減衰 (イテレーションが進むにつれ狭くする)
     angle_rad = (
         (
             (
@@ -787,6 +831,7 @@ def _random_search_cuda(
         / 180.0
     )
 
+    # ランダムな回転軸の生成
     rand_axis_x = cuda.random.xoroshiro128p_normal_float32(random_states, thread_id)
     rand_axis_y = cuda.random.xoroshiro128p_normal_float32(random_states, thread_id)
     rand_axis_z = cuda.random.xoroshiro128p_normal_float32(random_states, thread_id)
@@ -795,84 +840,74 @@ def _random_search_cuda(
     rand_axis_y /= norm
     rand_axis_z /= norm
 
+    # ロドリゲスの回転公式 (現在の法線を回転)
+    # n_currentをローカル変数にコピー
+    nx = n_current[0]
+    ny = n_current[1]
+    nz = n_current[2]
+
+    # 無効な法線の場合はリセット
+    if (
+        math.isnan(nx)
+        or math.isinf(nx)
+        or math.isnan(ny)
+        or math.isinf(ny)
+        or math.isnan(nz)
+        or math.isinf(nz)
+    ):
+        nx = 0.0
+        ny = 0.0
+        nz = 1.0
+
     cos_a = math.cos(angle_rad)
     sin_a = math.sin(angle_rad)
-    one_minus_cos_a = 1.0 - cos_a
+    one_minus_cos = 1.0 - cos_a
 
-    dot_product = (
-        rand_axis_x * n_current[0]
-        + rand_axis_y * n_current[1]
-        + rand_axis_z * n_current[2]
-    )
+    dot = rand_axis_x * nx + rand_axis_y * ny + rand_axis_z * nz
 
-    cross_product_x = rand_axis_y * n_current[2] - rand_axis_z * n_current[1]
-    cross_product_y = rand_axis_z * n_current[0] - rand_axis_x * n_current[2]
-    cross_product_z = rand_axis_x * n_current[1] - rand_axis_y * n_current[0]
+    cross_x = rand_axis_y * nz - rand_axis_z * ny
+    cross_y = rand_axis_z * nx - rand_axis_x * nz
+    cross_z = rand_axis_x * ny - rand_axis_y * nx
 
-    n_new_x = (
-        n_current[0] * cos_a
-        + cross_product_x * sin_a
-        + rand_axis_x * dot_product * one_minus_cos_a
-    )
-    n_new_y = (
-        n_current[1] * cos_a
-        + cross_product_y * sin_a
-        + rand_axis_y * dot_product * one_minus_cos_a
-    )
-    n_new_z = (
-        n_current[2] * cos_a
-        + cross_product_z * sin_a
-        + rand_axis_z * dot_product * one_minus_cos_a
-    )
+    n_new_x = nx * cos_a + cross_x * sin_a + rand_axis_x * dot * one_minus_cos
+    n_new_y = ny * cos_a + cross_y * sin_a + rand_axis_y * dot * one_minus_cos
+    n_new_z = nz * cos_a + cross_z * sin_a + rand_axis_z * dot * one_minus_cos
 
-    # If current normal is invalid, start from a random unit vector around Z
-    if (
-        math.isnan(n_current[0])
-        or math.isinf(n_current[0])
-        or math.isnan(n_current[1])
-        or math.isinf(n_current[1])
-        or math.isnan(n_current[2])
-        or math.isinf(n_current[2])
-    ):
-        n_current[0] = 0.0
-        n_current[1] = 0.0
-        n_current[2] = 1.0
-    norm_new = (n_new_x**2 + n_new_y**2 + n_new_z**2) ** 0.5
-    n_new_x /= norm_new
-    n_new_y /= norm_new
-    n_new_z /= norm_new
+    # 正規化
+    n_norm = math.sqrt(n_new_x**2 + n_new_y**2 + n_new_z**2)
+    if n_norm > 1e-6:
+        n_new_x /= n_norm
+        n_new_y /= n_norm
+        n_new_z /= n_norm
 
-    n_new = cuda.local.array(3, dtype=np.float32)
-    n_new[0] = n_new_x
-    n_new[1] = n_new_y
-    n_new[2] = n_new_z
+        # コスト計算（深度はd_currentを使用）
+        cost_normal_only = _evaluate_cost_cuda(
+            r,
+            c,
+            d_current,
+            n_new_x,
+            n_new_y,
+            n_new_z,
+            patch_size,
+            ref_image_gray,
+            ref_pose_K,
+            ref_pose_R,
+            ref_pose_T,
+            src_images_gray,
+            src_K,
+            src_R,
+            src_T,
+            top_k_costs,
+            adaptive_weight_sigma_color,
+            zncc_epsilon,
+        )
 
-    new_cost = _evaluate_cost_cuda(
-        r,
-        c,
-        d_new,
-        n_new[0],
-        n_new[1],
-        n_new[2],
-        patch_size,
-        ref_image_gray,
-        ref_pose_K,
-        ref_pose_R,
-        ref_pose_T,
-        src_images_gray,
-        src_K,
-        src_R,
-        src_T,
-        top_k_costs,
-        adaptive_weight_sigma_color,
-        zncc_epsilon,
-    )
-    if new_cost < cost_map[r, c]:
-        depth_map[r, c] = d_new
-        normal_map[r, c, 0] = n_new[0]
-        normal_map[r, c, 1] = n_new[1]
-        normal_map[r, c, 2] = n_new[2]
-        cost_map[r, c] = new_cost
+        if cost_normal_only < current_cost:
+            # 法線のみ更新
+            normal_map[r, c, 0] = n_new_x
+            normal_map[r, c, 1] = n_new_y
+            normal_map[r, c, 2] = n_new_z
+            cost_map[r, c] = cost_normal_only
 
 
 @njit(fastmath=True)
