@@ -815,76 +815,67 @@ def _random_search_cuda(
     # -----------------------------------------------------------------
     # フェーズ2: 法線のみ更新 (Normal Refinement)
     # 深度は固定(またはフェーズ1で更新された値)して、法線だけを動かす
+    # 加法ノイズ方式を使用（ロドリゲスの回転公式より高速でロバスト）
     # -----------------------------------------------------------------
 
-    # 探索角度の減衰 (イテレーションが進むにつれ狭くする)
-    angle_rad = (
-        (
-            (
-                cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) * 2
-                - 1
-            )
-            * normal_search_angle
-            * (decay_rate**iteration)
-        )
-        * math.pi
-        / 180.0
-    )
-
-    # ランダムな回転軸の生成
-    rand_axis_x = cuda.random.xoroshiro128p_normal_float32(random_states, thread_id)
-    rand_axis_y = cuda.random.xoroshiro128p_normal_float32(random_states, thread_id)
-    rand_axis_z = cuda.random.xoroshiro128p_normal_float32(random_states, thread_id)
-    norm = (rand_axis_x**2 + rand_axis_y**2 + rand_axis_z**2) ** 0.5
-    rand_axis_x /= norm
-    rand_axis_y /= norm
-    rand_axis_z /= norm
-
-    # ロドリゲスの回転公式 (現在の法線を回転)
-    # n_currentをローカル変数にコピー
-    nx = n_current[0]
-    ny = n_current[1]
-    nz = n_current[2]
+    # 現在の法線をローカル変数にコピー
+    n_curr_x = n_current[0]
+    n_curr_y = n_current[1]
+    n_curr_z = n_current[2]
 
     # 無効な法線の場合はリセット
     if (
-        math.isnan(nx)
-        or math.isinf(nx)
-        or math.isnan(ny)
-        or math.isinf(ny)
-        or math.isnan(nz)
-        or math.isinf(nz)
+        math.isnan(n_curr_x)
+        or math.isinf(n_curr_x)
+        or math.isnan(n_curr_y)
+        or math.isinf(n_curr_y)
+        or math.isnan(n_curr_z)
+        or math.isinf(n_curr_z)
     ):
-        nx = 0.0
-        ny = 0.0
-        nz = 1.0
+        n_curr_x = 0.0
+        n_curr_y = 0.0
+        n_curr_z = 1.0
 
-    cos_a = math.cos(angle_rad)
-    sin_a = math.sin(angle_rad)
-    one_minus_cos = 1.0 - cos_a
+    # 探索スケール（ノイズの大きさ）を決定
+    # normal_search_angle(度数法)をラジアン換算し、さらに減衰させる
+    # 角度θの変化は、単位ベクトルに対して長さ 2*sin(θ/2) 程度のノイズを加えることに相当
+    # 近似的に angle_rad をそのままスケールとして使っても機能します
+    scale = (normal_search_angle * (decay_rate**iteration)) * (math.pi / 180.0)
 
-    dot = rand_axis_x * nx + rand_axis_y * ny + rand_axis_z * nz
+    # [-0.5, 0.5] の一様乱数を生成してスケールを掛ける
+    rand_x = (
+        (cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) - 0.5)
+        * 2.0
+        * scale
+    )
+    rand_y = (
+        (cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) - 0.5)
+        * 2.0
+        * scale
+    )
+    rand_z = (
+        (cuda.random.xoroshiro128p_uniform_float32(random_states, thread_id) - 0.5)
+        * 2.0
+        * scale
+    )
 
-    cross_x = rand_axis_y * nz - rand_axis_z * ny
-    cross_y = rand_axis_z * nx - rand_axis_x * nz
-    cross_z = rand_axis_x * ny - rand_axis_y * nx
+    # 現在の法線にノイズを加える
+    n_new_x = n_curr_x + rand_x
+    n_new_y = n_curr_y + rand_y
+    n_new_z = n_curr_z + rand_z
 
-    n_new_x = nx * cos_a + cross_x * sin_a + rand_axis_x * dot * one_minus_cos
-    n_new_y = ny * cos_a + cross_y * sin_a + rand_axis_y * dot * one_minus_cos
-    n_new_z = nz * cos_a + cross_z * sin_a + rand_axis_z * dot * one_minus_cos
+    # 正規化（単位ベクトルに戻す）
+    norm_new = math.sqrt(n_new_x**2 + n_new_y**2 + n_new_z**2)
+    if norm_new > 1e-6:
+        n_new_x /= norm_new
+        n_new_y /= norm_new
+        n_new_z /= norm_new
 
-    # 正規化
-    n_norm = math.sqrt(n_new_x**2 + n_new_y**2 + n_new_z**2)
-    if n_norm > 1e-6:
-        n_new_x /= n_norm
-        n_new_y /= n_norm
-        n_new_z /= n_norm
-
-        # コスト計算（深度はd_currentを使用）
+        # コスト計算（深度は固定または更新済みの値を使用）
         cost_normal_only = _evaluate_cost_cuda(
             r,
             c,
-            d_current,
+            d_current,  # フェーズ1で更新された値
             n_new_x,
             n_new_y,
             n_new_z,
@@ -902,8 +893,8 @@ def _random_search_cuda(
             zncc_epsilon,
         )
 
+        # 法線単独でコストが下がれば更新
         if cost_normal_only < current_cost:
-            # 法線のみ更新
             normal_map[r, c, 0] = n_new_x
             normal_map[r, c, 1] = n_new_y
             normal_map[r, c, 2] = n_new_z
