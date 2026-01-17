@@ -250,7 +250,7 @@ def save_depth_map_as_exr(depth_map, file_path):
         exr_file.writePixels({"R": depth_bytes})
         exr_file.close()
 
-        logging.info(f"Saved depth map as EXR to {file_path}")
+        # ログは呼び出し元で出力されるため、ここでは出力しない
     except Exception as e:
         logging.error(f"Failed to save depth map as EXR to {file_path}: {e}")
 
@@ -345,7 +345,7 @@ def save_normal_map_as_image(normal_map, file_path):
         normal_image_rgb = (valid_normals * 255).astype(np.uint8)
         normal_image_bgr = cv2.cvtColor(normal_image_rgb, cv2.COLOR_RGB2BGR)
         cv2.imwrite(file_path, normal_image_bgr)
-        logging.info(f"Saved normal map to {file_path}")
+        # ログは呼び出し元で出力されるため、ここでは出力しない
     except Exception as e:
         logging.error(f"Failed to save normal map to {file_path}: {e}")
 

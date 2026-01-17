@@ -3,7 +3,7 @@ from typing import Dict, Tuple
 
 import numpy as np
 import open3d as o3d
-from numba import njit
+from numba import njit, prange
 
 
 class PointCloudIntegrator:
@@ -15,6 +15,7 @@ class PointCloudIntegrator:
     ):
         """
         複数の深度マップから生成された点群を統合し、ボクセルグリッド内でメディアンを計算する。
+        高速化版：NumPyのベクトル演算を使用してPythonループを削減。
 
         Args:
             points_list: 点群のリスト
@@ -33,6 +34,7 @@ class PointCloudIntegrator:
                 return np.array([]), np.array([]), np.array([])
             return np.array([]), np.array([])
 
+        # リストを結合（メモリ効率を考慮して一度に結合）
         all_pts = np.vstack(points_list)
         all_cols = np.vstack(colors_list)
         has_normals = normals_list is not None and len(normals_list) > 0
@@ -54,40 +56,56 @@ class PointCloudIntegrator:
                 return np.array([]), np.array([]), np.array([])
             return np.array([]), np.array([])
 
-        # 各点を対応するボクセルIDに割り当てる
-        vids = np.floor(pts / voxel_size).astype(int)
+        # ボクセルIDを計算（ベクトル化）
+        vids = np.floor(pts / voxel_size).astype(np.int64)
 
-        voxel_dict = {}
-        for i, vid in enumerate(map(tuple, vids)):
-            voxel_dict.setdefault(vid, []).append(i)
-
-        med_pts, med_cols = [], []
-        med_normals = [] if has_normals else None
-        for idxs in voxel_dict.values():
-            voxel_pts = pts[idxs]
-            voxel_cols = cols[idxs]
-            # 各ボクセル内の点のメディアンを計算
-            med_pts.append(np.median(voxel_pts, axis=0))
-            med_cols.append(np.median(voxel_cols, axis=0))
-            if has_normals:
-                # 法線は平均化して正規化
-                voxel_normals = normals[idxs]
-                avg_normal = np.mean(voxel_normals, axis=0)
-                norm = np.linalg.norm(avg_normal)
-                if norm > 1e-6:
-                    avg_normal = avg_normal / norm
-                else:
-                    avg_normal = np.array([0.0, 0.0, 1.0])
-                med_normals.append(avg_normal)
-
-        logging.info(f"Integrated {len(med_pts)} points from multiple depth maps.")
+        # ボクセルIDでソート（lexsortを使用して高速化）
+        # ソートキー: (voxel_id_x, voxel_id_y, voxel_id_z)
+        sort_keys = vids.T  # (3, N) -> (voxel_id_x, voxel_id_y, voxel_id_z)
+        sort_indices = np.lexsort(sort_keys)
+        vids_sorted = vids[sort_indices]
+        pts_sorted = pts[sort_indices]
+        cols_sorted = cols[sort_indices]
         if has_normals:
-            return (
-                np.array(med_pts),
-                np.array(med_cols),
-                np.array(med_normals),
+            normals_sorted = normals[sort_indices]
+
+        # ユニークなボクセルIDを取得（連続する同じIDを検出）
+        # 各ボクセルIDが異なるかどうかを判定
+        voxel_diff = np.any(vids_sorted[1:] != vids_sorted[:-1], axis=1)
+        # 最初のボクセルと、変化点のインデックスを取得
+        unique_voxel_indices = np.concatenate(
+            ([0], np.where(voxel_diff)[0] + 1, [len(vids_sorted)])
+        )
+
+        # 各ボクセルグループのサイズを計算
+        num_voxels = len(unique_voxel_indices) - 1
+        if num_voxels == 0:
+            logging.warning("No voxels found after integration.")
+            if has_normals:
+                return np.array([]), np.array([]), np.array([])
+            return np.array([]), np.array([])
+
+        # メディアン計算をベクトル化（JITコンパイル関数を使用）
+        if has_normals:
+            med_pts, med_cols, med_normals = _compute_voxel_medians_with_normals_jit(
+                pts_sorted,
+                cols_sorted,
+                normals_sorted,
+                unique_voxel_indices,
+                num_voxels,
             )
-        return np.array(med_pts), np.array(med_cols)
+        else:
+            med_pts, med_cols = _compute_voxel_medians_jit(
+                pts_sorted,
+                cols_sorted,
+                unique_voxel_indices,
+                num_voxels,
+            )
+
+        logging.info(f"Integrated {num_voxels} points from multiple depth maps.")
+        if has_normals:
+            return med_pts, med_cols, med_normals
+        return med_pts, med_cols
 
     def filter_points_by_multi_view_visibility(
         self,
@@ -273,6 +291,132 @@ class PointCloudIntegrator:
             f.write(header)
             np.savetxt(f, data, fmt=fmt)
         logging.info(f"Final point cloud saved to {filename}")
+
+
+@njit(fastmath=True, parallel=True)
+def _compute_voxel_medians_jit(
+    pts_sorted: np.ndarray,
+    cols_sorted: np.ndarray,
+    unique_voxel_indices: np.ndarray,
+    num_voxels: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    ソート済み点群から各ボクセルのメディアンを計算する（JITコンパイル版）。
+
+    Args:
+        pts_sorted: ソート済みの点群座標 (N, 3)
+        cols_sorted: ソート済みの色 (N, 3)
+        unique_voxel_indices: 各ボクセルグループの開始インデックス
+        num_voxels: ボクセル数
+
+    Returns:
+        med_pts: 各ボクセルのメディアン座標 (num_voxels, 3)
+        med_cols: 各ボクセルのメディアン色 (num_voxels, 3)
+    """
+    med_pts = np.zeros((num_voxels, 3), dtype=np.float32)
+    med_cols = np.zeros((num_voxels, 3), dtype=np.float32)
+
+    for i in prange(num_voxels):
+        start_idx = unique_voxel_indices[i]
+        end_idx = unique_voxel_indices[i + 1]
+        voxel_size_i = end_idx - start_idx
+
+        # メディアン計算（ソート済み配列の中央値を直接取得）
+        mid_idx = start_idx + voxel_size_i // 2
+        if voxel_size_i % 2 == 1:
+            # 奇数個の場合、中央値を直接取得
+            med_pts[i, 0] = pts_sorted[mid_idx, 0]
+            med_pts[i, 1] = pts_sorted[mid_idx, 1]
+            med_pts[i, 2] = pts_sorted[mid_idx, 2]
+            med_cols[i, 0] = cols_sorted[mid_idx, 0]
+            med_cols[i, 1] = cols_sorted[mid_idx, 1]
+            med_cols[i, 2] = cols_sorted[mid_idx, 2]
+        else:
+            # 偶数個の場合、中央2つの平均を取得
+            med_pts[i, 0] = (pts_sorted[mid_idx - 1, 0] + pts_sorted[mid_idx, 0]) * 0.5
+            med_pts[i, 1] = (pts_sorted[mid_idx - 1, 1] + pts_sorted[mid_idx, 1]) * 0.5
+            med_pts[i, 2] = (pts_sorted[mid_idx - 1, 2] + pts_sorted[mid_idx, 2]) * 0.5
+            med_cols[i, 0] = (
+                cols_sorted[mid_idx - 1, 0] + cols_sorted[mid_idx, 0]
+            ) * 0.5
+            med_cols[i, 1] = (
+                cols_sorted[mid_idx - 1, 1] + cols_sorted[mid_idx, 1]
+            ) * 0.5
+            med_cols[i, 2] = (
+                cols_sorted[mid_idx - 1, 2] + cols_sorted[mid_idx, 2]
+            ) * 0.5
+
+    return med_pts, med_cols
+
+
+@njit(fastmath=True, parallel=True)
+def _compute_voxel_medians_with_normals_jit(
+    pts_sorted: np.ndarray,
+    cols_sorted: np.ndarray,
+    normals_sorted: np.ndarray,
+    unique_voxel_indices: np.ndarray,
+    num_voxels: int,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    med_pts = np.zeros((num_voxels, 3), dtype=np.float32)
+    med_cols = np.zeros((num_voxels, 3), dtype=np.float32)
+    med_normals = np.zeros((num_voxels, 3), dtype=np.float32)
+
+    for i in prange(num_voxels):
+        start_idx = unique_voxel_indices[i]
+        end_idx = unique_voxel_indices[i + 1]
+        voxel_size_i = end_idx - start_idx
+
+        # メディアン計算（ソート済み配列の中央値を直接取得）
+        mid_idx = start_idx + voxel_size_i // 2
+        if voxel_size_i % 2 == 1:
+            # 奇数個の場合、中央値を直接取得
+            med_pts[i, 0] = pts_sorted[mid_idx, 0]
+            med_pts[i, 1] = pts_sorted[mid_idx, 1]
+            med_pts[i, 2] = pts_sorted[mid_idx, 2]
+            med_cols[i, 0] = cols_sorted[mid_idx, 0]
+            med_cols[i, 1] = cols_sorted[mid_idx, 1]
+            med_cols[i, 2] = cols_sorted[mid_idx, 2]
+        else:
+            # 偶数個の場合、中央2つの平均を取得
+            med_pts[i, 0] = (pts_sorted[mid_idx - 1, 0] + pts_sorted[mid_idx, 0]) * 0.5
+            med_pts[i, 1] = (pts_sorted[mid_idx - 1, 1] + pts_sorted[mid_idx, 1]) * 0.5
+            med_pts[i, 2] = (pts_sorted[mid_idx - 1, 2] + pts_sorted[mid_idx, 2]) * 0.5
+            med_cols[i, 0] = (
+                cols_sorted[mid_idx - 1, 0] + cols_sorted[mid_idx, 0]
+            ) * 0.5
+            med_cols[i, 1] = (
+                cols_sorted[mid_idx - 1, 1] + cols_sorted[mid_idx, 1]
+            ) * 0.5
+            med_cols[i, 2] = (
+                cols_sorted[mid_idx - 1, 2] + cols_sorted[mid_idx, 2]
+            ) * 0.5
+
+        # 法線は平均化して正規化
+        avg_nx = 0.0
+        avg_ny = 0.0
+        avg_nz = 0.0
+        for j in range(start_idx, end_idx):
+            avg_nx += normals_sorted[j, 0]
+            avg_ny += normals_sorted[j, 1]
+            avg_nz += normals_sorted[j, 2]
+        inv_size = 1.0 / voxel_size_i
+        avg_nx *= inv_size
+        avg_ny *= inv_size
+        avg_nz *= inv_size
+
+        # 正規化
+        norm_sq = avg_nx * avg_nx + avg_ny * avg_ny + avg_nz * avg_nz
+        if norm_sq > 1e-12:
+            norm_inv = 1.0 / np.sqrt(norm_sq)
+            med_normals[i, 0] = avg_nx * norm_inv
+            med_normals[i, 1] = avg_ny * norm_inv
+            med_normals[i, 2] = avg_nz * norm_inv
+        else:
+            med_normals[i, 0] = 0.0
+            med_normals[i, 1] = 0.0
+            med_normals[i, 2] = 1.0
+
+    return med_pts, med_cols, med_normals
 
 
 @njit(fastmath=True)
