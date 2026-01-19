@@ -1,0 +1,556 @@
+import logging
+import time
+from typing import Dict, List, Optional, Tuple
+
+import cv2
+import numpy as np
+
+# PyTorchのインポート（利用可能な場合）
+try:
+    import torch
+    import torch.nn.functional as F
+
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+
+try:
+    import mvs.config as config
+except Exception:
+    config = None
+
+
+# --- PyTorch Utility Functions ---
+
+
+def _axis_angle_to_rotation_matrix_torch(axis_angle):
+    """
+    Rodriguesの公式をPyTorchで実装
+    Args:
+        axis_angle: (N, 3) tensor
+    Returns:
+        R: (N, 3, 3) tensor
+    """
+    angle = torch.norm(axis_angle, dim=1, keepdim=True)  # (N, 1)
+    # 0除算回避 (微小値を追加)
+    angle = torch.clamp(angle, min=1e-8)
+    axis = axis_angle / angle  # (N, 3)
+
+    cos = torch.cos(angle)
+    sin = torch.sin(angle)
+    one_minus_cos = 1.0 - cos
+
+    x, y, z = axis[:, 0], axis[:, 1], axis[:, 2]
+
+    # 回転行列の構築
+    R = torch.zeros(
+        (axis_angle.shape[0], 3, 3), device=axis_angle.device, dtype=axis_angle.dtype
+    )
+
+    R[:, 0, 0] = cos[:, 0] + x * x * one_minus_cos[:, 0]
+    R[:, 0, 1] = x * y * one_minus_cos[:, 0] - z * sin[:, 0]
+    R[:, 0, 2] = x * z * one_minus_cos[:, 0] + y * sin[:, 0]
+
+    R[:, 1, 0] = y * x * one_minus_cos[:, 0] + z * sin[:, 0]
+    R[:, 1, 1] = cos[:, 0] + y * y * one_minus_cos[:, 0]
+    R[:, 1, 2] = y * z * one_minus_cos[:, 0] - x * sin[:, 0]
+
+    R[:, 2, 0] = z * x * one_minus_cos[:, 0] - y * sin[:, 0]
+    R[:, 2, 1] = z * y * one_minus_cos[:, 0] + x * sin[:, 0]
+    R[:, 2, 2] = cos[:, 0] + z * z * one_minus_cos[:, 0]
+
+    return R
+
+
+def _project_points_torch(points_3d, rvecs, tvecs, K, camera_indices, point_indices):
+    """
+    3D点を2D画像座標へ投影する (Batch処理)
+    Args:
+        points_3d: (M, 3) 全3D点
+        rvecs: (C, 3) 全カメラの回転ベクトル
+        tvecs: (C, 3) 全カメラの並進ベクトル
+        K: (3, 3) 内部パラメータ
+        camera_indices: (N,) 観測に対応するカメラID
+        point_indices: (N,) 観測に対応する3D点ID
+    Returns:
+        projections: (N, 2) 投影された2D座標
+    """
+    # 観測に対応するパラメータを抽出
+    r_obs = rvecs[camera_indices]  # (N, 3)
+    t_obs = tvecs[camera_indices]  # (N, 3)
+    X_obs = points_3d[point_indices]  # (N, 3)
+
+    # 回転行列への変換
+    R_obs = _axis_angle_to_rotation_matrix_torch(r_obs)  # (N, 3, 3)
+
+    # カメラ座標系へ変換: X_cam = R * X + t
+    # (N, 3, 3) @ (N, 3, 1) + (N, 3, 1) -> (N, 3, 1)
+    X_obs_unsqueezed = X_obs.unsqueeze(-1)
+    t_obs_unsqueezed = t_obs.unsqueeze(-1)
+
+    X_cam = torch.bmm(R_obs, X_obs_unsqueezed) + t_obs_unsqueezed
+    X_cam = X_cam.squeeze(-1)  # (N, 3)
+
+    # 深度による正規化
+    z = X_cam[:, 2:3]
+    # カメラ後方の点は無視できないが、数値安定性のためイプシロン処理
+    # (実際にはHuberLossが外れ値として処理してくれることを期待)
+    z = torch.where(z < 1e-6, torch.tensor(1e-6, device=z.device), z)
+
+    x_norm = X_cam[:, 0:1] / z
+    y_norm = X_cam[:, 1:2] / z
+
+    # 内部パラメータの適用
+    fx, fy = K[0, 0], K[1, 1]
+    cx, cy = K[0, 2], K[1, 2]
+
+    u = fx * x_norm + cx
+    v = fy * y_norm + cy
+
+    return torch.cat([u, v], dim=1)
+
+
+def _optimize_bundle_adjustment_gpu(
+    camera_params: Dict[int, Tuple[np.ndarray, np.ndarray]],
+    points_3d: np.ndarray,
+    camera_indices: np.ndarray,
+    point_indices: np.ndarray,
+    points_2d: np.ndarray,
+    K: np.ndarray,
+    sorted_indices: List[str],
+    fixed_cam_idx: int,
+    cam_to_idx: Dict[int, int],
+    n_iterations: int = 100,
+    learning_rate: float = 1e-3,
+    huber_delta: float = 2.0,
+    scheduler_factor: float = 0.5,
+    scheduler_patience: int = 10,
+    log_every: int = 20,
+) -> Tuple[Dict[int, Tuple[np.ndarray, np.ndarray]], np.ndarray, float, float]:
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logging.info(f"[SfM] Running Bundle Adjustment on {device} (lr={learning_rate})...")
+
+    # --- データの準備 ---
+    n_cams = len(sorted_indices)
+
+    # パラメータの初期値をTensor化
+    init_rvecs_np = np.zeros((n_cams, 3), dtype=np.float32)
+    init_tvecs_np = np.zeros((n_cams, 3), dtype=np.float32)
+
+    for ds_id in sorted_indices:
+        ds_id_int = int(ds_id)
+        idx = cam_to_idx[ds_id_int]
+        r, t = camera_params[ds_id_int]
+        init_rvecs_np[idx] = r
+        init_tvecs_np[idx] = t
+
+    # 固定カメラのインデックス
+    fixed_idx = cam_to_idx[fixed_cam_idx]
+
+    # --- パラメータ設定 ---
+
+    # 全カメラのパラメータを作成
+    t_rvecs = torch.tensor(init_rvecs_np, device=device, dtype=torch.float32)
+    t_tvecs = torch.tensor(init_tvecs_np, device=device, dtype=torch.float32)
+
+    t_rvecs.requires_grad = True
+    t_tvecs.requires_grad = True
+    t_points_3d = torch.tensor(
+        points_3d, device=device, dtype=torch.float32, requires_grad=True
+    )
+
+    t_K = torch.tensor(K, device=device, dtype=torch.float32)
+
+    mapped_camera_indices = np.array([cam_to_idx[int(c)] for c in camera_indices])
+    t_camera_indices = torch.tensor(
+        mapped_camera_indices, device=device, dtype=torch.long
+    )
+    t_point_indices = torch.tensor(point_indices, device=device, dtype=torch.long)
+    t_observations = torch.tensor(points_2d, device=device, dtype=torch.float32)
+
+    # --- 最適化 ---
+    optimizer = torch.optim.Adam([t_rvecs, t_tvecs, t_points_3d], lr=learning_rate)
+
+    # 学習率スケジューラ (停滞したら下げる)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=scheduler_factor, patience=scheduler_patience
+    )
+
+    initial_loss = 0.0
+    best_loss = float("inf")
+
+    # 最良の結果を保持する変数
+    best_rvecs = init_rvecs_np.copy()
+    best_tvecs = init_tvecs_np.copy()
+
+    # 固定値を保存（念のため毎ステップ書き戻す用）
+    fixed_rvec = t_rvecs[fixed_idx].clone().detach()
+    fixed_tvec = t_tvecs[fixed_idx].clone().detach()
+
+    for i in range(n_iterations):
+        optimizer.zero_grad()
+
+        # 投影
+        projections = _project_points_torch(
+            t_points_3d, t_rvecs, t_tvecs, t_K, t_camera_indices, t_point_indices
+        )
+
+        # 損失計算 (Huber Loss = Robust Loss)
+        # deltaを小さくすることで、外れ値（大きくズレた点）の影響をより抑える
+        loss = F.huber_loss(
+            projections, t_observations, delta=huber_delta, reduction="mean"
+        )
+
+        # RMSE計算 (評価用)
+        with torch.no_grad():
+            rmse = torch.sqrt(
+                torch.mean(torch.sum((projections - t_observations) ** 2, dim=1))
+            )
+            rmse_val = rmse.item()
+            if i == 0:
+                initial_loss = rmse_val
+                best_loss = rmse_val
+                # 初期状態が悪化しないよう、初期値をbestとして保存
+                best_rvecs = t_rvecs.detach().cpu().numpy()
+                best_tvecs = t_tvecs.detach().cpu().numpy()
+
+            if rmse_val < best_loss:
+                best_loss = rmse_val
+                best_rvecs = t_rvecs.detach().cpu().numpy()
+                best_tvecs = t_tvecs.detach().cpu().numpy()
+
+        loss.backward()
+
+        t_rvecs.grad[fixed_idx] = 0.0
+        t_tvecs.grad[fixed_idx] = 0.0
+
+        optimizer.step()
+
+        with torch.no_grad():
+            t_rvecs[fixed_idx] = fixed_rvec
+            t_tvecs[fixed_idx] = fixed_tvec
+
+        scheduler.step(rmse_val)
+
+        if log_every > 0 and (i % log_every == 0 or i == n_iterations - 1):
+            logging.info(
+                f"[SfM-GPU] Iter {i+1}/{n_iterations}, RMSE: {rmse_val:.4f} (Best: {best_loss:.4f})"
+            )
+
+    # --- 結果の判定と書き出し ---
+
+    if best_loss > initial_loss * 1.1:  # 10%以上悪化した場合は警告
+        logging.warning(
+            f"[SfM] Optimization diverged! (Init: {initial_loss:.4f} -> Best: {best_loss:.4f}). Reverting to initial guess."
+        )
+        refined_rvecs = init_rvecs_np
+        refined_tvecs = init_tvecs_np
+        final_loss_ret = initial_loss
+    else:
+        refined_rvecs = best_rvecs
+        refined_tvecs = best_tvecs
+        final_loss_ret = best_loss
+
+    refined_camera_params = {}
+    for ds_id in sorted_indices:
+        ds_id_int = int(ds_id)
+        idx = cam_to_idx[ds_id_int]
+        refined_camera_params[ds_id_int] = (refined_rvecs[idx], refined_tvecs[idx])
+
+    return refined_camera_params, None, initial_loss, final_loss_ret
+
+
+# --- Existing CPU Logic (Preprocessing) ---
+
+
+def _get_feature_detector():
+    if hasattr(cv2, "SIFT_create"):
+        return cv2.SIFT_create(), "SIFT"
+    return cv2.ORB_create(nfeatures=5000), "ORB"
+
+
+def _match_features(
+    img1: np.ndarray,
+    img2: np.ndarray,
+    max_matches: int,
+    ratio: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    detector, det_name = _get_feature_detector()
+    k1, d1 = detector.detectAndCompute(img1, None)
+    k2, d2 = detector.detectAndCompute(img2, None)
+
+    if d1 is None or d2 is None or len(k1) < 8 or len(k2) < 8:
+        return np.empty((0, 2), dtype=np.float64), np.empty((0, 2), dtype=np.float64)
+
+    if det_name == "SIFT":
+        matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
+    else:
+        matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+
+    raw = matcher.knnMatch(d1, d2, k=2)
+    good = []
+    for m, n in raw:
+        if m.distance < ratio * n.distance:
+            good.append(m)
+
+    if not good:
+        return np.empty((0, 2), dtype=np.float64), np.empty((0, 2), dtype=np.float64)
+
+    good.sort(key=lambda m: m.distance)
+    if max_matches > 0:
+        good = good[:max_matches]
+
+    pts1 = np.array([k1[m.queryIdx].pt for m in good], dtype=np.float64)
+    pts2 = np.array([k2[m.trainIdx].pt for m in good], dtype=np.float64)
+
+    if len(pts1) < 8:
+        return np.empty((0, 2), dtype=np.float64), np.empty((0, 2), dtype=np.float64)
+
+    F, mask = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC, 1.0, 0.99)
+    if F is None or mask is None:
+        return np.empty((0, 2), dtype=np.float64), np.empty((0, 2), dtype=np.float64)
+
+    mask = mask.ravel().astype(bool)
+    pts1 = pts1[mask]
+    pts2 = pts2[mask]
+    return pts1, pts2
+
+
+def _triangulate_points(
+    K: np.ndarray,
+    R1: np.ndarray,
+    t1: np.ndarray,
+    R2: np.ndarray,
+    t2: np.ndarray,
+    pts1: np.ndarray,
+    pts2: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    P1 = K @ np.hstack([R1, t1.reshape(3, 1)])
+    P2 = K @ np.hstack([R2, t2.reshape(3, 1)])
+    pts1_h = pts1.T
+    pts2_h = pts2.T
+    X_h = cv2.triangulatePoints(P1, P2, pts1_h, pts2_h)
+    X = (X_h[:3] / X_h[3:4]).T
+
+    if X.size == 0:
+        return np.empty((0, 3), dtype=np.float64), pts1, pts2
+
+    z1 = (R1 @ X.T + t1.reshape(3, 1))[2]
+    z2 = (R2 @ X.T + t2.reshape(3, 1))[2]
+    mask = np.isfinite(X).all(axis=1) & (z1 > 0) & (z2 > 0)
+    return X[mask], pts1[mask], pts2[mask]
+
+
+def run_bundle_adjustment(
+    all_pairs_data: dict,
+    K: np.ndarray,
+) -> dict:
+    """
+    GPU (PyTorch) Accelerated Bundle Adjustment
+    """
+    if not all_pairs_data or len(all_pairs_data) < 2:
+        logging.info("[SfM] Not enough camera pairs for bundle adjustment.")
+        return all_pairs_data
+
+    # PyTorchが使えない場合は警告を出してそのまま返す（またはScipy版へフォールバック）
+    if not TORCH_AVAILABLE:
+        logging.error(
+            "[SfM] PyTorch is not available. Please install torch to use GPU Bundle Adjustment."
+        )
+        return all_pairs_data
+
+    # Config Check
+    if config is not None:
+        pos_scale = float(getattr(config, "POSITION_ERROR_SCALE", 0.0) or 0.0)
+        rot_scale = float(getattr(config, "ROTATION_ERROR_SCALE", 0.0) or 0.0)
+        if pos_scale <= 0.0 and rot_scale <= 0.0:
+            logging.info("[SfM] Bundle adjustment skipped (noise scale is 0).")
+            return all_pairs_data
+
+    def _cfg(name: str, default):
+        if config is None:
+            return default
+        return getattr(config, name, default)
+
+    max_matches = int(_cfg("SFM_MAX_MATCHES", 2000) or 2000)
+    max_points_per_pair = int(_cfg("SFM_MAX_POINTS_PER_PAIR", 500) or 500)
+    ratio = float(_cfg("SFM_MATCH_RATIO", 0.75) or 0.75)
+
+    sorted_indices = sorted(all_pairs_data.keys())
+    # マッピング作成 (DatasetID -> 0..N)
+    cam_to_idx = {int(ds_id): i for i, ds_id in enumerate(sorted_indices)}
+
+    image_cache = {}
+
+    def _read_gray(path: str) -> Optional[np.ndarray]:
+        if path in image_cache:
+            return image_cache[path]
+        img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            return None
+        image_cache[path] = img
+        return img
+
+    # Initial Camera Params
+    camera_params = {}
+    for idx in sorted_indices:
+        _, t_cv, _, _, R_cv = all_pairs_data[idx]
+        rvec, _ = cv2.Rodrigues(np.asarray(R_cv, dtype=np.float64))
+        camera_params[int(idx)] = (
+            rvec.reshape(3),
+            np.asarray(t_cv, dtype=np.float64).reshape(3),
+        )
+
+    # Observations building (CPU - OpenCV is efficient enough here)
+    points_3d_list: List[np.ndarray] = []
+    points_2d_list: List[np.ndarray] = []
+    camera_indices: List[int] = []
+    point_indices: List[int] = []
+
+    point_offset = 0
+    t_start = time.time()
+    logging.info(
+        "[SfM] Building observations from %d adjacent pairs...",
+        max(0, len(sorted_indices) - 1),
+    )
+
+    for i in range(len(sorted_indices) - 1):
+        idx1 = int(sorted_indices[i])
+        idx2 = int(sorted_indices[i + 1])
+        _, t1, left1, _, R1 = all_pairs_data[idx1]
+        _, t2, left2, _, R2 = all_pairs_data[idx2]
+        img1 = _read_gray(left1)
+        img2 = _read_gray(left2)
+        if img1 is None or img2 is None:
+            continue
+
+        pts1, pts2 = _match_features(img1, img2, max_matches=max_matches, ratio=ratio)
+        if len(pts1) < 8:
+            continue
+
+        X, pts1_f, pts2_f = _triangulate_points(
+            K.astype(np.float64),
+            np.asarray(R1, dtype=np.float64),
+            np.asarray(t1, dtype=np.float64),
+            np.asarray(R2, dtype=np.float64),
+            np.asarray(t2, dtype=np.float64),
+            pts1,
+            pts2,
+        )
+        if X.shape[0] == 0:
+            continue
+
+        if max_points_per_pair > 0 and X.shape[0] > max_points_per_pair:
+            # ランダムに間引く
+            choice = np.random.choice(X.shape[0], max_points_per_pair, replace=False)
+            X = X[choice]
+            pts1_f = pts1_f[choice]
+            pts2_f = pts2_f[choice]
+
+        points_3d_list.append(X)
+        points_2d_list.append(pts1_f)
+        points_2d_list.append(pts2_f)
+
+        # ここでの camera_indices は Dataset ID
+        camera_indices.extend([idx1] * len(X))
+        camera_indices.extend([idx2] * len(X))
+        point_indices.extend(list(range(point_offset, point_offset + len(X))))
+        point_indices.extend(list(range(point_offset, point_offset + len(X))))
+        point_offset += len(X)
+
+    if not points_3d_list:
+        logging.warning("[SfM] No valid 3D points for bundle adjustment.")
+        return all_pairs_data
+
+    points_3d = np.vstack(points_3d_list)
+    points_2d = np.vstack(points_2d_list)
+    camera_indices_np = np.asarray(camera_indices, dtype=np.int32)
+    point_indices_np = np.asarray(point_indices, dtype=np.int32)
+
+    logging.info(
+        "[SfM] Observations built: points=%d, observations=%d (%.2fs)",
+        points_3d.shape[0],
+        points_2d.shape[0],
+        time.time() - t_start,
+    )
+    logging.info("")
+
+    # --- Run GPU Optimization ---
+    fixed_cam_idx = int(sorted_indices[0])
+
+    # 最適化パラメータを設定ファイルから読み込み
+    n_iterations = int(_cfg("SFM_BA_ITERATIONS", 100) or 100)
+    learning_rate = float(_cfg("SFM_BA_LEARNING_RATE", 0.001) or 0.001)
+    huber_delta = float(_cfg("SFM_BA_HUBER_DELTA", 2.0) or 2.0)
+    scheduler_factor = float(_cfg("SFM_BA_SCHEDULER_FACTOR", 0.5) or 0.5)
+    scheduler_patience = int(_cfg("SFM_BA_SCHEDULER_PATIENCE", 10) or 10)
+    log_every = int(_cfg("SFM_BA_LOG_EVERY", 20) or 20)
+
+    logging.info(
+        "[SfM] Bundle Adjustment parameters: iterations=%d, lr=%.4f, huber_delta=%.2f, "
+        "scheduler_factor=%.2f, scheduler_patience=%d",
+        n_iterations,
+        learning_rate,
+        huber_delta,
+        scheduler_factor,
+        scheduler_patience,
+    )
+
+    refined_params, _, init_rmse, final_rmse = _optimize_bundle_adjustment_gpu(
+        camera_params=camera_params,
+        points_3d=points_3d,
+        camera_indices=camera_indices_np,
+        point_indices=point_indices_np,
+        points_2d=points_2d,
+        K=K,
+        sorted_indices=sorted_indices,
+        fixed_cam_idx=fixed_cam_idx,
+        cam_to_idx=cam_to_idx,
+        n_iterations=n_iterations,
+        learning_rate=learning_rate,
+        huber_delta=huber_delta,
+        scheduler_factor=scheduler_factor,
+        scheduler_patience=scheduler_patience,
+        log_every=log_every,
+    )
+
+    # Compute correction magnitude
+    corrections = []
+    for idx in sorted_indices:
+        rvec0, tvec0 = camera_params[int(idx)]
+        rvec1, tvec1 = refined_params[int(idx)]
+        R0, _ = cv2.Rodrigues(rvec0)
+        R1, _ = cv2.Rodrigues(rvec1)
+        C0 = -R0.T @ tvec0.reshape(3, 1)
+        C1 = -R1.T @ tvec1.reshape(3, 1)
+        corrections.append(float(np.linalg.norm(C1 - C0)))
+    avg_correction = float(np.mean(corrections)) if corrections else 0.0
+
+    logging.info("")
+    logging.info("=" * 80)
+    logging.info("[SfM] Bundle Adjustment Report:")
+    logging.info(f"  - Initial RMSE: {init_rmse:.4f} pixels")
+    logging.info(
+        f"  - Final RMSE:   {final_rmse:.4f} pixels "
+        f"(Improved by {max(0.0, init_rmse - final_rmse):.4f} pixels)"
+    )
+    logging.info(f"  - Average Camera Correction: {avg_correction:.4f} meters")
+    logging.info("=" * 80)
+
+    # Update Data
+    refined_pairs_data = {}
+    for idx in sorted_indices:
+        idx_int = int(idx)
+        _, _, left_path, right_path, _ = all_pairs_data[idx_int]
+        rvec, tvec = refined_params[idx_int]
+        R_cv, _ = cv2.Rodrigues(rvec)
+        refined_pairs_data[idx_int] = (
+            idx_int,
+            tvec.astype(np.float32),
+            left_path,
+            right_path,
+            R_cv.astype(np.float32),
+        )
+
+    return refined_pairs_data

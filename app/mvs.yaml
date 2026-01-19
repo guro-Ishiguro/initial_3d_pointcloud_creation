@@ -73,6 +73,24 @@ POSE_PLOT_ARROW_STRIDE: 5
 POSE_PLOT_ARROW_SCALE: 0.25
 
 # ============================================================================
+# バンドル調整設定
+# ============================================================================
+ENABLE_BUNDLE_ADJUSTMENT: false
+
+# バンドル調整の最適化パラメータ
+SFM_BA_ITERATIONS: 100              # 最適化の反復回数
+SFM_BA_LEARNING_RATE: 0.001         # 学習率（推奨: 0.0001-0.01）
+SFM_BA_HUBER_DELTA: 2.0             # Huber Lossのdelta（外れ値の閾値）
+SFM_BA_SCHEDULER_FACTOR: 0.5        # 学習率スケジューラの減衰率
+SFM_BA_SCHEDULER_PATIENCE: 10       # 学習率スケジューラのpatience（停滞許容回数）
+SFM_BA_LOG_EVERY: 20                # ログ出力間隔（イテレーション数）
+
+# 特徴点マッチングパラメータ
+SFM_MAX_MATCHES: 2000               # 1ペアあたりの最大マッチ数
+SFM_MAX_POINTS_PER_PAIR: 500        # 1ペアあたりの最大3D点数
+SFM_MATCH_RATIO: 0.75               # 特徴点マッチングの比率閾値（Lowe's ratio test）
+
+# ============================================================================
 # エラースケール
 # ============================================================================
 POSITION_ERROR_SCALE: 0.0
