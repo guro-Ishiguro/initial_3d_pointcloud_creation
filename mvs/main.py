@@ -541,18 +541,33 @@ def run():
     # are keyed by the frame index coming from the dataset.
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
     # --- Optional: Bundle Adjustment for noisy poses ---
-    if (
-        float(getattr(config, "POSITION_ERROR_SCALE", 0.0) or 0.0) > 0.0
-        or float(getattr(config, "ROTATION_ERROR_SCALE", 0.0) or 0.0) > 0.0
-    ):
+    enable_ba = bool(getattr(config, "ENABLE_BUNDLE_ADJUSTMENT", False))
+    pos_scale = float(getattr(config, "POSITION_ERROR_SCALE", 0.0) or 0.0)
+    rot_scale = float(getattr(config, "ROTATION_ERROR_SCALE", 0.0) or 0.0)
+
+    if enable_ba and (pos_scale > 0.0 or rot_scale > 0.0):
         logging.info(
-            "Noise detected (Pos: %.2f, Rot: %.2f). Running Bundle Adjustment...",
-            float(getattr(config, "POSITION_ERROR_SCALE", 0.0) or 0.0),
-            float(getattr(config, "ROTATION_ERROR_SCALE", 0.0) or 0.0),
+            "Bundle Adjustment enabled. Noise detected (Pos: %.2f, Rot: %.2f). Running Bundle Adjustment...",
+            pos_scale,
+            rot_scale,
         )
         from sfm.bundle_adjustment import run_bundle_adjustment
 
         all_pairs_data = run_bundle_adjustment(all_pairs_data, config.K)
+    elif enable_ba and pos_scale <= 0.0 and rot_scale <= 0.0:
+        logging.info(
+            "Bundle Adjustment is enabled but skipped (POSITION_ERROR_SCALE=%.2f, ROTATION_ERROR_SCALE=%.2f). "
+            "Set error scales > 0 to run bundle adjustment.",
+            pos_scale,
+            rot_scale,
+        )
+    elif not enable_ba and (pos_scale > 0.0 or rot_scale > 0.0):
+        logging.info(
+            "Noise detected (Pos: %.2f, Rot: %.2f) but Bundle Adjustment is disabled. "
+            "Set ENABLE_BUNDLE_ADJUSTMENT=true to enable.",
+            pos_scale,
+            rot_scale,
+        )
     if not all_pairs_data:
         logging.error(
             "No valid image pairs found. Check images under images/image_0 & image_1 and the txt/camera_params.csv."

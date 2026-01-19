@@ -636,6 +636,25 @@ class ConfigWidget(QWidget):
         widget = QWidget()
         layout = QFormLayout(widget)
 
+        # ENABLE_BUNDLE_ADJUSTMENT
+        self.config_widgets["ENABLE_BUNDLE_ADJUSTMENT"] = QCheckBox()
+        self.config_widgets["ENABLE_BUNDLE_ADJUSTMENT"].setChecked(
+            self._get_bool_value("ENABLE_BUNDLE_ADJUSTMENT", False)
+        )
+        layout.addRow(
+            QLabel("バンドル調整を有効化:"),
+            self.config_widgets["ENABLE_BUNDLE_ADJUSTMENT"],
+        )
+        layout.addRow(
+            QLabel(""),
+            QLabel(
+                "カメラポーズの誤差を補正するバンドル調整を実行します。"
+                "POSITION_ERROR_SCALEまたはROTATION_ERROR_SCALEが0より大きい場合に実行されます。"
+            ),
+        )
+
+        layout.addRow(QLabel(""), QLabel(""))  # セパレータ
+
         # POSITION_ERROR_SCALE
         self.config_widgets["POSITION_ERROR_SCALE"] = QDoubleSpinBox()
         self.config_widgets["POSITION_ERROR_SCALE"].setDecimals(4)
