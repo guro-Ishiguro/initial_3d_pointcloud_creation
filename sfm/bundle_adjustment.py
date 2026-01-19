@@ -1,11 +1,11 @@
 import logging
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
-from scipy.optimize import least_squares
-from scipy.sparse import lil_matrix
+import torch
+import torch.nn.functional as F
 
 try:
     import mvs.config as config
@@ -110,45 +110,70 @@ def _project_points(
     return np.hstack([u, v])
 
 
-def _compute_rmse(
-    camera_params: Dict[int, Tuple[np.ndarray, np.ndarray]],
-    points_3d: np.ndarray,
-    camera_indices: np.ndarray,
-    point_indices: np.ndarray,
-    points_2d: np.ndarray,
-    K: np.ndarray,
+def _rodrigues_torch(rvec: torch.Tensor) -> torch.Tensor:
+    """Batched Rodrigues: rvec (N,3) -> R (N,3,3)."""
+    eps = 1e-9
+    theta = torch.linalg.norm(rvec, dim=1, keepdim=True)  # (N,1)
+    theta2 = theta * theta
+    a = torch.where(theta > eps, torch.sin(theta) / theta, 1.0 - theta2 / 6.0)
+    b = torch.where(
+        theta > eps, (1.0 - torch.cos(theta)) / (theta2 + eps), 0.5 - theta2 / 24.0
+    )
+
+    rx, ry, rz = rvec[:, 0], rvec[:, 1], rvec[:, 2]
+    zero = torch.zeros_like(rx)
+    K = torch.stack(
+        [
+            torch.stack([zero, -rz, ry], dim=1),
+            torch.stack([rz, zero, -rx], dim=1),
+            torch.stack([-ry, rx, zero], dim=1),
+        ],
+        dim=1,
+    )  # (N,3,3)
+    K2 = torch.bmm(K, K)
+    eye_matrix = torch.eye(3, device=rvec.device, dtype=rvec.dtype).unsqueeze(0)
+    a = a.view(-1, 1, 1)
+    b = b.view(-1, 1, 1)
+    return eye_matrix + a * K + b * K2
+
+
+def _project_points_torch(
+    X: torch.Tensor,
+    rvec: torch.Tensor,
+    tvec: torch.Tensor,
+    K: torch.Tensor,
+) -> torch.Tensor:
+    """Batched projection: X (N,3), rvec/tvec (N,3) -> uv (N,2)."""
+    R = _rodrigues_torch(rvec)
+    X_cam = torch.bmm(R, X.unsqueeze(2)).squeeze(2) + tvec
+    z = X_cam[:, 2:3]
+    z = torch.where(torch.abs(z) < 1e-9, torch.full_like(z, 1e-9), z)
+    x = X_cam[:, 0:1] / z
+    y = X_cam[:, 1:2] / z
+    u = K[0, 0] * x + K[0, 2]
+    v = K[1, 1] * y + K[1, 2]
+    return torch.cat([u, v], dim=1)
+
+
+def _compute_rmse_torch(
+    rvecs: torch.Tensor,
+    tvecs: torch.Tensor,
+    points_3d: torch.Tensor,
+    camera_indices: torch.Tensor,
+    point_indices: torch.Tensor,
+    points_2d: torch.Tensor,
+    K: torch.Tensor,
 ) -> float:
-    if len(points_2d) == 0:
+    if points_2d.numel() == 0:
         return 0.0
-    residuals = []
-    for cam_idx, pt_idx, obs in zip(camera_indices, point_indices, points_2d):
-        rvec, tvec = camera_params[int(cam_idx)]
-        proj = _project_points(points_3d[pt_idx : pt_idx + 1], rvec, tvec, K)[0]
-        residuals.append(proj - obs)
-    residuals = np.vstack(residuals)
-    return float(np.sqrt(np.mean(residuals**2)))
-
-
-def _build_sparsity(
-    n_cams_var: int,
-    n_points: int,
-    camera_indices: np.ndarray,
-    point_indices: np.ndarray,
-    cam_to_var: Dict[int, int],
-) -> lil_matrix:
-    n_obs = camera_indices.size
-    m = n_obs * 2
-    n = n_cams_var * 6 + n_points * 3
-    A = lil_matrix((m, n), dtype=int)
-
-    for i in range(n_obs):
-        cam = int(camera_indices[i])
-        if cam in cam_to_var:
-            c = cam_to_var[cam]
-            A[2 * i : 2 * i + 2, c * 6 : c * 6 + 6] = 1
-        p = int(point_indices[i])
-        A[2 * i : 2 * i + 2, n_cams_var * 6 + p * 3 : n_cams_var * 6 + p * 3 + 3] = 1
-    return A
+    with torch.no_grad():
+        rvec_obs = rvecs[camera_indices]
+        tvec_obs = tvecs[camera_indices]
+        X_obs = points_3d[point_indices]
+        proj = _project_points_torch(X_obs, rvec_obs, tvec_obs, K)
+        residuals = proj - points_2d
+        rmse = torch.sqrt(torch.mean(residuals**2))
+    return float(rmse.item())
 
 
 def run_bundle_adjustment(
@@ -278,45 +303,52 @@ def run_bundle_adjustment(
     point_indices = np.asarray(point_indices, dtype=np.int32)
 
     fixed_cam_idx = int(sorted_indices[0])
-    cam_to_var = {
-        int(idx): k for k, idx in enumerate(sorted_indices) if int(idx) != fixed_cam_idx
-    }
+    idx_to_pos = {int(idx): i for i, idx in enumerate(sorted_indices)}
+    var_cam_indices = [int(idx) for idx in sorted_indices if int(idx) != fixed_cam_idx]
+    var_cam_positions = [idx_to_pos[idx] for idx in var_cam_indices]
 
-    n_cams_var = len(sorted_indices) - 1
-    x0_cams = []
+    # Prepare torch tensors
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dtype = torch.float32
+    K_t = torch.tensor(K.astype(np.float32), device=device, dtype=dtype)
+
+    n_cams = len(sorted_indices)
+    base_rvecs = np.zeros((n_cams, 3), dtype=np.float32)
+    base_tvecs = np.zeros((n_cams, 3), dtype=np.float32)
     for idx in sorted_indices:
-        if int(idx) == fixed_cam_idx:
-            continue
+        pos = idx_to_pos[int(idx)]
         rvec, tvec = camera_params[int(idx)]
-        x0_cams.append(rvec)
-        x0_cams.append(tvec)
-    x0_cams = np.hstack(x0_cams) if x0_cams else np.empty((0,), dtype=np.float64)
-    x0_pts = points_3d.ravel()
-    x0 = np.hstack([x0_cams, x0_pts])
+        base_rvecs[pos] = rvec.astype(np.float32)
+        base_tvecs[pos] = tvec.astype(np.float32)
 
-    def residuals(params: np.ndarray) -> np.ndarray:
-        cam_params_var = params[: n_cams_var * 6].reshape(-1, 6)
-        pts = params[n_cams_var * 6 :].reshape(-1, 3)
-        res = np.zeros((points_2d.shape[0], 2), dtype=np.float64)
+    base_rvecs_t = torch.tensor(base_rvecs, device=device, dtype=dtype)
+    base_tvecs_t = torch.tensor(base_tvecs, device=device, dtype=dtype)
 
-        for i, (cam_idx, pt_idx) in enumerate(zip(camera_indices, point_indices)):
-            cam_idx = int(cam_idx)
-            if cam_idx == fixed_cam_idx:
-                rvec, tvec = camera_params[cam_idx]
-            else:
-                c = cam_to_var[cam_idx]
-                rvec = cam_params_var[c, :3]
-                tvec = cam_params_var[c, 3:6]
-            proj = _project_points(pts[pt_idx : pt_idx + 1], rvec, tvec, K)[0]
-            res[i] = proj - points_2d[i]
-        return res.ravel()
+    var_rvecs = (
+        torch.tensor(base_rvecs[var_cam_positions], device=device, dtype=dtype)
+        if var_cam_positions
+        else torch.empty((0, 3), device=device, dtype=dtype)
+    )
+    var_tvecs = (
+        torch.tensor(base_tvecs[var_cam_positions], device=device, dtype=dtype)
+        if var_cam_positions
+        else torch.empty((0, 3), device=device, dtype=dtype)
+    )
+    var_rvecs = var_rvecs.requires_grad_(True)
+    var_tvecs = var_tvecs.requires_grad_(True)
 
-    sparsity = _build_sparsity(
-        n_cams_var=n_cams_var,
-        n_points=points_3d.shape[0],
-        camera_indices=camera_indices,
-        point_indices=point_indices,
-        cam_to_var=cam_to_var,
+    points_3d_t = torch.tensor(points_3d.astype(np.float32), device=device, dtype=dtype)
+    points_3d_t = points_3d_t.requires_grad_(True)
+
+    camera_indices_pos = torch.tensor(
+        [idx_to_pos[int(i)] for i in camera_indices],
+        device=device,
+        dtype=torch.long,
+    )
+    point_indices_t = torch.tensor(point_indices, device=device, dtype=torch.long)
+    points_2d_t = torch.tensor(points_2d.astype(np.float32), device=device, dtype=dtype)
+    var_cam_positions_t = torch.tensor(
+        var_cam_positions, device=device, dtype=torch.long
     )
 
     logging.info(
@@ -326,51 +358,86 @@ def run_bundle_adjustment(
         time.time() - t_start,
     )
 
-    initial_rmse = _compute_rmse(
-        camera_params,
-        points_3d,
-        camera_indices,
-        point_indices,
-        points_2d,
-        K,
+    # Assemble full camera params for initial RMSE
+    full_rvecs_init = base_rvecs_t.clone()
+    full_tvecs_init = base_tvecs_t.clone()
+    if var_cam_positions:
+        full_rvecs_init[var_cam_positions_t] = var_rvecs.detach()
+        full_tvecs_init[var_cam_positions_t] = var_tvecs.detach()
+
+    initial_rmse = _compute_rmse_torch(
+        full_rvecs_init,
+        full_tvecs_init,
+        points_3d_t.detach(),
+        camera_indices_pos,
+        point_indices_t,
+        points_2d_t,
+        K_t,
     )
+
+    iters = int(_cfg("SFM_BA_ITERS", 50) or 50)
+    lr = float(_cfg("SFM_BA_LR", 0.02) or 0.02)
+    huber_delta = float(_cfg("SFM_BA_HUBER_DELTA", 1.0) or 1.0)
+    log_every = int(_cfg("SFM_BA_LOG_EVERY", 25) or 25)
+
+    params = [points_3d_t]
+    if var_cam_positions:
+        params.extend([var_rvecs, var_tvecs])
+
+    optimizer = torch.optim.Adam(params, lr=lr)
 
     logging.info(
-        "[SfM] Starting bundle adjustment (max_nfev=%d)...",
-        int(_cfg("SFM_MAX_NFEV", 100) or 100),
-    )
-    result = least_squares(
-        residuals,
-        x0,
-        jac_sparsity=sparsity,
-        x_scale="jac",
-        method="trf",
-        loss="soft_l1",
-        f_scale=1.0,
-        verbose=2,
-        max_nfev=int(_cfg("SFM_MAX_NFEV", 100) or 100),
+        "[SfM] Starting bundle adjustment (device=%s, iters=%d, lr=%.3f)...",
+        device.type,
+        iters,
+        lr,
     )
 
-    refined_params = result.x
-    cam_params_var = refined_params[: n_cams_var * 6].reshape(-1, 6)
-    refined_points = refined_params[n_cams_var * 6 :].reshape(-1, 3)
+    for i in range(iters):
+        optimizer.zero_grad(set_to_none=True)
+        full_rvecs = base_rvecs_t.clone()
+        full_tvecs = base_tvecs_t.clone()
+        if var_cam_positions:
+            full_rvecs[var_cam_positions_t] = var_rvecs
+            full_tvecs[var_cam_positions_t] = var_tvecs
 
-    refined_camera_params = dict(camera_params)
+        rvec_obs = full_rvecs[camera_indices_pos]
+        tvec_obs = full_tvecs[camera_indices_pos]
+        X_obs = points_3d_t[point_indices_t]
+
+        proj = _project_points_torch(X_obs, rvec_obs, tvec_obs, K_t)
+        loss = F.huber_loss(proj, points_2d_t, delta=huber_delta, reduction="mean")
+        loss.backward()
+        optimizer.step()
+
+        if log_every > 0 and ((i + 1) % log_every == 0 or (i + 1) == iters):
+            logging.info("[SfM] BA iter %d/%d loss=%.6f", i + 1, iters, loss.item())
+
+    # Final parameters
+    full_rvecs_final = base_rvecs_t.clone()
+    full_tvecs_final = base_tvecs_t.clone()
+    if var_cam_positions:
+        full_rvecs_final[var_cam_positions_t] = var_rvecs.detach()
+        full_tvecs_final[var_cam_positions_t] = var_tvecs.detach()
+
+    refined_camera_params = {}
+    full_rvecs_np = full_rvecs_final.detach().cpu().numpy()
+    full_tvecs_np = full_tvecs_final.detach().cpu().numpy()
     for idx in sorted_indices:
-        if int(idx) == fixed_cam_idx:
-            continue
-        c = cam_to_var[int(idx)]
-        rvec = cam_params_var[c, :3]
-        tvec = cam_params_var[c, 3:6]
-        refined_camera_params[int(idx)] = (rvec, tvec)
+        pos = idx_to_pos[int(idx)]
+        refined_camera_params[int(idx)] = (
+            full_rvecs_np[pos].astype(np.float64),
+            full_tvecs_np[pos].astype(np.float64),
+        )
 
-    final_rmse = _compute_rmse(
-        refined_camera_params,
-        refined_points,
-        camera_indices,
-        point_indices,
-        points_2d,
-        K,
+    final_rmse = _compute_rmse_torch(
+        full_rvecs_final,
+        full_tvecs_final,
+        points_3d_t.detach(),
+        camera_indices_pos,
+        point_indices_t,
+        points_2d_t,
+        K_t,
     )
 
     # Average camera correction in world coordinates
