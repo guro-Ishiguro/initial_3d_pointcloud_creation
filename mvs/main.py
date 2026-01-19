@@ -546,24 +546,30 @@ def run():
     rot_scale = float(getattr(config, "ROTATION_ERROR_SCALE", 0.0) or 0.0)
 
     if enable_ba and (pos_scale > 0.0 or rot_scale > 0.0):
+        logging.info("")
+        logging.info("=" * 80)
+        logging.info("バンドル調整 (Bundle Adjustment)")
+        logging.info("=" * 80)
         logging.info(
-            "Bundle Adjustment enabled. Noise detected (Pos: %.2f, Rot: %.2f). Running Bundle Adjustment...",
+            "Noise detected (Pos: %.4f, Rot: %.4f). Running Bundle Adjustment...",
             pos_scale,
             rot_scale,
         )
         from sfm.bundle_adjustment import run_bundle_adjustment
 
         all_pairs_data = run_bundle_adjustment(all_pairs_data, config.K)
+        logging.info("=" * 80)
+        logging.info("")
     elif enable_ba and pos_scale <= 0.0 and rot_scale <= 0.0:
         logging.info(
-            "Bundle Adjustment is enabled but skipped (POSITION_ERROR_SCALE=%.2f, ROTATION_ERROR_SCALE=%.2f). "
+            "Bundle Adjustment is enabled but skipped (POSITION_ERROR_SCALE=%.4f, ROTATION_ERROR_SCALE=%.4f). "
             "Set error scales > 0 to run bundle adjustment.",
             pos_scale,
             rot_scale,
         )
     elif not enable_ba and (pos_scale > 0.0 or rot_scale > 0.0):
         logging.info(
-            "Noise detected (Pos: %.2f, Rot: %.2f) but Bundle Adjustment is disabled. "
+            "Noise detected (Pos: %.4f, Rot: %.4f) but Bundle Adjustment is disabled. "
             "Set ENABLE_BUNDLE_ADJUSTMENT=true to enable.",
             pos_scale,
             rot_scale,

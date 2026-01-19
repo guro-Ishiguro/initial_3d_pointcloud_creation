@@ -121,7 +121,11 @@ def _optimize_bundle_adjustment_gpu(
     fixed_cam_idx: int,
     cam_to_idx: Dict[int, int],
     n_iterations: int = 100,
-    learning_rate: float = 1e-3,  # 学習率を下げて安定化
+    learning_rate: float = 1e-3,
+    huber_delta: float = 2.0,
+    scheduler_factor: float = 0.5,
+    scheduler_patience: int = 10,
+    log_every: int = 20,
 ) -> Tuple[Dict[int, Tuple[np.ndarray, np.ndarray]], np.ndarray, float, float]:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -170,7 +174,7 @@ def _optimize_bundle_adjustment_gpu(
 
     # 学習率スケジューラ (停滞したら下げる)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=10
+        optimizer, mode="min", factor=scheduler_factor, patience=scheduler_patience
     )
 
     initial_loss = 0.0
@@ -194,7 +198,9 @@ def _optimize_bundle_adjustment_gpu(
 
         # 損失計算 (Huber Loss = Robust Loss)
         # deltaを小さくすることで、外れ値（大きくズレた点）の影響をより抑える
-        loss = F.huber_loss(projections, t_observations, delta=2.0, reduction="mean")
+        loss = F.huber_loss(
+            projections, t_observations, delta=huber_delta, reduction="mean"
+        )
 
         # RMSE計算 (評価用)
         with torch.no_grad():
@@ -227,9 +233,9 @@ def _optimize_bundle_adjustment_gpu(
 
         scheduler.step(rmse_val)
 
-        if i % 20 == 0:
+        if log_every > 0 and (i % log_every == 0 or i == n_iterations - 1):
             logging.info(
-                f"[SfM-GPU] Iter {i}/{n_iterations}, RMSE: {rmse_val:.4f} (Best: {best_loss:.4f})"
+                f"[SfM-GPU] Iter {i+1}/{n_iterations}, RMSE: {rmse_val:.4f} (Best: {best_loss:.4f})"
             )
 
     # --- 結果の判定と書き出し ---
@@ -468,11 +474,29 @@ def run_bundle_adjustment(
         points_2d.shape[0],
         time.time() - t_start,
     )
+    logging.info("")
 
     # --- Run GPU Optimization ---
     fixed_cam_idx = int(sorted_indices[0])
 
-    # 学習率を1e-3に下げて安定させる
+    # 最適化パラメータを設定ファイルから読み込み
+    n_iterations = int(_cfg("SFM_BA_ITERATIONS", 100) or 100)
+    learning_rate = float(_cfg("SFM_BA_LEARNING_RATE", 0.001) or 0.001)
+    huber_delta = float(_cfg("SFM_BA_HUBER_DELTA", 2.0) or 2.0)
+    scheduler_factor = float(_cfg("SFM_BA_SCHEDULER_FACTOR", 0.5) or 0.5)
+    scheduler_patience = int(_cfg("SFM_BA_SCHEDULER_PATIENCE", 10) or 10)
+    log_every = int(_cfg("SFM_BA_LOG_EVERY", 20) or 20)
+
+    logging.info(
+        "[SfM] Bundle Adjustment parameters: iterations=%d, lr=%.4f, huber_delta=%.2f, "
+        "scheduler_factor=%.2f, scheduler_patience=%d",
+        n_iterations,
+        learning_rate,
+        huber_delta,
+        scheduler_factor,
+        scheduler_patience,
+    )
+
     refined_params, _, init_rmse, final_rmse = _optimize_bundle_adjustment_gpu(
         camera_params=camera_params,
         points_3d=points_3d,
@@ -483,8 +507,12 @@ def run_bundle_adjustment(
         sorted_indices=sorted_indices,
         fixed_cam_idx=fixed_cam_idx,
         cam_to_idx=cam_to_idx,
-        n_iterations=100,
-        learning_rate=1e-3,
+        n_iterations=n_iterations,
+        learning_rate=learning_rate,
+        huber_delta=huber_delta,
+        scheduler_factor=scheduler_factor,
+        scheduler_patience=scheduler_patience,
+        log_every=log_every,
     )
 
     # Compute correction magnitude
@@ -499,6 +527,8 @@ def run_bundle_adjustment(
         corrections.append(float(np.linalg.norm(C1 - C0)))
     avg_correction = float(np.mean(corrections)) if corrections else 0.0
 
+    logging.info("")
+    logging.info("=" * 80)
     logging.info("[SfM] Bundle Adjustment Report:")
     logging.info(f"  - Initial RMSE: {init_rmse:.4f} pixels")
     logging.info(
@@ -506,6 +536,7 @@ def run_bundle_adjustment(
         f"(Improved by {max(0.0, init_rmse - final_rmse):.4f} pixels)"
     )
     logging.info(f"  - Average Camera Correction: {avg_correction:.4f} meters")
+    logging.info("=" * 80)
 
     # Update Data
     refined_pairs_data = {}
