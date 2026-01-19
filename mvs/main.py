@@ -540,6 +540,19 @@ def run():
     # Keeping original indices is important because many artifacts (depth_XXXX, GT exr names, etc.)
     # are keyed by the frame index coming from the dataset.
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
+    # --- Optional: Bundle Adjustment for noisy poses ---
+    if (
+        float(getattr(config, "POSITION_ERROR_SCALE", 0.0) or 0.0) > 0.0
+        or float(getattr(config, "ROTATION_ERROR_SCALE", 0.0) or 0.0) > 0.0
+    ):
+        logging.info(
+            "Noise detected (Pos: %.2f, Rot: %.2f). Running Bundle Adjustment...",
+            float(getattr(config, "POSITION_ERROR_SCALE", 0.0) or 0.0),
+            float(getattr(config, "ROTATION_ERROR_SCALE", 0.0) or 0.0),
+        )
+        from sfm.bundle_adjustment import run_bundle_adjustment
+
+        all_pairs_data = run_bundle_adjustment(all_pairs_data, config.K)
     if not all_pairs_data:
         logging.error(
             "No valid image pairs found. Check images under images/image_0 & image_1 and the txt/camera_params.csv."
