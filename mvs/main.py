@@ -597,26 +597,34 @@ def run():
     except Exception as e:
         logging.warning(f"Failed to write selected frames CSV: {e}")
 
-    # --- Plot & save selected camera poses (trajectory) ---
+    # --- Save selected camera poses CSV for visualization ---
     try:
-        plots_dir = os.path.join(config.OUTPUT_TYPE_DIR, "plots")
-        plot_path = os.path.join(plots_dir, "selected_camera_poses.png")
-        plane = str(getattr(config, "POSE_PLOT_PLANE", "xz") or "xz")
-        arrow_stride = int(getattr(config, "POSE_PLOT_ARROW_STRIDE", 5) or 5)
-        arrow_stride = max(1, arrow_stride)
-        arrow_scale = float(getattr(config, "POSE_PLOT_ARROW_SCALE", 0.25) or 0.25)
-        _save_selected_pose_plot(
-            data_loader=data_loader,
-            selected_indices=available_indices,
-            out_path=plot_path,
-            plane=plane,
-            arrow_stride=arrow_stride,
-            arrow_scale=arrow_scale,
-            title=f"Session={getattr(config, 'DATA_TYPE', '')} selected={len(available_indices)}",
+        plots_csv_dir = os.path.join(config.OUTPUT_TYPE_DIR, "plots")
+        os.makedirs(plots_csv_dir, exist_ok=True)
+        selected_poses_csv_path = os.path.join(plots_csv_dir, "selected_poses.csv")
+        with open(selected_poses_csv_path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["pos_x", "pos_y", "pos_z", "rot_x", "rot_y", "rot_z", "rot_w"])
+            for idx in available_indices:
+                _, pos, quat = data_loader.get_camera_pose(idx)
+                if pos is not None and quat is not None:
+                    # pos: [x, y, z], quat: [x, y, z, w]
+                    w.writerow(
+                        [
+                            float(pos[0]),
+                            float(pos[1]),
+                            float(pos[2]),
+                            float(quat[0]),
+                            float(quat[1]),
+                            float(quat[2]),
+                            float(quat[3]),
+                        ]
+                    )
+        logging.info(
+            f"Selected poses CSV saved: {selected_poses_csv_path} (count={len(available_indices)})"
         )
-        logging.info(f"Selected pose plot saved: {plot_path}")
     except Exception as e:
-        logging.warning(f"Failed to save selected pose plot: {e}")
+        logging.warning(f"Failed to write selected poses CSV: {e}")
 
     # --- Target selection ---
     requested = None
