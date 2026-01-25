@@ -212,6 +212,6 @@ ax.invert_xaxis()  # 表示上の Z 軸（= Matplotlib の x軸）を反転
 # 初期視点の設定（添付画像寄り）
 # elev: 仰角（0度=水平、90度=真上から見下ろす）
 # azim: 方位角（0度=+X方向、90度=+Y方向、180度=-X方向、270度=-Y方向）
-ax.view_init(elev=30, azim=120)
+ax.view_init(elev=30, azim=-60)
 
 plt.show()
