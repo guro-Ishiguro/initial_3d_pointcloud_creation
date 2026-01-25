@@ -205,7 +205,7 @@ ax.set_zlim(mid_z - max_range / 2, mid_z + max_range / 2)
 # 初期視点の設定（画像のような視点）
 # elev: 仰角（0度=水平、90度=真上から見下ろす）
 # azim: 方位角（0度=+X方向、90度=+Y方向、180度=-X方向、270度=-Y方向）
-# 上方からアーチ全体を見下ろす視点: elev=25度、azim=-50度
-ax.view_init(elev=25, azim=-50)
+# 上方からアーチ全体を見下ろす視点: Z軸正方向、Y軸正方向から見下ろす角度
+ax.view_init(elev=30, azim=-60)
 
 plt.show()
