@@ -111,10 +111,11 @@ def get_frustum_local(fov_h, fov_v, scale=1.0):
 fig = plt.figure(figsize=(12, 12))
 ax = fig.add_subplot(111, projection="3d")
 
-# 座標変換: 画像のような軸の向きにする
-# (x, y, z) -> (z, y, x) で、その後軸を反転して調整
-# Z軸正が左、Y軸正が上、X軸正が画面外（左下方向）になるように
-poses_transformed = np.column_stack([poses[:, 2], poses[:, 1], poses[:, 0]])
+# 座標変換（表示用）
+# 元の (x, y, z) を Matplotlib の (X, Y, Z) に割り当て直す。
+# 添付の目標イメージ（Yが縦、Zが上辺、Xが斜め）に合わせて
+# (X, Y, Z) = (Z, X, Y) とする。
+poses_transformed = np.column_stack([poses[:, 2], poses[:, 0], poses[:, 1]])
 
 # フライトパスの描画（黒線）
 ax.plot(
@@ -147,8 +148,9 @@ for i in range(len(poses)):
     for p in local_frustum:
         p_rot = mat.dot(p)  # 回転
         p_glob = p_rot + pos  # 平行移動
-        # 座標変換: (x, y, z) -> (z, y, x) で画像のような軸の向きにする
-        p_transformed = np.array([p_glob[2], p_glob[1], p_glob[0]])
+        # 座標変換（poses_transformed と同じ割当）
+        # (X, Y, Z) = (Z, X, Y)
+        p_transformed = np.array([p_glob[2], p_glob[0], p_glob[1]])
         global_frustum.append(p_transformed)
 
     c, tr, tl, bl, br = global_frustum
@@ -183,8 +185,8 @@ ax.scatter(
 
 # 軸ラベルの設定（座標変換後の軸に対応）
 ax.set_xlabel("Z")
-ax.set_ylabel("Y")
-ax.set_zlabel("X")
+ax.set_ylabel("X")
+ax.set_zlabel("Y")
 ax.set_title("Camera Poses and Flight Path")
 
 # 軸のスケールを揃える
@@ -204,14 +206,12 @@ ax.set_xlim(mid_x - max_range / 2, mid_x + max_range / 2)
 ax.set_ylim(mid_y - max_range / 2, mid_y + max_range / 2)
 ax.set_zlim(mid_z - max_range / 2, mid_z + max_range / 2)
 
-# 軸の反転: Z軸正が左、X軸正が画面外（左下方向）になるように
-ax.invert_xaxis()  # X軸（表示上のZ軸）を反転して、Z軸正が左側に
-ax.invert_zaxis()  # Z軸（表示上のX軸）を反転して、X軸正が画面外に
+# 軸の反転: Z軸正が左になるように（添付画像の目盛り方向）
+ax.invert_xaxis()  # 表示上の Z 軸（= Matplotlib の x軸）を反転
 
-# 初期視点の設定（画像のような視点）
+# 初期視点の設定（添付画像寄り）
 # elev: 仰角（0度=水平、90度=真上から見下ろす）
 # azim: 方位角（0度=+X方向、90度=+Y方向、180度=-X方向、270度=-Y方向）
-# 上方からアーチ全体を見下ろす視点: Z軸正方向、Y軸正方向から見下ろす角度
-ax.view_init(elev=30, azim=-60)
+ax.view_init(elev=30, azim=120)
 
 plt.show()
