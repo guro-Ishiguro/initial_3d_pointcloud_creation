@@ -202,6 +202,9 @@ ax.set_xlim(mid_x - max_range / 2, mid_x + max_range / 2)
 ax.set_ylim(mid_y - max_range / 2, mid_y + max_range / 2)
 ax.set_zlim(mid_z - max_range / 2, mid_z + max_range / 2)
 
-ax.view_init(elev=0, azim=0)
+# 初期視点の設定（画像のような視点）
+# elev: 仰角（0度=水平、90度=真上から見下ろす）
+# azim: 方位角（0度=+X方向、90度=+Y方向、180度=-X方向、270度=-Y方向）
+ax.view_init(elev=60, azim=135)
 
 plt.show()
