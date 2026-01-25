@@ -112,8 +112,9 @@ fig = plt.figure(figsize=(12, 12))
 ax = fig.add_subplot(111, projection="3d")
 
 # 座標変換: 画像のような軸の向きにする
-# (x, y, z) -> (-z, y, -x) で、Z軸正が左、Y軸正が上、X軸正が画面外（左下方向）になるように
-poses_transformed = np.column_stack([-poses[:, 2], poses[:, 1], -poses[:, 0]])
+# (x, y, z) -> (z, y, x) で、その後軸を反転して調整
+# Z軸正が左、Y軸正が上、X軸正が画面外（左下方向）になるように
+poses_transformed = np.column_stack([poses[:, 2], poses[:, 1], poses[:, 0]])
 
 # フライトパスの描画（黒線）
 ax.plot(
@@ -146,8 +147,8 @@ for i in range(len(poses)):
     for p in local_frustum:
         p_rot = mat.dot(p)  # 回転
         p_glob = p_rot + pos  # 平行移動
-        # 座標変換: (x, y, z) -> (-z, y, -x) で画像のような軸の向きにする
-        p_transformed = np.array([-p_glob[2], p_glob[1], -p_glob[0]])
+        # 座標変換: (x, y, z) -> (z, y, x) で画像のような軸の向きにする
+        p_transformed = np.array([p_glob[2], p_glob[1], p_glob[0]])
         global_frustum.append(p_transformed)
 
     c, tr, tl, bl, br = global_frustum
@@ -202,6 +203,10 @@ mid_z = np.mean(z_limits)
 ax.set_xlim(mid_x - max_range / 2, mid_x + max_range / 2)
 ax.set_ylim(mid_y - max_range / 2, mid_y + max_range / 2)
 ax.set_zlim(mid_z - max_range / 2, mid_z + max_range / 2)
+
+# 軸の反転: Z軸正が左、X軸正が画面外（左下方向）になるように
+ax.invert_xaxis()  # X軸（表示上のZ軸）を反転して、Z軸正が左側に
+ax.invert_zaxis()  # Z軸（表示上のX軸）を反転して、X軸正が画面外に
 
 # 初期視点の設定（画像のような視点）
 # elev: 仰角（0度=水平、90度=真上から見下ろす）
