@@ -361,7 +361,9 @@ def main():
         out_path = (args.out or "").strip()
         if not out_path:
             out_path = os.path.join("output", dataset_name, "plots", "ref_neighbors.mp4")
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        out_dir = os.path.dirname(out_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
 
         step = max(1, int(args.frame_step))
         frame_order_positions = list(range(0, len(indices), step))
