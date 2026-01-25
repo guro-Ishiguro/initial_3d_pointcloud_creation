@@ -111,8 +111,9 @@ def get_frustum_local(fov_h, fov_v, scale=1.0):
 fig = plt.figure(figsize=(12, 12))
 ax = fig.add_subplot(111, projection="3d")
 
-# 座標変換: z軸を水平方向（手前）、x軸を鉛直方向（上下）にする
-poses_transformed = np.column_stack([poses[:, 2], poses[:, 1], poses[:, 0]])
+# 座標変換: 画像のような軸の向きにする
+# (x, y, z) -> (-z, y, -x) で、Z軸正が左、Y軸正が上、X軸正が画面外（左下方向）になるように
+poses_transformed = np.column_stack([-poses[:, 2], poses[:, 1], -poses[:, 0]])
 
 # フライトパスの描画（黒線）
 ax.plot(
@@ -145,8 +146,8 @@ for i in range(len(poses)):
     for p in local_frustum:
         p_rot = mat.dot(p)  # 回転
         p_glob = p_rot + pos  # 平行移動
-        # 座標変換: (x, y, z) -> (z, y, x)
-        p_transformed = np.array([p_glob[2], p_glob[1], p_glob[0]])
+        # 座標変換: (x, y, z) -> (-z, y, -x) で画像のような軸の向きにする
+        p_transformed = np.array([-p_glob[2], p_glob[1], -p_glob[0]])
         global_frustum.append(p_transformed)
 
     c, tr, tl, bl, br = global_frustum
