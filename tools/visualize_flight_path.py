@@ -202,9 +202,13 @@ mid_x = np.mean(x_limits)
 mid_y = np.mean(y_limits)
 mid_z = np.mean(z_limits)
 
-ax.set_xlim(mid_x - max_range / 2, mid_x + max_range / 2)
-ax.set_ylim(mid_y - max_range / 2, mid_y + max_range / 2)
-ax.set_zlim(mid_z - max_range / 2, mid_z + max_range / 2)
+# 表示の拡大率（1.0=全体が入る、0.5=2倍ズーム相当）
+zoom_factor = 0.6
+zoom_range = max_range * zoom_factor
+
+ax.set_xlim(mid_x - zoom_range / 2, mid_x + zoom_range / 2)
+ax.set_ylim(mid_y - zoom_range / 2, mid_y + zoom_range / 2)
+ax.set_zlim(mid_z - zoom_range / 2, mid_z + zoom_range / 2)
 
 # 軸の反転: Z軸正が左になるように（添付画像の目盛り方向）
 ax.invert_xaxis()  # 表示上の Z 軸（= Matplotlib の x軸）を反転
