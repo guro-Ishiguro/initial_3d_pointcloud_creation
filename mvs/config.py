@@ -178,10 +178,31 @@ if _missing_params:
     )
 
 # グローバル変数に設定を反映
+# YAMLのブール値（true/false）を明示的にPythonのboolに変換
+def _yaml_to_bool(v):
+    """YAMLのブール値をPythonのboolに変換"""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.lower() in ("true", "1", "yes", "on")
+    return bool(v)
+
 g = globals()
 for k, v in _cfg.items():
     if v is not None:
-        g[k] = v
+        # ブール値として扱うべきキーを明示的に変換
+        if k in (
+            "MULTI_SCALE_ENABLED",
+            "SHOW_POINT_CLOUD",
+            "DEBUG_SAVE_DEPTH_MAPS",
+            "DEBUG_SAVE_NORMAL_MAPS",
+            "DEBUG_SAVE_GT_DEPTH_MAPS",
+            "ENABLE_BUNDLE_ADJUSTMENT",
+            "MULTI_VIEW_VISIBILITY_FILTER_ENABLED",
+        ):
+            g[k] = _yaml_to_bool(v)
+        else:
+            g[k] = v
 
 if "VIZ_DEPTH_MIN" not in _cfg or _cfg["VIZ_DEPTH_MIN"] is None:
     VIZ_DEPTH_MIN = 0
