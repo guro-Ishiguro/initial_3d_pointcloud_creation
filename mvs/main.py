@@ -30,6 +30,7 @@ from utils import (  # noqa: E402
     initialize_csv,
     parse_arguments,
     read_exr_depth,
+    resize_image_and_camera,
     save_depth_map_as_exr,
     save_depth_map_as_image,
     save_disparity_map_with_colorbar,
@@ -892,20 +893,145 @@ def run():
             logging.info(f"[{filename_stem}] ステップ2: PatchMatch MVS深度最適化")
             logging.info("-" * 80)
             refine_start = time.time()
-            (
-                optimized_depth,
-                optimized_normal,
-                iter_times_gpu,
-            ) = depth_optimization.refine_depth_with_patchmatch(
-                initial_depth=initial_depth,
-                initial_depth_error=d_cost,
-                ref_image=li_rgb,
-                ref_pose=ref_pose,
-                neighbor_views_data=neighbor_views_data,
-                gt_depth=gt_depth,
-                ref_idx=idx,
-                filename_stem=filename_stem,
+            # -----------------------------------------------------------------
+            # Coarse-to-Fine (Multi-Scale) PatchMatch
+            # - 各スケールで画像とKをリサイズ
+            # - 初回スケールはSGBM由来の初期深度をダウンサンプルして使用
+            # - 2回目以降は前段のoptimized_depthを最近傍でアップサンプルして初期値に使用
+            # - 探索範囲は initial_depth_error * SEARCH_RANGE_RATIOS[level] で段階的に縮小
+            # -----------------------------------------------------------------
+            multi_enabled = bool(getattr(config, "MULTI_SCALE_ENABLED", False))
+            scales = list(getattr(config, "SCALES", [1.0])) if multi_enabled else [1.0]
+            iters_per = (
+                list(getattr(config, "ITERATIONS_PER_SCALE", [config.PATCHMATCH_ITERATIONS]))
+                if multi_enabled
+                else [config.PATCHMATCH_ITERATIONS]
             )
+            range_ratios = (
+                list(getattr(config, "SEARCH_RANGE_RATIOS", [1.0])) if multi_enabled else [1.0]
+            )
+            # 長さが一致しない場合は安全側にフォールバック
+            if not (len(scales) == len(iters_per) == len(range_ratios)):
+                logging.warning(
+                    "Multi-scale config length mismatch. Falling back to single-scale."
+                )
+                scales, iters_per, range_ratios = [1.0], [config.PATCHMATCH_ITERATIONS], [1.0]
+
+            # フル解像度の参照（後段のフィルタリング用に保持）
+            ref_image_full = li_rgb
+            ref_pose_full = ref_pose
+            neighbor_views_full = neighbor_views_data
+
+            prev_optimized_depth = None
+            optimized_depth = None
+            optimized_normal = None
+            iter_times_gpu = []
+
+            # 基準: フル解像度の形状
+            full_h, full_w = initial_depth.shape
+
+            for level, (scale, n_iter, sr_ratio) in enumerate(
+                zip(scales, iters_per, range_ratios)
+            ):
+                s = float(scale)
+                # 現在スケールの目標サイズ
+                target_h = max(1, int(round(full_h * s)))
+                target_w = max(1, int(round(full_w * s)))
+
+                # 参照画像とKのリサイズ
+                ref_img_s, K_s = resize_image_and_camera(ref_image_full, ref_pose_full["K"], s)
+                ref_pose_s = {
+                    "R": ref_pose_full["R"],
+                    "T": ref_pose_full["T"],
+                    "K": K_s,
+                }
+
+                # 近傍ビュー（画像 + K）も同様にリサイズ
+                neighbor_views_s = []
+                for view in neighbor_views_full:
+                    img_s, K_nv = resize_image_and_camera(view["image"], view["K"], s)
+                    neighbor_views_s.append(
+                        {
+                            "image": img_s,
+                            "image_idx": view["image_idx"],
+                            "R": view["R"],
+                            "T": view["T"],
+                            "K": K_nv,
+                        }
+                    )
+
+                # 初期深度・誤差マップを現在スケールへ
+                # (深度値の混合を避けるため、最近傍でリサイズ)
+                init_depth_s = cv2.resize(
+                    initial_depth.astype(np.float32), (target_w, target_h), interpolation=cv2.INTER_NEAREST
+                )
+                d_cost_s = cv2.resize(
+                    d_cost.astype(np.float32), (target_w, target_h), interpolation=cv2.INTER_NEAREST
+                )
+                d_cost_s[np.isnan(d_cost_s)] = 1.0
+
+                # GT深度（あれば）も同解像度へ（主にデバッグ用途）
+                gt_s = None
+                if gt_depth is not None:
+                    gt_s = cv2.resize(
+                        gt_depth.astype(np.float32), (target_w, target_h), interpolation=cv2.INTER_NEAREST
+                    )
+
+                # 2段目以降: 前段の結果をアップサンプルして初期値とする
+                initial_depth_map_s = None
+                if prev_optimized_depth is not None:
+                    initial_depth_map_s = DepthOptimization.upsample_depth(
+                        prev_optimized_depth, (target_h, target_w)
+                    )
+
+                # 各スケールで反復回数を切り替え（GPUカーネルはそのまま）
+                prev_iters = int(getattr(config, "PATCHMATCH_ITERATIONS", 10) or 10)
+                config.PATCHMATCH_ITERATIONS = int(n_iter)
+
+                # スケールごとに出力フォルダが衝突しないようサブフォルダを切る（任意）
+                stem_for_scale = (
+                    os.path.join(filename_stem, f"scale_{s:.2f}")
+                    if multi_enabled
+                    else filename_stem
+                )
+
+                logging.info(
+                    f"[{filename_stem}] Multi-scale PatchMatch: level={level} scale={s:.2f} "
+                    f"iters={int(n_iter)} search_range_ratio={float(sr_ratio):.3f} "
+                    f"shape=({target_h},{target_w})"
+                )
+
+                (
+                    optimized_depth_s,
+                    optimized_normal_s,
+                    iter_times_s,
+                ) = depth_optimization.refine_depth_with_patchmatch(
+                    initial_depth=init_depth_s,
+                    initial_depth_error=d_cost_s,
+                    ref_image=ref_img_s,
+                    ref_pose=ref_pose_s,
+                    neighbor_views_data=neighbor_views_s,
+                    gt_depth=gt_s,
+                    ref_idx=idx,
+                    filename_stem=stem_for_scale,
+                    initial_depth_map=initial_depth_map_s,
+                    search_range_scale=float(sr_ratio),
+                )
+
+                # 反復回数設定を元に戻す
+                config.PATCHMATCH_ITERATIONS = prev_iters
+
+                # 次段の初期値として保持
+                prev_optimized_depth = optimized_depth_s
+
+                # 最終スケール（通常1.0）を最終出力として採用
+                optimized_depth = optimized_depth_s
+                optimized_normal = optimized_normal_s
+                if iter_times_s:
+                    # time.csv との衝突を避けるため、スケールprefix付きで記録する
+                    for iter_num, iter_time in enumerate(iter_times_s, 1):
+                        iter_times_gpu.append((s, iter_num, float(iter_time)))
+
             refine_elapsed = time.time() - refine_start
             total_times["disparity_generation"] += result.get("disp_elapsed", 0.0)
             total_times["disparity_to_depth"] += result.get("depth_conv_elapsed", 0.0)
@@ -915,10 +1041,19 @@ def run():
             )
             # 各イテレーションの時間をtime.csvに記録
             if iter_times_gpu is not None and len(iter_times_gpu) > 0:
-                for iter_num, iter_time in enumerate(iter_times_gpu, 1):
-                    append_to_csv(
-                        time_csv_path, [f"iter_{iter_num}", f"{iter_time:.6f}"]
-                    )
+                # multi-scaleでは (scale, iter_num, time) のタプル群
+                if isinstance(iter_times_gpu[0], tuple):
+                    for s, iter_num, iter_time in iter_times_gpu:
+                        append_to_csv(
+                            time_csv_path,
+                            [f"scale_{s:.2f}_iter_{int(iter_num)}", f"{float(iter_time):.6f}"],
+                        )
+                else:
+                    # 互換: 単一スケールの従来形式
+                    for iter_num, iter_time in enumerate(iter_times_gpu, 1):
+                        append_to_csv(
+                            time_csv_path, [f"iter_{iter_num}", f"{iter_time:.6f}"]
+                        )
                 logging.info(
                     f"[{filename_stem}] {len(iter_times_gpu)}個のイテレーション時間をtime.csvに保存しました: {time_csv_path}"
                 )

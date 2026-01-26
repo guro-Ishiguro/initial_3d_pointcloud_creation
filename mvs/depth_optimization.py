@@ -1281,6 +1281,32 @@ class DepthOptimization:
             )
             self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR = 10.0
 
+    @staticmethod
+    def upsample_depth(low_res_depth: np.ndarray, target_shape: tuple) -> np.ndarray:
+        """
+        低解像度の深度マップを目標解像度へアップサンプリングする。
+        深度値の「混合」を避けるため、最近傍補間を使用する。
+
+        Args:
+            low_res_depth: (H_low, W_low) float depth map
+            target_shape: (H_target, W_target)
+
+        Returns:
+            (H_target, W_target) float32 depth map
+        """
+        if low_res_depth is None:
+            raise ValueError("low_res_depth is None")
+        if target_shape is None or len(target_shape) != 2:
+            raise ValueError(f"target_shape must be (H,W), got {target_shape}")
+        th, tw = int(target_shape[0]), int(target_shape[1])
+        if th <= 0 or tw <= 0:
+            raise ValueError(f"Invalid target_shape: {target_shape}")
+
+        depth = low_res_depth.astype(np.float32, copy=False)
+        # cv2.resize expects (W,H)
+        up = cv2.resize(depth, (tw, th), interpolation=cv2.INTER_NEAREST)
+        return up.astype(np.float32, copy=False)
+
     def _initialize_normals_gpu(self, depth_map, K):
         h, w = depth_map.shape
         d_depth_map = cuda.to_device(depth_map.astype(np.float32))
@@ -1463,13 +1489,25 @@ class DepthOptimization:
         gt_depth,
         ref_idx=0,
         filename_stem=None,
+        initial_depth_map=None,
+        search_range_scale: float = 1.0,
     ):
         logging.info(
             "Starting PatchMatch MVS depth refinement using checkerboard propagation..."
         )
 
-        h, w = initial_depth.shape
-        depth_map = initial_depth.astype(np.float32)
+        # ---------------------------------------------------------------------
+        # Coarse-to-Fine対応:
+        # - initial_depth_map が与えられた場合は、その深度を初期値として使用する
+        # - 探索範囲(depth_range_map)は initial_depth_error * search_range_scale として制御する
+        #   (GPUカーネルは変更せず、渡すdepth_range_mapのみを調整)
+        # ---------------------------------------------------------------------
+        if initial_depth_map is not None:
+            depth_map = initial_depth_map.astype(np.float32)
+        else:
+            depth_map = initial_depth.astype(np.float32)
+
+        h, w = depth_map.shape
         normal_map = self._initialize_normals_gpu(
             depth_map, ref_pose["K"].astype(np.float32)
         )
@@ -1594,7 +1632,8 @@ class DepthOptimization:
         # 各イテレーションの深度マップを保存するリスト（エラーマップの統一スケール用）
         all_iteration_depths = []
         if gt_depth is not None:
-            all_iteration_depths.append(initial_depth.copy())
+            # 実際に初期化に使った深度（initial_depth_map優先）を保存
+            all_iteration_depths.append(depth_map.copy())
 
         (
             depth_map,
@@ -1605,7 +1644,8 @@ class DepthOptimization:
             depth_map,
             normal_map,
             cost_map,
-            initial_depth_error,
+            # 探索範囲の制御: initial_depth_error にスケール係数を掛ける
+            (initial_depth_error.astype(np.float32) * np.float32(search_range_scale)),
             ref_image_gray,
             ref_pose_K,
             ref_pose_R,

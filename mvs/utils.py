@@ -41,6 +41,50 @@ except ImportError:
 # ここでの basicConfig は削除（共通初期化は mvs.logging_setup.setup_logging 側に統一）
 
 
+def resize_image_and_camera(image: np.ndarray, K: np.ndarray, scale: float):
+    """
+    画像とカメラ内部パラメータをスケールに合わせてリサイズする。
+
+    Args:
+        image: (H,W) or (H,W,C)
+        K: 3x3 camera intrinsics
+        scale: resize scale (e.g., 0.25, 0.5, 1.0)
+
+    Returns:
+        resized_image, resized_K
+    """
+    if image is None:
+        raise ValueError("image is None")
+    if K is None:
+        raise ValueError("K is None")
+
+    s = float(scale)
+    if not np.isfinite(s) or s <= 0:
+        raise ValueError(f"Invalid scale: {scale}")
+
+    h, w = image.shape[:2]
+    new_w = max(1, int(round(w * s)))
+    new_h = max(1, int(round(h * s)))
+
+    # Downscale: INTER_AREA tends to preserve information; Upscale: LINEAR.
+    interp = cv2.INTER_AREA if s < 1.0 else cv2.INTER_LINEAR
+    resized_image = cv2.resize(image, (new_w, new_h), interpolation=interp)
+
+    K_in = np.asarray(K, dtype=np.float32)
+    if K_in.shape != (3, 3):
+        raise ValueError(f"K must be 3x3, got {K_in.shape}")
+
+    K_out = K_in.copy()
+    # fx, fy, cx, cy scale with image resize; keep K[2,2]=1.0.
+    K_out[0, 0] *= s  # fx
+    K_out[1, 1] *= s  # fy
+    K_out[0, 2] *= s  # cx
+    K_out[1, 2] *= s  # cy
+    K_out[2, 2] = 1.0
+
+    return resized_image, K_out
+
+
 def parse_arguments():
     """コマンド引数の値を受け取る"""
     parser = argparse.ArgumentParser(description="3D Point Cloud Creater")
