@@ -900,7 +900,19 @@ def run():
             # - 2回目以降は前段のoptimized_depthを最近傍でアップサンプルして初期値に使用
             # - 探索範囲は initial_depth_error * SEARCH_RANGE_RATIOS[level] で段階的に縮小
             # -----------------------------------------------------------------
-            multi_enabled = bool(getattr(config, "MULTI_SCALE_ENABLED", False))
+            # 設定値の読み込み（YAMLのtrue/falseを明示的に変換）
+            multi_enabled_raw = getattr(config, "MULTI_SCALE_ENABLED", False)
+            if isinstance(multi_enabled_raw, str):
+                multi_enabled = multi_enabled_raw.lower() in ("true", "1", "yes", "on")
+            else:
+                multi_enabled = bool(multi_enabled_raw)
+            
+            # 設定値の確認（デバッグ用）
+            logging.info(
+                f"[{filename_stem}] Multi-scale config check: MULTI_SCALE_ENABLED={multi_enabled} "
+                f"(raw={multi_enabled_raw}, type={type(multi_enabled_raw).__name__})"
+            )
+            
             scales = list(getattr(config, "SCALES", [1.0])) if multi_enabled else [1.0]
             iters_per = (
                 list(getattr(config, "ITERATIONS_PER_SCALE", [config.PATCHMATCH_ITERATIONS]))
@@ -910,10 +922,19 @@ def run():
             range_ratios = (
                 list(getattr(config, "SEARCH_RANGE_RATIOS", [1.0])) if multi_enabled else [1.0]
             )
+            
+            # 読み込まれた設定値の確認
+            logging.info(
+                f"[{filename_stem}] Multi-scale config loaded: "
+                f"scales={scales}, iters_per={iters_per}, range_ratios={range_ratios}"
+            )
+            
             # 長さが一致しない場合は安全側にフォールバック
             if not (len(scales) == len(iters_per) == len(range_ratios)):
                 logging.warning(
-                    "Multi-scale config length mismatch. Falling back to single-scale."
+                    f"Multi-scale config length mismatch (scales={len(scales)}, "
+                    f"iters_per={len(iters_per)}, range_ratios={len(range_ratios)}). "
+                    "Falling back to single-scale."
                 )
                 scales, iters_per, range_ratios = [1.0], [config.PATCHMATCH_ITERATIONS], [1.0]
 
