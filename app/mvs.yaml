@@ -10,6 +10,7 @@ NUM_DISP: 16
 # ============================================================================
 PATCHMATCH_ITERATIONS: 10
 PATCHMATCH_PATCH_SIZE: 7
+PATCHMATCH_SCALES: 3
 ZNCC_EPSILON: 1e-6
 TOP_K_COSTS: 5
 PATCHMATCH_DECAY_RATE: 0.95
@@ -86,8 +87,8 @@ SFM_BA_SCHEDULER_PATIENCE: 10       # 学習率スケジューラのpatience（�
 SFM_BA_LOG_EVERY: 20                # ログ出力間隔（イテレーション数）
 
 # 特徴点マッチングパラメータ
-SFM_MAX_MATCHES: 2000               # 1ペアあたりの最大マッチ数
-SFM_MAX_POINTS_PER_PAIR: 500        # 1ペアあたりの最大3D点数
+SFM_MAX_MATCHES: 5000               # 1ペアあたりの最大マッチ数
+SFM_MAX_POINTS_PER_PAIR: 1000        # 1ペアあたりの最大3D点数
 SFM_MATCH_RATIO: 0.75               # 特徴点マッチングの比率閾値（Lowe's ratio test）
 
 # ============================================================================

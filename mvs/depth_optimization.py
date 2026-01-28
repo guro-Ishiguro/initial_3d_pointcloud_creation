@@ -1281,6 +1281,13 @@ class DepthOptimization:
             )
             self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR = 10.0
 
+        # マルチスケール PatchMatch 用のスケール数
+        if not hasattr(self.config, "PATCHMATCH_SCALES"):
+            logging.info(
+                "PATCHMATCH_SCALES not found in config. Using default value 3."
+            )
+            self.config.PATCHMATCH_SCALES = 3
+
     def _initialize_normals_gpu(self, depth_map, K):
         h, w = depth_map.shape
         d_depth_map = cuda.to_device(depth_map.astype(np.float32))
@@ -1453,9 +1460,129 @@ class DepthOptimization:
             f"{title_prefix} | Depth: {depth:.3f}, Normal: [{normal[0]:.2f}, {normal[1]:.2f}, {normal[2]:.2f}]"
         )
 
-    def refine_depth_with_patchmatch(
+    def _build_image_and_camera_pyramids(
+        self, ref_image, ref_pose, neighbor_views_data, num_scales
+    ):
+        """
+        参照画像・近傍画像およびカメラ内部パラメータKのピラミッドを構築する。
+        Level 0 が最も粗い解像度（coarsest）になるように並べ替えて返す。
+        """
+        num_scales = max(1, int(num_scales))
+
+        # 参照画像とKのピラミッド（finest -> coarsest）
+        ref_images_ftc = [ref_image]
+        K_ref_ftc = [ref_pose["K"].astype(np.float32)]
+        img = ref_image
+        K_curr = K_ref_ftc[0].copy()
+        for _ in range(1, num_scales):
+            img = cv2.pyrDown(img)
+            scale = 0.5
+            K_curr = K_curr.copy()
+            K_curr[0, 0] *= scale
+            K_curr[1, 1] *= scale
+            K_curr[0, 2] *= scale
+            K_curr[1, 2] *= scale
+            ref_images_ftc.append(img)
+            K_ref_ftc.append(K_curr)
+
+        # 近傍ビューごとの画像とKのピラミッド（finest -> coarsest）
+        neighbor_pyramids = []
+        for view in neighbor_views_data:
+            imgs = [view["image"]]
+            Ks = [view["K"].astype(np.float32)]
+            img_v = view["image"]
+            K_v = Ks[0].copy()
+            for _ in range(1, num_scales):
+                img_v = cv2.pyrDown(img_v)
+                scale = 0.5
+                K_v = K_v.copy()
+                K_v[0, 0] *= scale
+                K_v[1, 1] *= scale
+                K_v[0, 2] *= scale
+                K_v[1, 2] *= scale
+                imgs.append(img_v)
+                Ks.append(K_v)
+            neighbor_pyramids.append(
+                {
+                    "imgs": imgs,
+                    "Ks": Ks,
+                    "R": view["R"].astype(np.float32),
+                    "T": view["T"].astype(np.float32),
+                    "image_idx": view.get("image_idx"),
+                }
+            )
+
+        # coarse(0) -> fine(num_scales-1) に並べ替え
+        ref_images_levels = []
+        ref_poses_levels = []
+        neighbor_views_levels = []
+        R_ref = ref_pose["R"].astype(np.float32)
+        T_ref = ref_pose["T"].astype(np.float32)
+        for level in range(num_scales):
+            idx = num_scales - 1 - level  # finest-to-coarsest配列からインデックスを取得
+            ref_images_levels.append(ref_images_ftc[idx])
+            ref_poses_levels.append(
+                {
+                    "K": K_ref_ftc[idx],
+                    "R": R_ref,
+                    "T": T_ref,
+                }
+            )
+            neigh_level = []
+            for nvp in neighbor_pyramids:
+                neigh_level.append(
+                    {
+                        "image": nvp["imgs"][idx],
+                        "K": nvp["Ks"][idx],
+                        "R": nvp["R"],
+                        "T": nvp["T"],
+                        "image_idx": nvp["image_idx"],
+                    }
+                )
+            neighbor_views_levels.append(neigh_level)
+
+        return ref_images_levels, ref_poses_levels, neighbor_views_levels
+
+    def _build_depth_pyramids(self, initial_depth, initial_depth_error, num_scales):
+        """
+        初期深度と深度誤差マップのピラミッドを構築する。
+        Level 0 が最も粗い解像度（coarsest）になるように並べ替えて返す。
+        """
+        num_scales = max(1, int(num_scales))
+        depth_ftc = [initial_depth.astype(np.float32)]
+        err_ftc = [
+            (
+                initial_depth_error.astype(np.float32)
+                if initial_depth_error is not None
+                else None
+            )
+        ]
+
+        depth_curr = depth_ftc[0]
+        err_curr = err_ftc[0]
+        for _ in range(1, num_scales):
+            depth_curr = cv2.resize(
+                depth_curr,
+                (depth_curr.shape[1] // 2, depth_curr.shape[0] // 2),
+                interpolation=cv2.INTER_NEAREST,
+            )
+            depth_ftc.append(depth_curr)
+            if err_curr is not None:
+                err_curr = cv2.resize(
+                    err_curr,
+                    (err_curr.shape[1] // 2, err_curr.shape[0] // 2),
+                    interpolation=cv2.INTER_NEAREST,
+                )
+            err_ftc.append(err_curr)
+
+        # coarse(0) -> fine(num_scales-1)
+        depth_levels = depth_ftc[::-1]
+        err_levels = err_ftc[::-1]
+        return depth_levels, err_levels
+
+    def _process_single_scale(
         self,
-        initial_depth,
+        depth_map,
         initial_depth_error,
         ref_image,
         ref_pose,
@@ -1463,13 +1590,16 @@ class DepthOptimization:
         gt_depth,
         ref_idx=0,
         filename_stem=None,
+        scale_level: int = 0,
+        num_scales: int = 1,
     ):
         logging.info(
-            "Starting PatchMatch MVS depth refinement using checkerboard propagation..."
+            f"Starting PatchMatch MVS depth refinement (scale {scale_level+1}/{num_scales}) "
+            "using checkerboard propagation..."
         )
 
-        h, w = initial_depth.shape
-        depth_map = initial_depth.astype(np.float32)
+        h, w = depth_map.shape
+        depth_map = depth_map.astype(np.float32)
         normal_map = self._initialize_normals_gpu(
             depth_map, ref_pose["K"].astype(np.float32)
         )
@@ -1561,12 +1691,6 @@ class DepthOptimization:
         cost_map = d_cost_map.copy_to_host()
         logging.info("Initial cost map computation completed on GPU.")
 
-        # Early-stop state will be managed on-the-fly without predeclared thresholds
-
-        # CSV書き込み処理は削除（評価は別スクリプトで実行）
-
-        # start_refinement_time removed (unused)
-
         # --- PatchMatch反復ループ (GPU) ---
         save_each_depth_dir = None
         # ファイル名ベースのフォルダ名を使用（フォールバック: ref_idx）
@@ -1594,7 +1718,7 @@ class DepthOptimization:
         # 各イテレーションの深度マップを保存するリスト（エラーマップの統一スケール用）
         all_iteration_depths = []
         if gt_depth is not None:
-            all_iteration_depths.append(initial_depth.copy())
+            all_iteration_depths.append(depth_map.copy())
 
         (
             depth_map,
@@ -1632,8 +1756,6 @@ class DepthOptimization:
         # すべてのイテレーションの深度マップを結合
         if gt_depth is not None and iteration_depths:
             all_iteration_depths.extend(iteration_depths)
-
-        # 深度マップのEXR形式での保存はmain.pyで統一して行うため、ここでは削除
 
         # --- Debug: cost_map statistics and cost validation check on samples ---
         try:
@@ -1684,7 +1806,9 @@ class DepthOptimization:
         except Exception as e:
             logging.warning(f"[GPU Debug] cost comparison failed: {e}")
 
-        logging.info("PatchMatch MVS refinement finished.")
+        logging.info(
+            f"PatchMatch MVS refinement finished at scale {scale_level+1}/{num_scales}."
+        )
         final_depth_map = depth_map.copy()
         final_normal_map = normal_map.copy()
 
@@ -1709,6 +1833,90 @@ class DepthOptimization:
             logging.debug(f"Skip plotting GPU iteration time: {e}")
 
         return final_depth_map, final_normal_map, iter_times_gpu
+
+    def refine_depth_with_patchmatch(
+        self,
+        initial_depth,
+        initial_depth_error,
+        ref_image,
+        ref_pose,
+        neighbor_views_data,
+        gt_depth,
+        ref_idx=0,
+        filename_stem=None,
+    ):
+        """
+        マルチスケール（Coarse-to-Fine）PatchMatch MVS による深度最適化。
+
+        - Level 0: 最も粗い解像度の画像・深度マップで大域的に探索
+        - Level i -> i+1: 深度マップをアップスケールし、次のレベルの初期値として使用
+        """
+        num_scales = max(1, int(getattr(self.config, "PATCHMATCH_SCALES", 1)))
+        logging.info(
+            f"Starting multi-scale PatchMatch refinement with {num_scales} scales..."
+        )
+
+        # 画像・カメラパラメータのピラミッド（Level 0: coarse）
+        (
+            ref_images_levels,
+            ref_poses_levels,
+            neighbor_views_levels,
+        ) = self._build_image_and_camera_pyramids(
+            ref_image, ref_pose, neighbor_views_data, num_scales
+        )
+
+        # 深度・深度誤差のピラミッド（Level 0: coarse）
+        depth_levels, err_levels = self._build_depth_pyramids(
+            initial_depth, initial_depth_error, num_scales
+        )
+
+        current_depth = None
+        current_normal = None
+        final_iter_times = []
+
+        for level in range(num_scales):
+            ref_img_l = ref_images_levels[level]
+            ref_pose_l = ref_poses_levels[level]
+            neigh_l = neighbor_views_levels[level]
+
+            if level == 0:
+                # 最も粗いレベルでは、SGBM 深度を縮小したものを初期値として使用
+                depth_init_l = depth_levels[level]
+                err_init_l = err_levels[level]
+            else:
+                # 一つ粗いレベルの結果をアップスケールして初期深度とする
+                target_h, target_w = depth_levels[level].shape
+                current_depth_resized = cv2.resize(
+                    current_depth,
+                    (target_w, target_h),
+                    interpolation=cv2.INTER_NEAREST,
+                )
+                depth_init_l = current_depth_resized.astype(np.float32)
+                # 深度誤差マップはピラミッド側をそのまま利用
+                err_init_l = err_levels[level]
+
+            # 各レベルで PatchMatch を実行
+            # （最終レベルの反復時間のみ返り値として使用）
+            depth_opt_l, normal_opt_l, iter_times_l = self._process_single_scale(
+                depth_init_l,
+                err_init_l,
+                ref_img_l,
+                ref_pose_l,
+                neigh_l,
+                gt_depth if level == num_scales - 1 else None,
+                ref_idx=ref_idx,
+                filename_stem=filename_stem,
+                scale_level=level,
+                num_scales=num_scales,
+            )
+
+            current_depth = depth_opt_l
+            current_normal = normal_opt_l
+            if level == num_scales - 1:
+                final_iter_times = iter_times_l
+
+        logging.info("Multi-scale PatchMatch MVS refinement finished.")
+        return current_depth, current_normal, final_iter_times
 
     def filter_depth_map_by_geometric_consistency(
         self, ref_depth_map, ref_pose, neighbor_views_data, all_optimized_depths

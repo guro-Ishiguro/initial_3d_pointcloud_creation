@@ -20,7 +20,7 @@ def main():
         "--config",
         type=str,
         default=None,
-        help="Path to YAML config (default: app/config.yaml)",
+        help="Path to MVS YAML config (default: app/mvs.yaml)",
     )
     parser.add_argument(
         "--dataset",
@@ -38,10 +38,20 @@ def main():
     if mvs_dir not in sys.path:
         sys.path.insert(0, mvs_dir)
 
+    # Resolve config path:
+    # - If --config is given, use it.
+    # - Otherwise, default to app/mvs.yaml under the project root.
+    if args.config is None:
+        default_config = os.path.join(project_root, "app", "mvs.yaml")
+        args.config = default_config
+
+    # Expose the MVS config path so mvs/config.py will prioritise it
+    os.environ["APP_MVS_CONFIG"] = os.path.abspath(args.config)
+
     # Remove custom args so downstream parser (mvs.utils.parse_arguments) doesn't see them
     sys.argv = [sys.argv[0]]
 
-    # Apply global settings overrides if present
+    # Apply global settings overrides (for generic env vars) if present
     try:
         from app.settings import apply_env_overrides
 
