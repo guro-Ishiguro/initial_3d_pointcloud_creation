@@ -270,51 +270,127 @@ def _get_feature_detector():
     return cv2.ORB_create(nfeatures=5000), "ORB"
 
 
+def _create_matcher(det_name: str) -> cv2.BFMatcher:
+    if det_name == "SIFT":
+        return cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
+    return cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+
+
+def _extract_features(
+    detector, img: np.ndarray
+) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    """
+    Returns:
+        kpts_xy: (N, 2) float64
+        desc: (N, D) or None
+    """
+    kps, desc = detector.detectAndCompute(img, None)
+    if not kps or desc is None:
+        return np.empty((0, 2), dtype=np.float64), None
+    kpts_xy = np.array([kp.pt for kp in kps], dtype=np.float64)
+    return kpts_xy, desc
+
+
+def _match_descriptors_mutual_ransac(
+    matcher: cv2.BFMatcher,
+    kpts1_xy: np.ndarray,
+    desc1: Optional[np.ndarray],
+    kpts2_xy: np.ndarray,
+    desc2: Optional[np.ndarray],
+    max_matches: int,
+    ratio: float,
+    ransac_reproj_threshold: float = 1.0,
+    ransac_confidence: float = 0.99,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    (1) ratio test, (2) mutual check, (3) Fundamental matrix RANSAC を通った
+    対応点インデックスのペアを返す。
+    Returns:
+        idx1: (M,) indices into kpts1_xy/desc1
+        idx2: (M,) indices into kpts2_xy/desc2
+    """
+    if desc1 is None or desc2 is None or kpts1_xy.shape[0] < 8 or kpts2_xy.shape[0] < 8:
+        return np.empty((0,), dtype=np.int32), np.empty((0,), dtype=np.int32)
+
+    raw_f = matcher.knnMatch(desc1, desc2, k=2)
+    good_f = []
+    for m_n in raw_f:
+        if len(m_n) != 2:
+            continue
+        m, n = m_n
+        if m.distance < ratio * n.distance:
+            good_f.append(m)
+    if not good_f:
+        return np.empty((0,), dtype=np.int32), np.empty((0,), dtype=np.int32)
+
+    good_f.sort(key=lambda m: m.distance)
+    if max_matches > 0:
+        good_f = good_f[:max_matches]
+
+    # reverse for mutual check
+    raw_r = matcher.knnMatch(desc2, desc1, k=2)
+    best_r: Dict[int, Tuple[float, int]] = {}
+    for m_n in raw_r:
+        if len(m_n) != 2:
+            continue
+        m, n = m_n
+        if m.distance < ratio * n.distance:
+            prev = best_r.get(m.queryIdx)
+            if prev is None or m.distance < prev[0]:
+                best_r[m.queryIdx] = (float(m.distance), int(m.trainIdx))
+
+    mutual = []
+    for m in good_f:
+        rev = best_r.get(int(m.trainIdx))
+        if rev is None:
+            continue
+        _, rev_train = rev
+        if int(rev_train) == int(m.queryIdx):
+            mutual.append(m)
+
+    if len(mutual) < 8:
+        return np.empty((0,), dtype=np.int32), np.empty((0,), dtype=np.int32)
+
+    idx1 = np.array([m.queryIdx for m in mutual], dtype=np.int32)
+    idx2 = np.array([m.trainIdx for m in mutual], dtype=np.int32)
+    pts1 = kpts1_xy[idx1]
+    pts2 = kpts2_xy[idx2]
+
+    F, mask = cv2.findFundamentalMat(
+        pts1, pts2, cv2.FM_RANSAC, ransac_reproj_threshold, ransac_confidence
+    )
+    if F is None or mask is None:
+        return np.empty((0,), dtype=np.int32), np.empty((0,), dtype=np.int32)
+
+    mask = mask.ravel().astype(bool)
+    idx1 = idx1[mask]
+    idx2 = idx2[mask]
+    return idx1, idx2
+
+
 def _match_features(
     img1: np.ndarray,
     img2: np.ndarray,
     max_matches: int,
     ratio: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    # Backward compatible wrapper: returns only coordinates (no indices).
     detector, det_name = _get_feature_detector()
-    k1, d1 = detector.detectAndCompute(img1, None)
-    k2, d2 = detector.detectAndCompute(img2, None)
-
-    if d1 is None or d2 is None or len(k1) < 8 or len(k2) < 8:
+    matcher = _create_matcher(det_name)
+    kpts1_xy, d1 = _extract_features(detector, img1)
+    kpts2_xy, d2 = _extract_features(detector, img2)
+    idx1, idx2 = _match_descriptors_mutual_ransac(
+        matcher=matcher,
+        kpts1_xy=kpts1_xy,
+        desc1=d1,
+        kpts2_xy=kpts2_xy,
+        desc2=d2,
+        max_matches=max_matches,
+        ratio=ratio,
+    )
+    if idx1.size == 0:
         return np.empty((0, 2), dtype=np.float64), np.empty((0, 2), dtype=np.float64)
-
-    if det_name == "SIFT":
-        matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
-    else:
-        matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
-
-    raw = matcher.knnMatch(d1, d2, k=2)
-    good = []
-    for m, n in raw:
-        if m.distance < ratio * n.distance:
-            good.append(m)
-
-    if not good:
-        return np.empty((0, 2), dtype=np.float64), np.empty((0, 2), dtype=np.float64)
-
-    good.sort(key=lambda m: m.distance)
-    if max_matches > 0:
-        good = good[:max_matches]
-
-    pts1 = np.array([k1[m.queryIdx].pt for m in good], dtype=np.float64)
-    pts2 = np.array([k2[m.trainIdx].pt for m in good], dtype=np.float64)
-
-    if len(pts1) < 8:
-        return np.empty((0, 2), dtype=np.float64), np.empty((0, 2), dtype=np.float64)
-
-    F, mask = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC, 1.0, 0.99)
-    if F is None or mask is None:
-        return np.empty((0, 2), dtype=np.float64), np.empty((0, 2), dtype=np.float64)
-
-    mask = mask.ravel().astype(bool)
-    pts1 = pts1[mask]
-    pts2 = pts2[mask]
-    return pts1, pts2
+    return kpts1_xy[idx1], kpts2_xy[idx2]
 
 
 def _triangulate_points(
