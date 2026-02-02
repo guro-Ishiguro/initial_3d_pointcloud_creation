@@ -462,7 +462,13 @@ def _evaluate_cost_cuda(
             if costs[i] > costs[j]:
                 costs[i], costs[j] = costs[j], costs[i]
     top_k = min(top_k_costs, num_neighbors)
-    return np.median(costs[:top_k])
+    # CUDA device does not support np.median; use sorted median
+    if top_k <= 0:
+        return 1.0
+    mid = (top_k - 1) // 2
+    if top_k % 2 == 1:
+        return costs[mid]
+    return (costs[mid] + costs[mid + 1]) * 0.5
 
 
 @njit(fastmath=True)
@@ -899,7 +905,7 @@ def _check_geometric_consistency_jit(
     neighbor_depth_maps_np,
     error_threshold,
 ):
-    """1つの3D点が近傍ビューの深度マップと幾何学的に一貫している視点数を返す。
+    """1つの3D点が近傍ビューの深度マップと幾何学的に一貫している視点数を返す。"""
     consistent_views = 0
     h, w = neighbor_depth_maps_np[0].shape
 
@@ -1553,7 +1559,7 @@ class DepthOptimization:
             ),
             gt_depth=gt_depth,
             iter_times=iter_times_gpu,
-            csv_files=None,  
+            csv_files=None,
         )
 
         if gt_depth is not None and iteration_depths:
