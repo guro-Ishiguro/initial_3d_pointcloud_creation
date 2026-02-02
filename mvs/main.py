@@ -1,4 +1,5 @@
 # mvs/main.py
+"""MVS パイプラインのエントリポイント。"""
 
 import bisect
 import csv
@@ -41,11 +42,7 @@ from app.data_loader import DataLoader  # noqa: E402
 
 
 def _pose_unity_to_cv_RT(pos_unity, quat_unity):
-    """
-    Convert Unity-like pose (pos, quat) to CV extrinsics used in this pipeline.
-    Matches the logic in app/data_loader.py.
-    Returns (R_cv, T_cv) as np.float32.
-    """
+    """Unity 系の位置・四元数を OpenCV の外参（R, T）に変換する。"""
     pos_cv = np.array([pos_unity[0], -pos_unity[1], pos_unity[2]], dtype=np.float32)
     quat_cv = np.array(
         [-quat_unity[0], quat_unity[1], -quat_unity[2], quat_unity[3]],
@@ -65,11 +62,7 @@ def _select_nearest_neighbors(
     r_min: float,
     r_max: float,
 ):
-    """
-    Select neighbors by distance from ref_pos (nearest first).
-    - candidates: list of dicts with at least {"pos": (x,y,z), ...}
-    Returns a list of candidate dicts (length <= count).
-    """
+    """ref_pos からの距離が r_min〜r_max の候補を距離順に最大 count 件選び、辞書のリストで返す。"""
     ref = np.array(ref_pos, dtype=np.float64)
 
     items = []
@@ -94,19 +87,7 @@ def _select_nearest_neighbors(
 
 
 def _log_selected_neighbors(ref_idx: int, frames: list):
-    """
-    Log selected neighbor frames for a reference view.
-    Controlled via YAML/env:
-      - LOG_SELECTED_NEIGHBORS (bool)
-      - LOG_SELECTED_NEIGHBORS_MAX_PER_REF (int)
-      - LOG_SELECTED_NEIGHBORS_MAX_REFS (int)
-      - LOG_SELECTED_NEIGHBORS_SHOW_PATHS (bool)
-    """
-    # Defaults:
-    # - enabled
-    # - log 10 neighbors per reference
-    # - log for all reference views
-    # - do not show paths
+    """参照ビュー ref_idx の選択近傍フレームをログに出す。"""
     if not bool(getattr(config, "LOG_SELECTED_NEIGHBORS", True)):
         return
 
@@ -146,13 +127,7 @@ def _save_selected_pose_plot(
     arrow_scale: float = 0.25,
     title: str = "",
 ):
-    """
-    Plot camera positions (trajectory) and approximate viewing direction arrows for selected frames.
-
-    - plane: "xz" (recommended for Unity-like top-down), "xy", "yz"
-    - arrow_stride: draw direction arrows every N selected frames (>=1)
-    - arrow_scale: arrow length multiplier in plot units
-    """
+    """選択フレームのカメラ位置（軌跡）と向きの矢印を plane（xz/xy/yz）でプロットし、out_path に保存する。"""
     if not selected_indices:
         return
 
@@ -162,7 +137,6 @@ def _save_selected_pose_plot(
     axis_names = ["x", "y", "z"]
 
     xs, ys = [], []
-    # forward direction (projected)
     dxs, dys = [], []
     arrow_points_x, arrow_points_y = [], []
     arrow_dxs, arrow_dys = [], []
@@ -175,7 +149,6 @@ def _save_selected_pose_plot(
         xs.append(float(p[ax_i]))
         ys.append(float(p[ax_j]))
 
-        # Direction arrow: assume camera forward is +Z in the pose coordinate.
         try:
             rot = Rotation.from_quat(np.array(quat, dtype=np.float64))
             forward = rot.apply(np.array([0.0, 0.0, 1.0], dtype=np.float64))
@@ -203,11 +176,9 @@ def _save_selected_pose_plot(
     ax.plot(xs, ys, "-", linewidth=1.0, alpha=0.8, label="trajectory")
     ax.scatter(xs, ys, s=6, alpha=0.8)
 
-    # Start/end markers
     ax.scatter([xs[0]], [ys[0]], s=40, marker="o", label="start")
     ax.scatter([xs[-1]], [ys[-1]], s=40, marker="x", label="end")
 
-    # Direction arrows
     if arrow_points_x:
         ax.quiver(
             arrow_points_x,
@@ -235,9 +206,7 @@ def _save_selected_pose_plot(
 
 
 def _compute_normals_from_depth(depth_map: np.ndarray, K: np.ndarray) -> np.ndarray:
-    """
-    深度マップから法線マップを計算する（高速なJITコンパイル版を使用）
-    """
+    """深度マップから法線マップを計算する。"""
     return _initialize_normals_from_depth_jit(
         depth_map.astype(np.float32), K.astype(np.float32)
     )
@@ -255,29 +224,7 @@ def _process_single_view_cpu(
     _log_selected_neighbors,
     _compute_normals_from_depth,
 ):
-    """
-    単一ビューのCPU処理部分を実行する（並列化可能）。
-
-    この関数は、データ読み込み、視差推定、深度変換、光度フィルタリングまでを実行し、
-    GPU処理（PatchMatch）に必要なデータを準備する。
-
-    Returns:
-        dict: 処理結果を含む辞書。キーは以下の通り:
-            - 'idx': 画像インデックス
-            - 'success': 処理が成功したかどうか
-            - 'initial_depth': 初期深度マップ
-            - 'd_cost': 深度誤差コスト
-            - 'li_rgb': 左画像（RGB）
-            - 'ref_pose': 参照ビューのポーズ
-            - 'neighbor_views_data': 近傍ビューのデータ
-            - 'gt_depth': 真値深度（存在する場合）
-            - 'filename_stem': ファイル名（拡張子なし）
-            - 'save_each_depth_dir': 深度マップ保存ディレクトリ
-            - 'save_each_normal_dir': 法線マップ保存ディレクトリ
-            - 'time_csv_path': time.csvのパス
-            - 'view_metrics': 評価メトリクス
-            - 'error': エラーメッセージ（失敗した場合）
-    """
+    """単一ビューの CPU 処理（視差→深度→近傍準備）を実行し、PatchMatch 用のデータを返す辞書で返す。"""
     result = {
         "idx": idx,
         "success": False,
@@ -307,7 +254,6 @@ def _process_single_view_cpu(
         _, T_pos, left_path, right_path, R_mat = all_pairs_data[idx]
         filename_stem = Path(left_path).stem
 
-        # ディレクトリの準備
         save_each_depth_dir = os.path.join(config.DEPTH_IMAGE_DIR, filename_stem)
         os.makedirs(save_each_depth_dir, exist_ok=True)
         clear_folder(save_each_depth_dir)
@@ -316,7 +262,6 @@ def _process_single_view_cpu(
         os.makedirs(save_each_normal_dir, exist_ok=True)
         clear_folder(save_each_normal_dir)
 
-        # time.csvを初期化
         csv_subdir = os.path.join(config.CSV_DIR, filename_stem)
         os.makedirs(csv_subdir, exist_ok=True)
         time_csv_path = os.path.join(csv_subdir, "time.csv")
@@ -324,7 +269,6 @@ def _process_single_view_cpu(
             os.remove(time_csv_path)
         initialize_csv(time_csv_path, ["stage", "time"])
 
-        # Ground Truth Depthの読み込み
         gt_depth_path = os.path.join(
             config.LABEL_DEPTH_IMAGE_DIR, f"depth_{idx:06d}.exr"
         )
@@ -350,7 +294,6 @@ def _process_single_view_cpu(
                     )
                     save_depth_map_as_image(gt_depth, gt_png_path)
 
-        # 画像の読み込み
         li_bgr = cv2.imread(left_path)
         ri_bgr = cv2.imread(right_path)
         if li_bgr is None or ri_bgr is None:
@@ -361,22 +304,18 @@ def _process_single_view_cpu(
         li_gray = cv2.cvtColor(li_bgr, cv2.COLOR_BGR2GRAY)
         ri_gray = cv2.cvtColor(ri_bgr, cv2.COLOR_BGR2GRAY)
 
-        # 視差画像の生成
         disp_start = time.time()
         disp = image_processor.create_disparity(li_gray, ri_gray)
         disp_elapsed = time.time() - disp_start
 
-        # 視差から深度への変換
         depth_conv_start = time.time()
         initial_depth = depth_estimator.disparity_to_depth(disp)
         depth_conv_elapsed = time.time() - depth_conv_start
 
-        # 深度誤差コストを計算
         d_cost = depth_estimator.compute_depth_error_cost(
             disp, initial_depth, config.WINDOW_SIZE
         )
 
-        # 境界領域や無効な深度をNaNでマスク
         valid_mask = np.isfinite(initial_depth)
         bmask = valid_mask & (
             ~np.roll(valid_mask, 10, 0)
@@ -388,7 +327,6 @@ def _process_single_view_cpu(
         d_cost[bmask] = np.nan
         d_cost[np.isnan(d_cost)] = 1.0
 
-        # 初期深度を保存
         if config.DEBUG_SAVE_DEPTH_MAPS:
             save_initial_depth_path = os.path.join(
                 save_each_depth_dir, f"depth_iter_00.png"
@@ -401,21 +339,17 @@ def _process_single_view_cpu(
             )
             save_normal_map_as_image(init_normals, save_initial_normal_path)
 
-        # 視差マップを保存
         save_disparity_map_with_colorbar(
             disp, os.path.join(config.DISPARITY_IMAGE_DIR, f"disp_{idx:04d}.png")
         )
 
-        # 近傍ビューのデータを準備
         neighbor_views_data = []
         neighbor_frames = _neighbors_for_ref(idx)
-        # ログ出力はメインループで行うため、ここでは呼び出さない
         for fr in neighbor_frames:
             nv = _get_neighbor_view(idx, fr)
             if nv is not None:
                 neighbor_views_data.append(nv)
 
-        # 結果を保存
         result["success"] = True
         result["initial_depth"] = initial_depth
         result["d_cost"] = d_cost
@@ -446,11 +380,7 @@ def _export_gt_depth_pngs_per_view(
     out_depth_dir: str,
     all_pairs_data: dict,
 ):
-    """
-    Export GT depth EXR files to per-view folders as PNG visualizations.
-    This can be expensive if run for all frames, so we allow passing only selected indices.
-    GT depth maps are saved in the same folders as the generated depth maps (using filename_stem).
-    """
+    """指定インデックスの GT 深度 EXR を読み、各ビュー用フォルダに PNG として保存する。"""
     if not label_depth_dir or not os.path.isdir(label_depth_dir):
         return 0
 
@@ -461,7 +391,6 @@ def _export_gt_depth_pngs_per_view(
         except Exception:
             continue
 
-        # depth_######.exr と ######.exr の両方に対応
         src_path = os.path.join(label_depth_dir, f"depth_{idx_int:06d}.exr")
         if not os.path.exists(src_path):
             alt = os.path.join(label_depth_dir, f"{idx_int:06d}.exr")
@@ -481,7 +410,6 @@ def _export_gt_depth_pngs_per_view(
         else:
             gt_resized = gt
 
-        # 生成された深度マップと同じフォルダを使用（filename_stem）
         if idx_int in all_pairs_data:
             _, _, left_path, _, _ = all_pairs_data[idx_int]
             filename_stem = Path(left_path).stem
@@ -498,11 +426,10 @@ def _export_gt_depth_pngs_per_view(
 
 
 def run():
+    """ログ・DataLoader・各モジュールを初期化し、カメラペアごとに視差→深度→PatchMatch→点群統合を実行して PLY を出力する。"""
     args = parse_arguments()
     start_time = time.time()
 
-    # --- 初期化 ---
-    # ログ初期化
     try:
         setup_logging(
             getattr(config, "LOG_DIR", os.path.join(os.getcwd(), "logs")),
@@ -540,7 +467,6 @@ def run():
     # Keeping original indices is important because many artifacts (depth_XXXX, GT exr names, etc.)
     # are keyed by the frame index coming from the dataset.
     all_pairs_data = data_loader.get_all_camera_pairs(config.K)
-    # --- Optional: Bundle Adjustment for noisy poses ---
     enable_ba = bool(getattr(config, "ENABLE_BUNDLE_ADJUSTMENT", False))
     pos_scale = float(getattr(config, "POSITION_ERROR_SCALE", 0.0) or 0.0)
     rot_scale = float(getattr(config, "ROTATION_ERROR_SCALE", 0.0) or 0.0)
@@ -582,7 +508,6 @@ def run():
 
     available_indices = sorted(list(all_pairs_data.keys()))
 
-    # --- Log which images will be used (after subsampling & file existence checks) ---
     try:
         selected_frames_csv_path = os.path.join(config.CSV_DIR, "selected_frames.csv")
         with open(selected_frames_csv_path, "w", newline="") as f:
@@ -597,7 +522,6 @@ def run():
     except Exception as e:
         logging.warning(f"Failed to write selected frames CSV: {e}")
 
-    # --- Save selected camera poses CSV for visualization ---
     try:
         plots_csv_dir = os.path.join(config.OUTPUT_TYPE_DIR, "plots")
         os.makedirs(plots_csv_dir, exist_ok=True)
@@ -626,14 +550,11 @@ def run():
     except Exception as e:
         logging.warning(f"Failed to write selected poses CSV: {e}")
 
-    # --- Target selection ---
     requested = None
     if hasattr(config, "TARGET_INDICES") and config.TARGET_INDICES:
         requested = list(config.TARGET_INDICES)
 
     if requested is not None:
-        # Explicit request:
-        # - [] means "skip this dataset"
         if len(requested) == 0:
             logging.info(
                 "TARGET_INDICES specified as empty for this dataset; skipping processing."
@@ -658,7 +579,6 @@ def run():
 
     logging.info(f"Targeting specific image indices for processing: {target_indices}")
 
-    # --- Neighbor selection ---
     neighbor_selection_mode = (
         str(
             os.getenv(
@@ -669,7 +589,6 @@ def run():
         .strip()
         .lower()
     )
-    # local pool pose cache (for neighbor selection)
     local_pose = {}
     for i in available_indices:
         _, p, q = data_loader.get_camera_pose(i)
@@ -679,19 +598,16 @@ def run():
                 "quat": tuple(q),
             }
 
-    # parameters for adjacent (existing behavior)
     neighbor_each_side = int(getattr(config, "NEIGHBOR_KEYFRAMES_EACH_SIDE", 3) or 3)
     neighbor_each_side = max(0, neighbor_each_side)
 
-    # parameters for nearest-neighbor selection (by distance)
     nearest_count = int(getattr(config, "NEIGHBOR_NEAREST_COUNT", 10) or 10)
     nearest_r_min = float(getattr(config, "NEIGHBOR_NEAREST_MIN_RADIUS_M", 0.0) or 0.0)
     nearest_r_max = float(getattr(config, "NEIGHBOR_NEAREST_MAX_RADIUS_M", 1e9) or 1e9)
 
-    # image caches
     logging.info("Pre-loading reference images...")
-    loaded_images = {}  # local idx -> RGB image
-    loaded_images_by_path = {}  # path -> RGB image (for global neighbors)
+    loaded_images = {}
+    loaded_images_by_path = {}
     for idx in target_indices:
         left_path, _ = data_loader.get_image_paths(idx)
         img = cv2.imread(left_path)
@@ -699,7 +615,6 @@ def run():
             loaded_images[idx] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     def _neighbors_for_ref(ref_idx: int):
-        # returns list of frame dicts with keys: pos, quat, left_path, id
         if neighbor_selection_mode == "adjacent":
             if neighbor_each_side <= 0:
                 return []
@@ -725,7 +640,6 @@ def run():
                         out.append(fr)
             return out
 
-        # nearest-by-distance
         ref = local_pose.get(ref_idx, None)
         if ref is None:
             return []
@@ -749,12 +663,10 @@ def run():
         return picked
 
     def _get_neighbor_view(ref_idx: int, fr: dict):
-        # load neighbor image & pose (R,T)
         left_path = str(fr.get("left_path", "")).strip()
         if not left_path:
             return None
 
-        # prefer already loaded local images
         ni = int(fr.get("id", -1))
         img = loaded_images.get(ni, None)
         if img is None:
@@ -769,7 +681,6 @@ def run():
         if pos is None or quat is None:
             return None
         R_n, T_n = _pose_unity_to_cv_RT(pos, quat)
-        # all_optimized_depthsのキーと一致する
         image_idx = int(fr.get("id", -1))
         return {
             "image": img,
@@ -787,15 +698,12 @@ def run():
     logging.info("=" * 80)
     logging.info("")
     all_optimized_depths = {}
-    all_optimized_normals = {}  # 最適化された法線マップを保存
-    # 各ステージの深度マップを保存（エラーマップの統一スケール用）
+    all_optimized_normals = {}  
     all_stage_depths = {}
-    # 各画像のポーズ情報を保存（幾何学的一貫性フィルタリング用）
     all_poses = {}
     all_images = {}
     all_gt_depths = {}
 
-    # 各ステップの処理時間を累積するための辞書
     total_times = {
         "disparity_generation": 0.0,  # 視差画像の生成
         "disparity_to_depth": 0.0,  # 視差から深度への変換
@@ -807,14 +715,11 @@ def run():
         "pointcloud_filtering": 0.0,  # 点群のフィルタリング
     }
 
-    # マルチスレッド並列化の設定
     max_workers = getattr(config, "MAX_WORKERS", 4)
     logging.info(f"Using ThreadPoolExecutor with max_workers={max_workers}")
 
-    # CPU処理を並列実行（データ読み込み、視差推定、深度変換まで）
     cpu_results = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # 各ビューのCPU処理を並列実行
         future_to_idx = {
             executor.submit(
                 _process_single_view_cpu,
@@ -832,7 +737,6 @@ def run():
             for idx in target_indices
         }
 
-        # 完了したタスクから順に処理
         for future in as_completed(future_to_idx):
             idx = future_to_idx[future]
             try:
@@ -873,16 +777,13 @@ def run():
         time_csv_path = result["time_csv_path"]
         view_metrics = result["view_metrics"]
 
-        # 処理開始のログ
         logging.info("=" * 80)
         logging.info(f"処理開始: 画像ペア {idx} (ファイル: {filename_stem})")
         logging.info("=" * 80)
 
-        # 近傍ビューのログ出力（GPU処理部分で一度だけ）
         neighbor_frames = _neighbors_for_ref(idx)
         _log_selected_neighbors(idx, neighbor_frames)
 
-        # 初期深度の有効ピクセル数をログ出力
         valid_pixels_initial = np.sum(np.isfinite(initial_depth))
         logging.info(f"[Initial Depth] Valid pixels: {valid_pixels_initial}")
 
@@ -913,7 +814,6 @@ def run():
             logging.info(
                 f"[{filename_stem}] PatchMatch最適化完了 (経過時間: {refine_elapsed:.2f}秒)"
             )
-            # 各イテレーションの時間をtime.csvに記録
             if iter_times_gpu is not None and len(iter_times_gpu) > 0:
                 for iter_num, iter_time in enumerate(iter_times_gpu, 1):
                     append_to_csv(
@@ -927,7 +827,6 @@ def run():
                     f"[{filename_stem}] iter_times_gpu is None or empty for index {idx}, skipping iteration time recording"
                 )
 
-            # 最適化後の深度の有効ピクセル数をログ出力
             valid_pixels_before_photo = np.sum(np.isfinite(optimized_depth))
             logging.info(f"[Optimized Depth] Valid pixels: {valid_pixels_before_photo}")
 
@@ -962,7 +861,6 @@ def run():
                     ),
                 )
 
-            # 光度フィルタリング後の深度の有効ピクセル数をログ出力
             valid_pixels_after_photo = np.sum(
                 np.isfinite(photometrically_filtered_depth)
             )
@@ -990,7 +888,6 @@ def run():
             all_images[idx] = li_rgb
             if gt_depth is not None:
                 all_gt_depths[idx] = gt_depth
-            # 各ステージの深度マップを保存（エラーマップの統一スケール用）
             if gt_depth is not None:
                 if idx not in all_stage_depths:
                     all_stage_depths[idx] = {}
@@ -1025,7 +922,6 @@ def run():
         if idx not in all_optimized_depths:
             continue
 
-        # ファイル名ベースのフォルダ名を取得（all_pairs_dataから）
         if idx in all_pairs_data:
             _, _, left_path, _, _ = all_pairs_data[idx]
             filename_stem = Path(left_path).stem
@@ -1037,12 +933,10 @@ def run():
         photometrically_filtered_depth = all_optimized_depths[idx]
         ref_pose = all_poses[idx]
 
-        # 近傍ビューのデータを準備
         neighbor_views_data = []
         neighbor_frames = _neighbors_for_ref(idx)
         _log_selected_neighbors(idx, neighbor_frames)
         for fr in neighbor_frames:
-            # For Step 2, require that neighbor has an optimized depth.
             ni = int(fr.get("id", -1))
             if ni not in all_optimized_depths:
                 continue
@@ -1055,7 +949,6 @@ def run():
             valid_pixels_after_photo = np.sum(
                 np.isfinite(photometrically_filtered_depth)
             )
-            # time.csvのパスを取得
             if idx in all_pairs_data:
                 _, _, left_path, _, _ = all_pairs_data[idx]
                 filename_stem = Path(left_path).stem
@@ -1084,14 +977,12 @@ def run():
             )
             all_geometrically_filtered_depths[idx] = geometrically_filtered_depth
 
-            # 幾何学フィルタリング後の深度の有効ピクセル数をログ出力
             valid_pixels_after_geo = np.sum(np.isfinite(geometrically_filtered_depth))
             pixels_filtered_geo = valid_pixels_after_photo - valid_pixels_after_geo
             logging.info(
                 f"[{filename_stem}] 幾何学フィルタリング後: 有効ピクセル数={valid_pixels_after_geo} "
                 f"(フィルタリング={pixels_filtered_geo}ピクセル, {pixels_filtered_geo/valid_pixels_after_photo*100:.2f}%)"
             )
-            # 幾何学フィルタリング後の深度マップも保存
             if idx in all_stage_depths:
                 all_stage_depths[idx]["geometric"] = geometrically_filtered_depth.copy()
             if config.DEBUG_SAVE_DEPTH_MAPS:
@@ -1119,8 +1010,6 @@ def run():
             logging.warning(f"Geometric consistency filtering skipped for {idx}: {e}")
             all_geometrically_filtered_depths[idx] = photometrically_filtered_depth
 
-    # --- ステップ2.5: 深度マップをEXR形式で保存（絶対的な深度値が読み取れる形式） ---
-    # DEBUG_SAVE_DEPTH_MAPSがFalseの場合は保存しない
     if config.DEBUG_SAVE_DEPTH_MAPS and all_stage_depths:
         logging.info("")
         logging.info("=" * 80)
@@ -1138,7 +1027,6 @@ def run():
             if save_each_depth_dir is None:
                 continue
 
-            # 各ステージの深度マップをEXR形式で保存
             stage_map = {
                 "initial": "depth_initial.exr",
                 "optimized": "depth_optimized.exr",
@@ -1162,7 +1050,7 @@ def run():
     logging.info("=" * 80)
     logging.info("")
     merged_pts_list, merged_cols_list = [], []
-    merged_normals_list = []  # 法線リストを追加
+    merged_normals_list = []  
     last_integ_pts, last_integ_cols = None, None
     last_integ_normals = None
 
@@ -1176,10 +1064,8 @@ def run():
         R_mat = ref_pose["R"]
         T_pos = ref_pose["T"]
 
-        # 最適化された法線を取得（存在する場合）
         optimized_normal = all_optimized_normals.get(idx)
 
-        # time.csvのパスを取得
         if idx in all_pairs_data:
             _, _, left_path, _, _ = all_pairs_data[idx]
             filename_stem = Path(left_path).stem
@@ -1222,7 +1108,6 @@ def run():
         logging.info(f"統合対象: {len(merged_pts_list)}個の点群")
         logging.info("-" * 80)
         integ_start = time.time()
-        # 法線リストが存在する場合のみ統合に含める
         normals_list_for_integration = (
             merged_normals_list if merged_normals_list else None
         )
@@ -1273,7 +1158,6 @@ def run():
             geometric_error_threshold = getattr(
                 config, "MULTI_VIEW_GEOMETRIC_ERROR_THRESHOLD", 0.05
             )
-            # フィルタリング前の点群をバックアップ
             original_pts = merged_pts.copy()
             original_cols = merged_cols.copy()
 
@@ -1289,7 +1173,6 @@ def run():
                 geometric_error_threshold=geometric_error_threshold,
             )
 
-            # フィルタリング後にポイントが0になった場合、フィルタリング前の点群を使用
             if len(merged_pts) == 0:
                 logging.warning(
                     "Multi-view visibility filtering removed all points. Using unfiltered point cloud."
@@ -1297,12 +1180,10 @@ def run():
                 merged_pts = original_pts
                 merged_cols = original_cols
 
-        # 統合された法線がある場合は使用、なければNone
         merged_normals = None
         if last_integ_normals is not None:
             merged_normals = last_integ_normals
         elif merged_normals_list:
-            # 統合されていない場合は結合
             merged_normals = np.vstack(merged_normals_list)
 
         final_pcd = point_cloud_integrator.process_and_save_final_point_cloud(
@@ -1314,14 +1195,12 @@ def run():
         filter_elapsed = time.time() - filter_start
         total_times["pointcloud_filtering"] += filter_elapsed
         if final_pcd and len(final_pcd.points) > 0:
-            # 点群表示の制御（デフォルトは表示しない）
             show_point_cloud = getattr(config, "SHOW_POINT_CLOUD", False)
             if show_point_cloud:
                 logging.info(
                     "Showing final integrated point cloud. Close the window to exit."
                 )
                 o3d.visualization.draw_geometries([final_pcd])
-            # 保存完了のログは write_ply 内で出力されるため、ここでは出力しない
     else:
         logging.warning("No point clouds were generated.")
 
@@ -1343,7 +1222,6 @@ def run():
     logging.info(f"全体処理完了 (総経過時間: {time_str} / {total_elapsed:.2f}秒)")
     logging.info("=" * 80)
 
-    # 各ステップの処理時間の集計を表示
     logging.info("")
     logging.info("=" * 80)
     logging.info("各ステップの処理時間集計（全画像合計）")
@@ -1389,7 +1267,6 @@ def run():
     logging.info(f"  合計（測定対象）: {total_time_str} ({total_measured_time:.2f}秒)")
     logging.info("=" * 80)
 
-    # DEBUG_SAVE_DEPTH_MAPSがtrueの場合は評価コマンドを表示
     if config.DEBUG_SAVE_DEPTH_MAPS:
         logging.info("")
         logging.info("=" * 80)
@@ -1418,7 +1295,6 @@ def run():
         logging.info("点群の評価を実行するには、以下のコマンドを実行してください:")
         logging.info("=" * 80)
         pred_pointcloud = config.POINT_CLOUD_FILE_PATH
-        # 真値メッシュのパスは設定から取得できないため、プレースホルダーとして表示
         eval_cmd = (
             f"python3 evaluation/pointcloud_evaluation.py "
             f"--pred_pointcloud {pred_pointcloud} "

@@ -1,3 +1,7 @@
+"""
+ログ初期化モジュール。
+"""
+
 import contextlib
 import logging
 import os
@@ -11,7 +15,7 @@ import numpy as np
 
 def setup_logging(log_dir: str, level: str = "INFO", to_file: bool = True) -> None:
     """
-    共通ログ初期化。標準出力とローテーションファイルロギング（任意）。
+    共通ログ初期化。標準出力と任意でローテーションファイル（run.log）に出力する。
     """
     level_map = {
         "DEBUG": logging.DEBUG,
@@ -25,7 +29,6 @@ def setup_logging(log_dir: str, level: str = "INFO", to_file: bool = True) -> No
     datefmt = "%Y-%m-%d %H:%M:%S"
 
     logging.basicConfig(level=log_level, format=fmt, datefmt=datefmt)
-    # Ensure root logger level and stdout handler are correctly set
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
     has_stream = any(
@@ -38,9 +41,7 @@ def setup_logging(log_dir: str, level: str = "INFO", to_file: bool = True) -> No
         sh.setFormatter(logging.Formatter(fmt=fmt, datefmt=datefmt))
         root_logger.addHandler(sh)
 
-    # Noise suppression for verbose CUDA/Numba logs
     if os.getenv("PM_SUPPRESS_NOISY_LOGS", "1") == "1":
-        # Suppress specific warning categories/messages (stderr warnings)
         try:
             try:
                 from numba.core.errors import NumbaPerformanceWarning  # type: ignore
@@ -49,7 +50,6 @@ def setup_logging(log_dir: str, level: str = "INFO", to_file: bool = True) -> No
             warnings.filterwarnings("ignore", category=NumbaPerformanceWarning)
         except Exception:
             pass
-        # Common noisy warnings
         warnings.filterwarnings(
             "ignore",
             message=r"Grid size .*will likely result in GPU under-utilization",
@@ -67,6 +67,8 @@ def setup_logging(log_dir: str, level: str = "INFO", to_file: bool = True) -> No
         )
 
         class MessageExcludeFilter(logging.Filter):
+            """ログメッセージに指定文字列が含まれる場合はそのレコードを破棄するフィルタ。"""
+
             def __init__(self, substrings):
                 super().__init__()
                 self.substrings = tuple(substrings)
@@ -85,7 +87,6 @@ def setup_logging(log_dir: str, level: str = "INFO", to_file: bool = True) -> No
             ]
         )
 
-        # Lower verbosity of known noisy third-party loggers and apply filter there only
         for name in (
             "numba",
             "numba.cuda",
@@ -108,6 +109,9 @@ def setup_logging(log_dir: str, level: str = "INFO", to_file: bool = True) -> No
 
 
 def set_log_level(level: str) -> None:
+    """
+    root logger のログレベルを変更する。
+    """
     level_map = {
         "DEBUG": logging.DEBUG,
         "INFO": logging.INFO,
@@ -119,6 +123,9 @@ def set_log_level(level: str) -> None:
 
 @contextlib.contextmanager
 def time_block(name: str, level: int = logging.INFO):
+    """
+    ブロックの実行時間を計測し、指定レベルで "[TIME] name: 経過秒数" をログ出力するコンテキストマネージャ。
+    """
     t0 = time.time()
     try:
         yield
@@ -133,6 +140,10 @@ def log_ndarray_stats(
     mask: Optional[np.ndarray] = None,
     level: int = logging.DEBUG,
 ) -> None:
+    """
+    配列の shape と有限値の個数・min/max/mean を指定レベルでログ出力する。
+    mask を渡した場合はそのマスクで絞った値で統計を計算する。
+    """
     try:
         if mask is not None:
             vals = arr[mask]

@@ -1,3 +1,8 @@
+"""
+MVSパイプライン用のGUIモジュール。
+データセット選択・YAML設定の編集・パイプライン実行・ログ表示を行う。
+"""
+
 import logging
 import os
 import sys
@@ -5,6 +10,7 @@ import tempfile
 
 import yaml
 
+# PyQt5 を優先、なければ PySide2 を使用（API互換のため Signal を pyqtSignal として利用）
 try:
     from PyQt5.QtCore import QThread, pyqtSignal
     from PyQt5.QtWidgets import (
@@ -54,7 +60,9 @@ except ImportError:
 
 
 def _list_datasets(project_root: str):
-    """データセットのリストを取得"""
+    """
+    プロジェクトルート直下の data ディレクトリ内のサブディレクトリ名をデータセット名としてソート済みリストで返す。
+    """
     data_dir = os.path.join(project_root, "data")
     if not os.path.isdir(data_dir):
         return []
@@ -64,21 +72,21 @@ def _list_datasets(project_root: str):
 
 
 def _load_default_config(config_path: str):
-    """デフォルト設定を読み込む"""
+    """
+    YAML設定ファイルを読み込み、キーを保持した辞書を返す。
+    文字列の値は数値・bool・None に変換する。
+    """
     if os.path.exists(config_path):
         with open(config_path, "r") as f:
             config = yaml.safe_load(f) or {}
-            # 数値型に変換
             for key, value in config.items():
                 if isinstance(value, str):
-                    # 数値文字列を数値に変換
                     try:
                         if "." in value or "e" in value.lower():
                             config[key] = float(value)
                         else:
                             config[key] = int(value)
                     except ValueError:
-                        # 変換できない場合はそのまま（boolやNoneなど）
                         if value.lower() in ("true", "false"):
                             config[key] = value.lower() == "true"
                         elif value.lower() == "null":
@@ -88,7 +96,12 @@ def _load_default_config(config_path: str):
 
 
 class PipelineThread(QThread):
-    """パイプラインを実行するスレッド"""
+    """
+    MVSパイプラインを別スレッドで実行するQThread。
+
+    一時YAMLを作成して環境変数とAPP_MVS_CONFIGで渡し、mvs.main.run を呼び出す。
+    ログは log_signal でGUIに送り、終了コードは finished_signal で通知する。
+    """
 
     log_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(int)
@@ -100,7 +113,9 @@ class PipelineThread(QThread):
         self.config_dict = config_dict
 
     def run(self):
-        """パイプラインを実行"""
+        """
+        環境変数・一時YAMLを設定し、mvs.main.run を実行
+        """
         try:
             # 環境変数を設定
             os.environ["DATA_TYPE"] = self.dataset
@@ -119,7 +134,7 @@ class PipelineThread(QThread):
                 try:
                     from app.settings import apply_env_overrides
 
-                    # 設定を環境変数に設定（ブール値は文字列に変換）
+                    # 設定を環境変数に設定
                     for key, value in self.config_dict.items():
                         if value is not None:
                             # ブール値の場合は小文字の文字列に変換
@@ -186,14 +201,16 @@ class PipelineThread(QThread):
 
 
 class LogHandler(logging.Handler):
-    """GUIのログエリアにログを出力するハンドラ"""
+    """
+    Python の logging のログを、PyQt のシグナル経由でGUIのテキストエリアに表示するハンドラ。
+    """
 
     def __init__(self, signal):
         super().__init__()
         self.signal = signal
 
     def emit(self, record):
-        """ログメッセージをGUIに表示"""
+        """フォーマットしたログメッセージをシグナルで送信し、GUIに表示する。"""
         try:
             msg = self.format(record)
             self.signal.emit(msg)
@@ -202,7 +219,9 @@ class LogHandler(logging.Handler):
 
 
 class ConfigWidget(QWidget):
-    """設定入力ウィジェット"""
+    """
+    MVS設定をタブで編集するウィジェット。
+    """
 
     def __init__(self, default_config):
         super().__init__()
@@ -211,7 +230,9 @@ class ConfigWidget(QWidget):
         self._create_widgets()
 
     def _get_int_value(self, key, default):
-        """整数値を取得（型変換付き）"""
+        """
+        default_config から key の値を取得し、整数に変換する。
+        """
         value = self.default_config.get(key, default)
         if isinstance(value, str):
             try:
@@ -221,7 +242,9 @@ class ConfigWidget(QWidget):
         return int(value) if value is not None else default
 
     def _get_float_value(self, key, default):
-        """浮動小数点値を取得（型変換付き）"""
+        """
+        default_config から key の値を取得し、浮動小数点数に変換する。
+        """
         value = self.default_config.get(key, default)
         if isinstance(value, str):
             try:
@@ -231,14 +254,18 @@ class ConfigWidget(QWidget):
         return float(value) if value is not None else default
 
     def _get_bool_value(self, key, default):
-        """ブール値を取得（型変換付き）"""
+        """
+        default_config から key の値を取得し、bool に変換する。
+        """
         value = self.default_config.get(key, default)
         if isinstance(value, str):
             return value.lower() in ("true", "1", "yes", "on")
         return bool(value) if value is not None else default
 
     def _create_widgets(self):
-        """ウィジェットを作成"""
+        """
+        各タブ（PatchMatch・フィルタ・フレーム・近傍・デバッグ・可視化・その他）のウィジェットを作成する。
+        """
         layout = QVBoxLayout(self)
 
         # タブウィジェット
@@ -698,7 +725,9 @@ class ConfigWidget(QWidget):
         return scroll
 
     def get_config(self):
-        """現在の設定値を取得"""
+        """
+        各ウィジェットの現在の値を収集し、MVS用の設定辞書として返す。
+        """
         config = {}
         for key, widget in self.config_widgets.items():
             if isinstance(widget, QCheckBox):
@@ -711,7 +740,12 @@ class ConfigWidget(QWidget):
 
 
 class MVSGUI(QMainWindow):
+    """
+    MVSパイプライン用のメインウィンドウ。
+    """
+
     def __init__(self):
+        """プロジェクトルート・パス・デフォルト設定を読み込み、ウィジェットを構築する。"""
         super().__init__()
         self.setWindowTitle("3D Point Cloud Pipeline")
         self.setGeometry(100, 100, 900, 700)
@@ -739,7 +773,7 @@ class MVSGUI(QMainWindow):
         self._load_datasets()
 
     def _create_widgets(self):
-        """ウィジェットを作成"""
+        """データセット選択・設定タブ・実行ボタン・ログエリア・進捗バーを配置する。"""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
@@ -785,7 +819,7 @@ class MVSGUI(QMainWindow):
         layout.addWidget(self.progress)
 
     def _load_datasets(self):
-        """データセットのリストを読み込み"""
+        """data ディレクトリ内のサブディレクトリを列挙し、コンボボックスに追加する。0件の場合は実行ボタンを無効化。"""
         datasets = _list_datasets(self.project_root)
         if datasets:
             self.dataset_combo.addItems(datasets)
@@ -796,18 +830,18 @@ class MVSGUI(QMainWindow):
             self.run_button.setEnabled(False)
 
     def _log(self, message):
-        """ログを表示"""
+        """ログテキストエリアに1行追加し、縦スクロールを最下部に移動する。"""
         self.log_text.append(message)
         # 自動スクロール
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
     def _clear_log(self):
-        """ログをクリア"""
+        """ログ表示エリアの内容をすべて削除する。"""
         self.log_text.clear()
 
     def _run_pipeline(self):
-        """パイプラインを実行"""
+        """選択中のデータセットと設定で PipelineThread を起動し、UIを実行中状態にする。"""
         if self.pipeline_thread and self.pipeline_thread.isRunning():
             self._log("既に実行中です。")
             return
@@ -841,7 +875,7 @@ class MVSGUI(QMainWindow):
         self.pipeline_thread.start()
 
     def _on_pipeline_finished(self, result):
-        """パイプライン完了時の処理"""
+        """パイプライン終了時のコールバック。"""
         if result == 0:
             self._log("パイプラインが正常に完了しました。")
         else:
@@ -856,7 +890,7 @@ class MVSGUI(QMainWindow):
 
 
 def main():
-    """GUIアプリケーションを起動"""
+    """QApplication を生成し、MVSGUI のメインウィンドウを表示してイベントループを開始する。"""
     app = QApplication(sys.argv)
     window = MVSGUI()
     window.show()

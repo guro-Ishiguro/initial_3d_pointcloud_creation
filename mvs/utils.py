@@ -1,3 +1,9 @@
+"""
+ユーティリティモジュール。
+コマンド引数解析、四元数から回転行列への変換、フォルダ削除、深度マップの読み書き、
+評価指標計算・CSV出力、法線・視差マップの可視化保存などを提供する。
+"""
+
 import argparse
 import csv
 import logging
@@ -7,7 +13,7 @@ import shutil
 import cv2
 import numpy as np
 
-# ImathとOpenEXRのインポート（条件付き）
+# Imath と OpenEXR のインポート（未インストール時は EXR 読み書きを無効化）
 try:
     import Imath
     import OpenEXR
@@ -21,7 +27,7 @@ except ImportError as e:
         "Please install: pip install OpenEXR"
     )
 
-# mvs.configのインポート（条件付き）
+# mvs.config のインポート（CLI単体実行時などで import できない場合は DummyConfig を使用）
 try:
     import mvs.config as config
 
@@ -29,7 +35,7 @@ try:
 except ImportError:
     CONFIG_AVAILABLE = False
 
-    # ダミーのconfigオブジェクトを作成
+    # ダミーの config オブジェクト（可視化用のデフォルト値のみ保持）
     class DummyConfig:
         VIZ_DEPTH_MIN = 0.0
         VIZ_DEPTH_MAX = 50.0
@@ -38,11 +44,12 @@ except ImportError:
 
     config = DummyConfig()
 
-# ここでの basicConfig は削除（共通初期化は mvs.logging_setup.setup_logging 側に統一）
 
 
 def parse_arguments():
-    """コマンド引数の値を受け取る"""
+    """
+    コマンドライン引数を解析し、--show-viewer と --record-video の有無を返す。
+    """
     parser = argparse.ArgumentParser(description="3D Point Cloud Creater")
     parser.add_argument(
         "--show-viewer",
@@ -56,7 +63,9 @@ def parse_arguments():
 
 
 def quaternion_to_rotation_matrix(qx, qy, qz, qw):
-    """四元数を回転行列に変換"""
+    """
+    四元数 (qx, qy, qz, qw) を 3x3 回転行列に変換する。
+    """
     R = np.array(
         [
             [
@@ -80,7 +89,10 @@ def quaternion_to_rotation_matrix(qx, qy, qz, qw):
 
 
 def clear_folder(dir_path):
-    """指定フォルダの中身を削除する"""
+    """
+    指定ディレクトリ内のファイル・サブディレクトリを再帰的に削除する。
+    ディレクトリ自体は残す。存在しない場合はログのみ出力する。
+    """
     if os.path.exists(dir_path):
         for filename in os.listdir(dir_path):
             file_path = os.path.join(dir_path, filename)
@@ -96,6 +108,9 @@ def clear_folder(dir_path):
 
 
 def _resolve_cmap_code(cmap_name: str) -> int:
+    """
+    カラーマップ名（jet, viridis 等）を OpenCV の COLORMAP_* 定数に変換する。
+    """
     name = (cmap_name or "").strip().lower()
     table = {
         "jet": cv2.COLORMAP_JET,
@@ -112,7 +127,8 @@ def save_depth_map_as_image(
     depth_map, file_path, viz_min=None, viz_max=None, viz_cmap=None
 ):
     """
-    デプスマップを保存する。
+    深度マップを可視化用のカラー画像（PNG等）として保存する。
+    有効値の範囲は viz_min/viz_max（未指定時は config）で正規化し、viz_cmap で色付けする。
     """
     try:
         h, w = depth_map.shape
@@ -132,7 +148,6 @@ def save_depth_map_as_image(
             cv2.imwrite(file_path, black_image)
             return
 
-        # 可視化レンジの解決（引数優先→config→従来値）
         min_val = (
             float(viz_min)
             if viz_min is not None
@@ -172,7 +187,7 @@ def save_depth_map_as_image(
 
 def read_exr_depth(file_path):
     """
-    OpenEXRライブラリを使用して、単一チャンネルのEXR深度ファイルを読み込む。
+    OpenEXR 形式の深度ファイルを読み込み、float32 の深度マップとして返す。
     """
     if not EXR_AVAILABLE:
         logging.error(
@@ -198,7 +213,6 @@ def read_exr_depth(file_path):
             logging.error(f"Available channels: {available_channels}")
             return None
 
-        # noisy: channel detection log
         logging.debug(f"Detected '{target_channel}' channel in EXR; using it as depth.")
 
         dw = header["dataWindow"]
@@ -219,7 +233,7 @@ def read_exr_depth(file_path):
 
 def save_depth_map_as_exr(depth_map, file_path):
     """
-    深度マップをEXR形式で保存する（絶対的な深度値が読み取れる形式）。
+    深度マップを OpenEXR 形式で保存する。
     """
     if not EXR_AVAILABLE:
         logging.error(
@@ -257,9 +271,9 @@ def save_depth_map_as_exr(depth_map, file_path):
 
 def compute_depth_metrics(pred_depth, gt_depth):
     """
-    予測深度と正解深度を比較し、評価指標を計算する。
+    予測深度と正解深度を比較し、RMSE/MAE/abs_rel/sq_rel/rmse_log/delta1,2,3 を計算する。
     """
-    # 有効なピクセルのマスクを生成 (予測・真値ともに有限値で、かつ真値が0より大きい)
+    # 有効なピクセルのマスク（予測・真値とも有限かつ真値 > 0）
     valid_mask = np.isfinite(pred_depth) & np.isfinite(gt_depth) & (gt_depth > 0)
 
     # 有効なピクセルが存在しない場合はNaNを返す
@@ -316,7 +330,7 @@ def compute_depth_metrics(pred_depth, gt_depth):
 
 def save_error_map_as_image(pred_depth, gt_depth, file_path, max_error=1.0):
     """
-    深度誤差を計算し、カラーマップとして可視化して保存する。
+    予測深度と正解深度の絶対誤差を画像化し、max_error でクリップしてカラーマップで保存する。
     """
     valid_mask = np.isfinite(pred_depth) & np.isfinite(gt_depth) & (gt_depth > 0)
     error_map = np.full(pred_depth.shape, np.nan, dtype=np.float32)
@@ -337,7 +351,7 @@ def save_error_map_as_image(pred_depth, gt_depth, file_path, max_error=1.0):
 
 def save_normal_map_as_image(normal_map, file_path):
     """
-    法線マップを画像ファイルとして保存する。
+    法線マップを 0–255 に正規化して RGB 画像として保存する。
     """
     try:
         normalized_normals = normal_map * 0.5 + 0.5
@@ -352,7 +366,7 @@ def save_normal_map_as_image(normal_map, file_path):
 
 def save_disparity_map_with_colorbar(disparity_map, file_path):
     """
-    視差マップをカラーバー付きの画像として保存する。
+    視差マップを可視化用のカラー画像（PNG等）として保存する。
     """
     try:
         h, w = disparity_map.shape
@@ -372,24 +386,18 @@ def save_disparity_map_with_colorbar(disparity_map, file_path):
             cv2.imwrite(file_path, black_image)
             return
 
-        # 有効な視差値から最小値と最大値を取得
         min_val = disparity_map[valid_mask].min()
         max_val = disparity_map[valid_mask].max()
 
         if max_val - min_val > 1e-6:
-            # 0-255の範囲に正規化
             normalized_map = 255.0 * (disparity_map - min_val) / (max_val - min_val)
         else:
             normalized_map = np.full(disparity_map.shape, 128, dtype=np.float32)
 
-        # NaNの値を0に変換し、uint8にキャスト
         vis_map = np.nan_to_num(normalized_map).astype(np.uint8)
-        # カラーマップを適用
         colored_map = cv2.applyColorMap(vis_map, cv2.COLORMAP_JET)
-        # 無効な領域を黒で塗りつぶす
         colored_map[~valid_mask] = [0, 0, 0]
 
-        # サイドバー無しでそのまま保存
         cv2.imwrite(file_path, colored_map)
         logging.info(f"Saved disparity map to {file_path}")
     except Exception as e:
@@ -398,7 +406,7 @@ def save_disparity_map_with_colorbar(disparity_map, file_path):
 
 def initialize_csv(file_path, header):
     """
-    CSVファイルを初期化し、ヘッダーを書き込む。
+    CSV ファイルを新規作成し、1行目にヘッダーを書き込む。
     """
     try:
         with open(file_path, "w", newline="") as csvfile:
@@ -410,10 +418,9 @@ def initialize_csv(file_path, header):
 
 def append_to_csv(file_path, data_row):
     """
-    CSVファイルに新しい行を追記する。
+    CSV ファイルの末尾に1行を追記する。親ディレクトリが無い場合は作成する。
     """
     try:
-        # ディレクトリが存在するか確認し、存在しない場合は作成
         dir_path = os.path.dirname(file_path)
         if dir_path:
             os.makedirs(dir_path, exist_ok=True)
@@ -435,14 +442,7 @@ def write_stage_metrics_to_csv(
     metrics: dict,
 ):
     """
-    ステージごとの評価指標をresults.csvに書き込む。
-
-    Args:
-        csv_path: results.csvのパス
-        image_idx: 画像インデックス
-        stage: ステージ名（initial, optimized, photometric, geometric）
-        valid_pixels: 有効ピクセル数
-        metrics: 評価指標の辞書
+    ステージごとの評価指標を1行として CSV に追記する。
     """
     append_to_csv(
         csv_path,
@@ -471,16 +471,7 @@ def write_iteration_metrics_to_csv(
     valid_pixels: int = 0,
 ):
     """
-    イテレーションごとの評価指標を各メトリクスごとのCSVに書き込む。
-    時間列は含めない（image_idx, iter, valid_pixels, metric）。
-
-    Args:
-        csv_files: メトリクスごとのCSVファイルパスの辞書
-        image_idx: 画像インデックス
-        iteration: イテレーション番号
-        elapsed_time: 経過時間（秒）（使用しないが、互換性のため保持）
-        metrics: 評価指標の辞書
-        valid_pixels: 有効ピクセル数
+    イテレーションごとに、メトリクス名をキーとする CSV ファイル群に1行ずつ追記する。
     """
     for metric_key, csv_path in csv_files.items():
         if metric_key in metrics:

@@ -1,4 +1,5 @@
 # mvs/depth_optimization.py
+"""PatchMatch MVS による深度・法線の最適化（CUDA/JIT）と幾何・光度一貫性フィルタを提供するモジュール。"""
 
 import logging
 import math
@@ -24,6 +25,7 @@ MAX_NEIGHBORS_CONST = config.MAX_NEIGHBORS
 
 @cuda.jit(device=True)
 def _bilinear_interpolate_cuda(image, y, x):
+    """画像の実数座標 (y, x) で双線形補間した値を返す。"""
     h, w = image.shape
     x = np.float32(x)
     y = np.float32(y)
@@ -43,6 +45,7 @@ def _bilinear_interpolate_cuda(image, y, x):
 
 @njit(fastmath=True)
 def _bilinear_interpolate_jit(image, y, x):
+    """画像の実数座標 (y, x) で双線形補間した値を返す。"""
     h, w = image.shape
     x = np.float32(x)
     y = np.float32(y)
@@ -78,10 +81,8 @@ def _compute_homography_cuda(
     R_ref_inv,  # 事前計算済みのR_ref_invを引数として受け取る
     K_inv,  # 事前計算済みのK_invを引数として受け取る
 ):
-    # R_ref_invとK_invは事前計算済みなので、ここでは計算しない
+    """参照視点の3D平面（点＋法線）を元に、参照画像から参照画像へのホモグラフィを計算する。"""
 
-    # T_ref_invの計算（R_ref_invを使用）
-    # 共通の計算をまとめて最適化
     T_ref_0 = T_ref[0]
     T_ref_1 = T_ref[1]
     T_ref_2 = T_ref[2]
@@ -101,8 +102,6 @@ def _compute_homography_cuda(
         + R_ref_inv[2, 2] * T_ref_2
     )
 
-    # ワールド座標からカメラ座標への変換（R_refとT_refを使用）
-    # 共通の計算をまとめて最適化
     p_ref_0 = (
         R_ref[0, 0] * plane_point_3d_0
         + R_ref[0, 1] * plane_point_3d_1
@@ -122,7 +121,6 @@ def _compute_homography_cuda(
         + T_ref_2
     )
 
-    # 法線の変換（R_refを使用）
     n_ref_0 = (
         R_ref[0, 0] * plane_normal_0
         + R_ref[0, 1] * plane_normal_1
@@ -139,7 +137,6 @@ def _compute_homography_cuda(
         + R_ref[2, 2] * plane_normal_2
     )
 
-    # 相対回転行列の計算（R_src @ R_ref_inv）
     R_rel = cuda.local.array((3, 3), dtype=np.float32)
     for i in range(3):
         for j in range(3):
@@ -149,7 +146,6 @@ def _compute_homography_cuda(
                 + R_src[i, 2] * R_ref_inv[2, j]
             )
 
-    # 相対並進ベクトルの計算（R_src @ T_ref_inv + T_src）
     T_rel_0 = (
         R_src[0, 0] * T_ref_inv_0
         + R_src[0, 1] * T_ref_inv_1
@@ -183,7 +179,6 @@ def _compute_homography_cuda(
         return
 
     H = cuda.local.array((3, 3), dtype=np.float32)
-    # dの逆数を事前計算して除算回数を削減
     d_inv = 1.0 / d
     H[0, 0] = R_rel[0, 0] + T_rel_0 * n_ref_0 * d_inv
     H[0, 1] = R_rel[0, 1] + T_rel_0 * n_ref_1 * d_inv
@@ -195,10 +190,7 @@ def _compute_homography_cuda(
     H[2, 1] = R_rel[2, 1] + T_rel_2 * n_ref_1 * d_inv
     H[2, 2] = R_rel[2, 2] + T_rel_2 * n_ref_2 * d_inv
 
-    # K_invは事前計算済みなので、ここでは計算しない
-
     temp_mat = cuda.local.array((3, 3), dtype=np.float32)
-    # temp_mat = K_src @ H
     for i in range(3):
         for j in range(3):
             val = 0.0
@@ -206,7 +198,6 @@ def _compute_homography_cuda(
                 val += K_src[i, k] * H[k, j]
             temp_mat[i, j] = val
 
-    # H_out = temp_mat @ K_inv
     for i in range(3):
         for j in range(3):
             val = 0.0
@@ -219,6 +210,7 @@ def _compute_homography_cuda(
 def _compute_homography_jit(
     K_ref, R_ref, T_ref, K_src, R_src, T_src, plane_point_3d, plane_normal
 ):
+    """参照視点の3D平面（点＋法線）を元に、参照画像から参照画像へのホモグラフィ行列を返す。"""
     K_src = np.ascontiguousarray(K_src)
     R_src = np.ascontiguousarray(R_src)
     R_ref_inv = R_ref.T
@@ -238,6 +230,7 @@ def _compute_homography_jit(
 def _compute_weighted_zncc_cost_cuda(
     patch_ref, warped_patch_src, sigma_color, zncc_epsilon
 ):
+    """適応的重み付き ZNCC で参照パッチとワープした参照パッチのコストを計算する。"""
     patch_size = patch_ref.shape[0]
     half = patch_size // 2
     center_val = patch_ref[half, half]
@@ -291,21 +284,17 @@ def _compute_weighted_zncc_cost_cuda(
 def _compute_weighted_zncc_cost_jit(
     patch_ref, warped_patch_src, sigma_color, zncc_epsilon
 ):
-    """
-    適応的支持領域重み付けを用いてZNCCコストを計算する。
-    """
+    """適応的重み付き ZNCC で参照パッチとワープした参照パッチのコストを計算する。"""
     patch_size = patch_ref.shape[0]
     half = patch_size // 2
     center_val = patch_ref[half, half]
 
-    # 1. 重みカーネルを計算
     weights = np.zeros_like(patch_ref, dtype=np.float32)
     for r in range(patch_size):
         for c in range(patch_size):
             color_diff_sq = (patch_ref[r, c] - center_val) ** 2
             weights[r, c] = np.exp(-color_diff_sq / (2 * sigma_color**2))
 
-    # 2. 重み付き統計量を計算
     sum_w = np.sum(weights)
     if sum_w < 1e-6:
         return 1.0
@@ -322,13 +311,11 @@ def _compute_weighted_zncc_cost_jit(
     if std_ref < zncc_epsilon or std_src < zncc_epsilon:
         return 1.0
 
-    # 3. 重み付きZNCCを計算
     numerator = (
         np.sum(weights * (patch_ref - mean_ref) * (warped_patch_src - mean_src)) / sum_w
     )
     denominator = std_ref * std_src
 
-    # ZNCC値は-1から1なので、コストを0から1の範囲に変換
     return (1.0 - (numerator / denominator)) / 2.0
 
 
@@ -352,15 +339,15 @@ def _evaluate_cost_cuda(
     top_k_costs,
     adaptive_weight_sigma_color,
     zncc_epsilon,
-    R_ref_inv,  # 事前計算済みのR_ref_invを引数として受け取る
-    K_inv,  # 事前計算済みのK_invを引数として受け取る
+    R_ref_inv,
+    K_inv,
 ):
+    """ピクセル (r,c) の深度・法線でホモグラフィを求め、近傍ビューとの重み付き ZNCC コストの中央値を返す。"""
     h, w = ref_image_gray.shape
     half = patch_size // 2
     if r - half < 0 or r + half + 1 > h or c - half < 0 or c + half + 1 > w:
         return 1.0
 
-    # カメラ座標の計算（K_invを使用して最適化）
     fx_inv = K_inv[0, 0]
     fy_inv = K_inv[1, 1]
     cx = ref_pose_K[0, 2]
@@ -371,8 +358,6 @@ def _evaluate_cost_cuda(
     point_3d_cam_1 = y_cam
     point_3d_cam_2 = depth
 
-    # R_ref_invは事前計算済みなので、ここでは計算しない
-    # ワールド座標への変換
     point_3d_cam_T_0 = point_3d_cam_0 - ref_pose_T[0]
     point_3d_cam_T_1 = point_3d_cam_1 - ref_pose_T[1]
     point_3d_cam_T_2 = point_3d_cam_2 - ref_pose_T[2]
@@ -393,7 +378,6 @@ def _evaluate_cost_cuda(
         + R_ref_inv[2, 2] * point_3d_cam_T_2
     )
 
-    # 法線のワールド座標への変換
     normal_world_0 = (
         R_ref_inv[0, 0] * normal_0
         + R_ref_inv[0, 1] * normal_1
@@ -433,10 +417,9 @@ def _evaluate_cost_cuda(
             normal_world_0,
             normal_world_1,
             normal_world_2,
-            R_ref_inv,  # 事前計算済みのR_ref_invを渡す
-            K_inv,  # 事前計算済みのK_invを渡す
+            R_ref_inv,
+            K_inv,
         )
-        # Guard invalid H
         invalid_H = False
         for ii in range(3):
             for jj in range(3):
@@ -479,20 +462,7 @@ def _evaluate_cost_cuda(
             if costs[i] > costs[j]:
                 costs[i], costs[j] = costs[j], costs[i]
     top_k = min(top_k_costs, num_neighbors)
-    # 常に中央値を使用（外れ値に強い集約方法）
-    # costs は昇順ソート済み（下で2重ループの後に並べ替えがあるため、こちらでも整列を担保）
-    # ただし上の2重ループは隣接要素の交換なのでコストが単調とは限らない。念のため再整列。
-    # 軽量なローカル選択のため単純な挿入ソートでもよいが、件数が少ないので再使用。
-    # 手動の簡易ソート（バブル）
-    for ii in range(num_neighbors):
-        for jj in range(ii + 1, num_neighbors):
-            if costs[ii] > costs[jj]:
-                tmp = costs[ii]
-                costs[ii] = costs[jj]
-                costs[jj] = tmp
-    # 中央値（偶数なら下側の中間値）
-    mid = top_k // 2
-    return costs[mid]
+    return np.median(costs[:top_k])
 
 
 @njit(fastmath=True)
@@ -516,6 +486,7 @@ def _evaluate_cost_jit(
     adaptive_weight_sigma_color,
     zncc_epsilon,
 ):
+    """ピクセル (r,c) の深度・法線でホモグラフィを求め、近傍ビューとの重み付き ZNCC コストの中央値を返す。"""
     h, w = ref_image_gray.shape
     half = patch_size // 2
 
@@ -565,7 +536,6 @@ def _evaluate_cost_jit(
 
     costs = np.sort(costs)
     top_k = min(top_k_costs, len(costs))
-    # 常に中央値を使用（外れ値に強い集約方法）
     return np.median(costs[:top_k])
 
 
@@ -587,9 +557,7 @@ def _initialize_cost_map_jit(
     adaptive_weight_sigma_color,
     zncc_epsilon,
 ):
-    """
-    全ピクセルに対して並列に初期コストを計算する
-    """
+    """全ピクセルに対して並列に初期コスト（重み付き ZNCC の中央値）を計算する。"""
     h, w = depth_map.shape
     for r in prange(h):
         for c in range(w):
@@ -639,6 +607,7 @@ def _propagate_spatial_one_color_cuda(
     R_ref_inv,  # 事前計算済みのR_ref_inv
     K_inv,  # 事前計算済みのK_inv
 ):
+    """チェッカーボードの一方の色のピクセルについて、隣接ピクセルの深度・法線でコストを評価し、改善すれば伝播する。"""
     c, r = cuda.grid(2)
     h, w = depth_map.shape
 
@@ -646,7 +615,6 @@ def _propagate_spatial_one_color_cuda(
         return
     if (r + c) % 2 != color:
         return
-    # 無効深度の画素はスキップ
     if math.isnan(depth_map[r, c]) or math.isinf(depth_map[r, c]):
         return
 
@@ -682,8 +650,8 @@ def _propagate_spatial_one_color_cuda(
             top_k_costs,
             adaptive_weight_sigma_color,
             zncc_epsilon,
-            R_ref_inv,  # 事前計算済みのR_ref_invを渡す
-            K_inv,  # 事前計算済みのK_invを渡す
+            R_ref_inv,
+            K_inv,
         )
 
         if new_cost < cost_map[r, c]:
@@ -711,12 +679,10 @@ def _initialize_cost_map_cuda(
     src_K,
     src_R,
     src_T,
-    R_ref_inv,  # 事前計算済みのR_ref_inv
-    K_inv,  # 事前計算済みのK_inv
+    R_ref_inv,
+    K_inv,
 ):
-    """
-    GPUで全ピクセルに対して並列に初期コストを計算する
-    """
+    """GPU で全ピクセルに対して並列に初期コストを計算する。"""
     c, r = cuda.grid(2)
     h, w = depth_map.shape
 
@@ -746,8 +712,8 @@ def _initialize_cost_map_cuda(
         top_k_costs,
         adaptive_weight_sigma_color,
         zncc_epsilon,
-        R_ref_inv,  # 事前計算済みのR_ref_invを渡す
-        K_inv,  # 事前計算済みのK_invを渡す
+        R_ref_inv,
+        K_inv,
     )
     cost_map[r, c] = cost
 
@@ -774,9 +740,10 @@ def _random_search_cuda(
     adaptive_weight_sigma_color,
     depth_range_map,
     random_states,
-    R_ref_inv,  # 事前計算済みのR_ref_inv
-    K_inv,  # 事前計算済みのK_inv
+    R_ref_inv,
+    K_inv,
 ):
+    """ランダムサーチで深度・法線を更新し、コストが改善すれば採用する。"""
     c, r = cuda.grid(2)
     h, w = depth_map.shape
     thread_id = r * w + c
@@ -784,7 +751,6 @@ def _random_search_cuda(
     if r >= h or c >= w:
         return
 
-    # 現在の状態を取得
     d_current = depth_map[r, c]
     n_current = normal_map[r, c]
     current_cost = cost_map[r, c]
@@ -792,10 +758,6 @@ def _random_search_cuda(
     if math.isnan(d_current) or math.isinf(d_current) or d_current <= 0:
         return
 
-    # -----------------------------------------------------------------
-    # フェーズ1: 深度のみ更新 (Depth Refinement)
-    # 法線は固定して、深度だけを動かしてみる
-    # -----------------------------------------------------------------
     d_range = depth_range_map[r, c]
     if not (math.isnan(d_range) or math.isinf(d_range) or d_range <= 0):
         d_new = (
@@ -808,7 +770,6 @@ def _random_search_cuda(
         )
 
         if d_new > 0:
-            # 法線はそのまま使用
             cost_depth_only = _evaluate_cost_cuda(
                 r,
                 c,
@@ -828,20 +789,18 @@ def _random_search_cuda(
                 top_k_costs,
                 adaptive_weight_sigma_color,
                 zncc_epsilon,
-                R_ref_inv,  # 事前計算済みのR_ref_invを渡す
-                K_inv,  # 事前計算済みのK_invを渡す
+                R_ref_inv,
+                K_inv,
             )
 
             if cost_depth_only < current_cost:
                 depth_map[r, c] = d_new
                 current_cost = cost_depth_only
-                d_current = d_new  # 次の法線探索のために現在値を更新
-                cost_map[r, c] = current_cost  # グローバルメモリも更新
+                d_current = d_new
+                cost_map[r, c] = current_cost
 
     # -----------------------------------------------------------------
     # フェーズ2: 法線のみ更新 (Normal Refinement)
-    # 深度は固定(またはフェーズ1で更新された値)して、法線だけを動かす
-    # 加法ノイズ方式を使用（ロドリゲスの回転公式より高速でロバスト）
     # -----------------------------------------------------------------
 
     # 現在の法線をローカル変数にコピー
@@ -940,37 +899,30 @@ def _check_geometric_consistency_jit(
     neighbor_depth_maps_np,
     error_threshold,
 ):
-    """
-    単一の3Dポイントが、近傍ビューの深度マップと幾何学的に一貫しているかチェックする
-    """
+    """1つの3D点が近傍ビューの深度マップと幾何学的に一貫している視点数を返す。
     consistent_views = 0
     h, w = neighbor_depth_maps_np[0].shape
 
-    # 各近傍ビューでチェック
     for i in range(len(neighbor_K_np)):
         K_src = neighbor_K_np[i]
         R_src = neighbor_R_np[i]
         T_src = neighbor_T_np[i]
         depth_map_src = neighbor_depth_maps_np[i]
 
-        # 近傍ビューのカメラ座標に変換
         p_src_cam = R_src @ point_3d_world + T_src
 
         # 近傍ビューの画像座標に投影
         p_src_img_h = K_src @ p_src_cam
         d_proj_src = p_src_img_h[2]
 
-        # ゼロ除算を防ぎ、カメラの後ろにある点も無視する
         if d_proj_src < 1e-6:
             continue
 
         u_src, v_src = p_src_img_h[0] / d_proj_src, p_src_img_h[1] / d_proj_src
 
-        # 画像範囲外かチェック
         if not (0 <= u_src < w and 0 <= v_src < h):
             continue
 
-        # 最も近いピクセルの深度値を取得
         r_src, c_src = int(round(v_src)), int(round(u_src))
 
         if not (0 <= c_src < w and 0 <= r_src < h):
@@ -978,12 +930,9 @@ def _check_geometric_consistency_jit(
 
         d_actual_src = depth_map_src[r_src, c_src]
 
-        # 近傍ビューの深度が有効かチェック
-        # ゼロ除算を避けるために、非常に小さい正の値も除外
         if not np.isfinite(d_actual_src) or d_actual_src < 1e-6:
             continue
 
-        # 幾何学的なエラーを計算 (相対深度差)
         relative_error = np.abs(d_proj_src - d_actual_src) / d_actual_src
 
         if relative_error < error_threshold:
@@ -1005,9 +954,7 @@ def _filter_depth_map_by_geometric_consistency_jit(
     error_threshold,
     min_consistent_views,
 ):
-    """
-    幾何学的一貫性に基づいて深度マップをフィルタリングする（並列化版）
-    """
+    """幾何学的一貫性を満たす視点数が閾値未満のピクセルを NaN にする。"""
     h, w = filtered_depth_map.shape
     failures = 0
 
@@ -1017,13 +964,11 @@ def _filter_depth_map_by_geometric_consistency_jit(
             if not (np.isfinite(d_ref) and d_ref > 0):
                 continue
 
-            # 3Dポイントへの逆投影
             x_cam_ref = (c - K_ref[0, 2]) * d_ref / K_ref[0, 0]
             y_cam_ref = (r - K_ref[1, 2]) * d_ref / K_ref[1, 1]
             point_3d_cam_ref = np.array([x_cam_ref, y_cam_ref, d_ref], dtype=np.float32)
             point_3d_world = R_ref.T @ (point_3d_cam_ref - T_ref)
 
-            # 幾何学的一貫性をチェック
             consistent_views = _check_geometric_consistency_jit(
                 point_3d_world,
                 neighbor_K_np,
@@ -1054,40 +999,30 @@ def _check_photometric_consistency_jit(
     neighbor_T,
     color_diff_threshold,
 ):
-    """
-    指定されたピクセルの深度値が、近傍ビューと光度的に一貫しているかチェックする
-    """
+    """指定ピクセルの深度で近傍ビューに再投影し、色差が閾値未満の視点数を返す。"""
     consistent_views = 0
     h, w, _ = neighbor_images[0].shape
 
-    # 参照ビューのカメラ座標系での3D点を計算
     x_cam = (c - K[0, 2]) * depth / K[0, 0]
     y_cam = (r - K[1, 2]) * depth / K[1, 1]
     point_3d_cam = np.array([x_cam, y_cam, depth], dtype=np.float32)
 
-    # ワールド座標に変換
     point_3d_world = R_ref.T @ (point_3d_cam - T_ref)
 
-    # 各近傍ビューでチェック
     for i in range(len(neighbor_images)):
         R_src, T_src = np.ascontiguousarray(neighbor_R[i]), neighbor_T[i]
 
-        # 近傍ビューのカメラ座標に変換
         p_src_cam = R_src @ point_3d_world + T_src
 
-        # カメラの後ろにある点は無視
         if p_src_cam[2] <= 0:
             continue
 
-        # 画像座標に投影
         p_src_img_h = K @ p_src_cam
         u_src, v_src = p_src_img_h[0] / p_src_img_h[2], p_src_img_h[1] / p_src_img_h[2]
 
-        # 画像範囲内かチェック
         if not (0 <= u_src < w and 0 <= v_src < h):
             continue
 
-        # 双線形補間で色を取得
         y, x = v_src, u_src
         x1, y1 = int(x), int(y)
         x2, y2 = x1 + 1, y1 + 1
@@ -1104,7 +1039,6 @@ def _check_photometric_consistency_jit(
         )
         neighbor_color = w1 * q11 + w2 * q12 + w3 * q21 + w4 * q22
 
-        # 色の差を計算 (L2ノルム)
         color_diff = np.sqrt(
             np.sum(
                 (ref_color_pixel.astype(np.float32) - neighbor_color.astype(np.float32))
@@ -1131,13 +1065,8 @@ def _filter_depth_map_by_photometric_consistency_jit(
     color_diff_threshold,
     min_consistent_views,
 ):
-    """
-    光度一貫性に基づいて深度マップをフィルタリングする（並列化版）
-    """
+    """光度一貫性を満たす視点数が閾値未満のピクセルを NaN にする。"""
     h, w = filtered_depth_map.shape
-    # Numbaのprangeでは、各スレッドが独立して変数を更新するため、
-    # 最終的な合計は正確ではない可能性があるが、実際には問題ない
-    # （ログ出力用のカウントなので、完全に正確である必要はない）
     consistency_failures = 0
 
     for r in prange(h):
@@ -1170,6 +1099,7 @@ def _filter_depth_map_by_photometric_consistency_jit(
 
 @njit(parallel=True)
 def _initialize_normals_from_depth_jit(depth_map, K):
+    """深度マップから隣接ピクセルの外積で法線を初期化する。"""
     h, w = depth_map.shape
     normals = np.zeros((h, w, 3), dtype=np.float32)
     cx, cy = K[0, 2], K[1, 2]
@@ -1216,6 +1146,7 @@ def _initialize_normals_from_depth_jit(depth_map, K):
 
 @cuda.jit
 def _initialize_normals_from_depth_cuda(normals, depth_map, K):
+    """深度マップから隣接ピクセルの外積で法線を初期化する。"""
     c, r = cuda.grid(2)
     h, w = depth_map.shape
     if r >= 1 and r < h - 1 and c >= 1 and c < w - 1:
@@ -1272,7 +1203,10 @@ def _initialize_normals_from_depth_cuda(normals, depth_map, K):
 
 
 class DepthOptimization:
+    """PatchMatch による深度・法線の最適化と幾何・光度一貫性フィルタを実行するクラス。"""
+
     def __init__(self, config):
+        """config を保持し、ADAPTIVE_WEIGHT_SIGMA_COLOR が無ければデフォルト 10.0 を設定する。"""
         self.config = config
         self._gpu_cum_start_nojit = None  # set after first GPU kernel finishes
         if not hasattr(self.config, "ADAPTIVE_WEIGHT_SIGMA_COLOR"):
@@ -1282,6 +1216,7 @@ class DepthOptimization:
             self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR = 10.0
 
     def _initialize_normals_gpu(self, depth_map, K):
+        """深度マップから CUDA で法線を初期化し、ホストにコピーして返す。"""
         h, w = depth_map.shape
         d_depth_map = cuda.to_device(depth_map.astype(np.float32))
         d_normals = cuda.device_array((h, w, 3), dtype=np.float32)
@@ -1308,6 +1243,7 @@ class DepthOptimization:
         neighbor_views_data,
         title_prefix="",
     ):
+        """指定ピクセルのパッチと近傍ビューへの投影結果を OpenCV で表示する。"""
         h, w, _ = ref_image.shape
         patch_size = self.config.PATCHMATCH_PATCH_SIZE
         half = patch_size // 2
@@ -1464,6 +1400,7 @@ class DepthOptimization:
         ref_idx=0,
         filename_stem=None,
     ):
+        """チェッカーボード伝播とランダムサーチで PatchMatch を実行し、深度・法線を反復更新する。"""
         logging.info(
             "Starting PatchMatch MVS depth refinement using checkerboard propagation..."
         )
@@ -1561,15 +1498,7 @@ class DepthOptimization:
         cost_map = d_cost_map.copy_to_host()
         logging.info("Initial cost map computation completed on GPU.")
 
-        # Early-stop state will be managed on-the-fly without predeclared thresholds
-
-        # CSV書き込み処理は削除（評価は別スクリプトで実行）
-
-        # start_refinement_time removed (unused)
-
-        # --- PatchMatch反復ループ (GPU) ---
         save_each_depth_dir = None
-        # ファイル名ベースのフォルダ名を使用（フォールバック: ref_idx）
         depth_folder_name = (
             filename_stem if filename_stem is not None else f"{ref_idx:04d}"
         )
@@ -1578,7 +1507,6 @@ class DepthOptimization:
                 config.DEPTH_IMAGE_DIR, depth_folder_name
             )
             os.makedirs(save_each_depth_dir, exist_ok=True)
-            # 初期深度も保存（iter_00）
             save_path0 = os.path.join(save_each_depth_dir, f"depth_iter_00.png")
             logging.info(f"Saving initial depth map to {save_path0}")
             save_depth_map_as_image(depth_map, save_path0)
@@ -1591,7 +1519,6 @@ class DepthOptimization:
             logging.info(f"Saving initial normal map to {save_pathn0}")
             save_normal_map_as_image(normal_map.copy(), save_pathn0)
         iter_times_gpu = []
-        # 各イテレーションの深度マップを保存するリスト（エラーマップの統一スケール用）
         all_iteration_depths = []
         if gt_depth is not None:
             all_iteration_depths.append(initial_depth.copy())
@@ -1626,16 +1553,12 @@ class DepthOptimization:
             ),
             gt_depth=gt_depth,
             iter_times=iter_times_gpu,
-            csv_files=None,  # CSV書き込み処理は削除（評価は別スクリプトで実行）
+            csv_files=None,  
         )
 
-        # すべてのイテレーションの深度マップを結合
         if gt_depth is not None and iteration_depths:
             all_iteration_depths.extend(iteration_depths)
 
-        # 深度マップのEXR形式での保存はmain.pyで統一して行うため、ここでは削除
-
-        # --- Debug: cost_map statistics and cost validation check on samples ---
         try:
             mask = np.isfinite(depth_map)
             if np.any(mask):
@@ -1713,9 +1636,7 @@ class DepthOptimization:
     def filter_depth_map_by_geometric_consistency(
         self, ref_depth_map, ref_pose, neighbor_views_data, all_optimized_depths
     ):
-        """
-        複数ビュー間の幾何学的一貫性に基づいて深度マップをフィルタリングする
-        """
+        """近傍ビューの深度マップと幾何学的一貫性をチェックし、閾値未満のピクセルを NaN にする。"""
         logging.info("Filtering depth map by geometric consistency...")
         h, w = ref_depth_map.shape
         filtered_depth_map = ref_depth_map.copy()
@@ -1777,9 +1698,7 @@ class DepthOptimization:
     def filter_depth_map_by_photometric_consistency(
         self, depth_map, ref_image, ref_pose, neighbor_views_data
     ):
-        """
-        光度一貫性に基づいて深度マップをフィルタリングする（高速な並列化版）
-        """
+        """近傍ビューへの再投影と色差で光度一貫性をチェックし、閾値未満のピクセルを NaN にする。"""
         logging.info(
             "Filtering optimized depth map based on cost and photometric consistency..."
         )
@@ -1802,7 +1721,6 @@ class DepthOptimization:
 
         ref_image_float = ref_image.astype(np.float32)
 
-        # 光度一貫性チェック（並列化版）
         consistency_failures = _filter_depth_map_by_photometric_consistency_jit(
             filtered_depth_map,
             ref_image_float,
@@ -1846,18 +1764,16 @@ class DepthOptimization:
         iter_times=None,
         csv_files=None,
     ):
-        # 各イテレーションの深度マップを保存するリスト（エラーマップの統一スケール用）
+        """CUDA でチェッカーボード伝播とランダムサーチを反復し、深度・法線・コストを更新する。"""
         iteration_depths = []
         h, w = depth_map.shape
 
-        # Invalid depthの強制シードは行わず、そのまま扱う
         depth_map = depth_map.copy()
         threadsperblock = (16, 16)
         blockspergrid_x = (w + threadsperblock[0] - 1) // threadsperblock[0]
         blockspergrid_y = (h + threadsperblock[1] - 1) // threadsperblock[1]
         blockspergrid = (blockspergrid_x, blockspergrid_y)
 
-        # R_ref_invとK_invを事前計算（CPU側で一度だけ計算）
         R_ref_inv = ref_pose_R.T.astype(np.float32)  # 転置行列
         fx = ref_pose_K[0, 0]
         fy = ref_pose_K[1, 1]
@@ -1872,7 +1788,6 @@ class DepthOptimization:
             dtype=np.float32,
         )
 
-        # Device arrays
         d_depth_map = cuda.to_device(depth_map)
         d_normal_map = cuda.to_device(normal_map)
         d_cost_map = cuda.to_device(cost_map)
@@ -1892,13 +1807,9 @@ class DepthOptimization:
             seed=1,
         )
 
-        # depth_prev_for_conv = depth_map.copy()  # early stopping disabled
-        # 最初のイテレーション開始時点を記録（累積時間の基準）
         first_iter_start_time = None
         for i in range(self.config.PATCHMATCH_ITERATIONS):
-            # イテレーション全体の開始時間（ログ表示用）
             iter_start_time = time.time()
-            # 最初のイテレーション開始時点を記録
             if first_iter_start_time is None:
                 first_iter_start_time = iter_start_time
 
@@ -1906,7 +1817,6 @@ class DepthOptimization:
                 f"PatchMatch GPU Iteration {i+1}/{self.config.PATCHMATCH_ITERATIONS}"
             )
 
-            # Propagation (checkerboard)
             neighbors_dr = np.array([-1, 1, 0, 0], dtype=np.int8)
             neighbors_dc = np.array([0, 0, -1, 1], dtype=np.int8)
             d_neighbors_dr = cuda.to_device(neighbors_dr)
@@ -1931,11 +1841,10 @@ class DepthOptimization:
                     d_src_K,
                     d_src_R,
                     d_src_T,
-                    d_R_ref_inv,  # 事前計算済みのR_ref_invを渡す
-                    d_K_inv,  # 事前計算済みのK_invを渡す
+                    d_R_ref_inv,
+                    d_K_inv,
                 )
 
-            # Random Search
             depth_range_map = (
                 initial_depth_error.astype(np.float32)
                 * (self.config.PATCHMATCH_DECAY_RATE**i)
@@ -1962,29 +1871,24 @@ class DepthOptimization:
                 self.config.ADAPTIVE_WEIGHT_SIGMA_COLOR,
                 d_depth_range_map,
                 rng_states,
-                d_R_ref_inv,  # 事前計算済みのR_ref_invを渡す
-                d_K_inv,  # 事前計算済みのK_invを渡す
+                d_R_ref_inv,
+                d_K_inv,
             )
             cuda.synchronize()
 
-            # Mark cumulative timer start after first successful kernel run (exclude initial JIT)
             if self._gpu_cum_start_nojit is None:
                 self._gpu_cum_start_nojit = time.time()
 
-            # Save depth per-iteration if requested (each iteration when DEBUG_SAVE_DEPTH_MAPS is true)
             depth_tmp = None
             if save_per_iter and save_dir is not None:
                 depth_tmp = d_depth_map.copy_to_host()
-                # PNG形式で保存
                 save_path = os.path.join(save_dir, f"depth_iter_{i+1:02d}.png")
                 save_depth_map_as_image(depth_tmp, save_path)
-                # EXR形式でも保存
                 save_path_exr = os.path.join(save_dir, f"depth_iter_{i+1:02d}.exr")
                 logging.info(
                     f"Saving depth map as EXR at iteration {i+1} to {save_path_exr}"
                 )
                 save_depth_map_as_exr(depth_tmp, save_path_exr)
-            # Save normal per-iteration if requested (each iteration when DEBUG_SAVE_NORMAL_MAPS is true)
             if save_normals_per_iter and normal_save_dir is not None:
                 normal_tmp = d_normal_map.copy_to_host()
                 save_path_n = os.path.join(
@@ -1992,71 +1896,22 @@ class DepthOptimization:
                 )
                 logging.info(f"Saving normal map at iteration {i+1} to {save_path_n}")
                 save_normal_map_as_image(normal_tmp, save_path_n)
-            # Record cumulative time from first iteration start
-            # 各イテレーションの開始時点での経過時間を記録
             if iter_times is not None:
                 cumulative_time = iter_start_time - first_iter_start_time
                 iter_times.append(cumulative_time)
                 if gt_depth is not None and save_per_iter and (save_dir is not None):
-                    # depth_tmp が未作成（保存オフ）ならホストへコピー
                     if depth_tmp is None:
                         depth_tmp = d_depth_map.copy_to_host()
-                    # エラーマップは後で統一スケールで再保存するため、ここでは保存しない
-                    # 代わりに深度マップをリストに保存
                     iteration_depths.append(depth_tmp.copy())
-            # Log per-iteration metrics and elapsed time (and cumulative from first iteration)
-            # iter_durationはイテレーション全体の時間（ログ表示用）
             iter_duration = time.time() - iter_start_time
-            # cumは最初のイテレーション開始からの累積時間（time.csvと同じ基準）
             cum_txt = ""
             if first_iter_start_time is not None:
                 cum_time = time.time() - first_iter_start_time
                 cum_txt = f", 累積: {cum_time:.2f}秒"
-            # メトリクス計算と出力は無効化（評価は別スクリプトで実行）
-            # if gt_depth is not None:
-            #     if depth_tmp is None:
-            #         depth_host = d_depth_map.copy_to_host()
-            #     else:
-            #         depth_host = depth_tmp
-            #     try:
-            #         metrics = compute_depth_metrics(depth_host, gt_depth)
-            #         logging.info(
-            #             f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] イテレーション {i+1}/{self.config.PATCHMATCH_ITERATIONS} "
-            #             f"(経過時間: {iter_duration:.2f}秒{cum_txt}) | "
-            #             f"MAE={metrics['mae']:.4f}, AbsRel={metrics['abs_rel']:.4f}, SqRel={metrics['sq_rel']:.4f}, "
-            #             f"RMSE={metrics['rmse']:.4f}, RMSElog={metrics['rmse_log']:.4f}, "
-            #             f"d1={metrics['delta1']:.4f}, d2={metrics['delta2']:.4f}, d3={metrics['delta3']:.4f}"
-            #         )
-            #         # CSV書き込み処理は削除（評価は別スクリプトで実行）
-            #     except Exception as e:
-            #         logging.warning(
-            #             f"[GPU] Could not compute metrics at iter {i+1}: {e}"
-            #         )
-            # else:
             logging.info(
                 f"[{filename_stem if filename_stem else f'{ref_idx:04d}'}] イテレーション {i+1}/{self.config.PATCHMATCH_ITERATIONS} "
                 f"(経過時間: {iter_duration:.2f}秒{cum_txt})"
             )
-
-            # Early convergence check disabled
-            # depth_curr = d_depth_map.copy_to_host()
-            # valid_mask = (
-            #     np.isfinite(depth_prev_for_conv)
-            #     & (depth_prev_for_conv != 0)
-            #     & np.isfinite(depth_curr)
-            # )
-            # if np.any(valid_mask):
-            #     mean_change = np.mean(
-            #         np.abs(depth_prev_for_conv[valid_mask] - depth_curr[valid_mask])
-            #         / np.maximum(1e-6, np.abs(depth_prev_for_conv[valid_mask]))
-            #     )
-            #     logging.info(f"[GPU] Average depth change: {mean_change:.5f}")
-            #     if mean_change < 0.001:
-            #         depth_map = depth_curr
-            #         normal_map = d_normal_map.copy_to_host()
-            #         cost_map = d_cost_map.copy_to_host()
-            #         return depth_map, normal_map, cost_map
-            # depth_prev_for_conv = depth_curr
 
         depth_map = d_depth_map.copy_to_host()
         normal_map = d_normal_map.copy_to_host()

@@ -1,3 +1,5 @@
+"""MVS パイプライン用の設定モジュール。DATA_TYPE・カメラCSV・YAML・環境変数からパスとパラメータを読み込む。"""
+
 import csv
 import os
 
@@ -9,21 +11,13 @@ try:
 except Exception:
     yaml = None
 
-# .envファイルの読み込み
 load_dotenv()
 
-"""
-データセット選択の方針:
-- 環境変数DATA_TYPEが設定されていればそれを使用
-- 設定されていなければ、最初のデータセットを自動選択
-- 対話的な選択は行わない（app/cli.pyで行う）
-"""
+# データセット選択: 環境変数 DATA_TYPE が有効ならそれを使用、そうでなければ data 内の最初のディレクトリを使用（対話選択は app/cli.py 側）
 
-# プロジェクトルート推定と環境変数の取得
 DEFAULT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 HOME_DIR = os.getenv("HOME_DIR", DEFAULT_HOME)
 
-# dataディレクトリ配下のディレクトリを取得
 DATA_DIR = os.path.join(HOME_DIR, "data")
 directories = [
     d for d in os.listdir(DATA_DIR) if os.path.isdir(os.path.join(DATA_DIR, d))
@@ -36,14 +30,13 @@ _env_data_type = os.getenv("DATA_TYPE", "").strip()
 
 
 def _is_valid_dataset_name(name: str) -> bool:
+    """name が空でなく、DATA_DIR 直下に同名ディレクトリが存在する場合に True。"""
     return bool(name) and os.path.isdir(os.path.join(DATA_DIR, name))
 
 
-# 環境変数DATA_TYPEが設定されていればそれを使用、なければ最初のデータセットを自動選択
 if _is_valid_dataset_name(_env_data_type):
     DATA_TYPE = _env_data_type
 else:
-    # 環境変数が設定されていない場合は、最初のデータセットを自動選択
     DATA_TYPE = directories[0]
 
 # パスの設定
@@ -73,12 +66,11 @@ CSV_DIR = os.path.join(OUTPUT_TYPE_DIR, "csv")
 
 """
 カメラ設定の読み込み
-必須: データセット内の txt/camera_params.csv
-   - baseline,width,height,camera_height,fov_v_deg,fov_h_deg,fx_pixels,fy_pixels,cx_pixels,cy_pixels
 """
 
 
 def _load_camera_params_from_csv(csv_path: str):
+    """camera_params.csv を読み込み、baseline・解像度・fov・内部パラメータ等の辞書を返す。"""
     if not os.path.exists(csv_path):
         return None
     try:
@@ -138,13 +130,11 @@ _cy = _cam_cfg.get("cy")
 cy = float(_cy) if _cy is not None else (height / 2.0)
 focal_length = float(fx)
 K = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float32)
-# for orthographic plane sizing
 scene_width = 2.0 * camera_height * np.tan(np.deg2rad(fov_h) / 2.0)
 scene_height = 2.0 * camera_height * np.tan(np.deg2rad(fov_v) / 2.0)
 pixel_size = scene_width / float(width)
 
-# YAML(app/mvs.yaml もしくは APP_MVS_CONFIG) による MVS パラメータの読み込み（必須）
-# 視差推定パラメータと可視化パラメータはYAMLから読み込まれる
+# YAML(app/mvs.yaml もしくは APP_MVS_CONFIG) による MVS パラメータの読み込み
 mvs_yaml_path = os.getenv(
     "APP_MVS_CONFIG", os.path.join(DEFAULT_HOME, "app", "mvs.yaml")
 )
@@ -164,7 +154,6 @@ with open(mvs_yaml_path, "r") as f:
 if not isinstance(_cfg, dict):
     raise ValueError(f"Invalid YAML configuration format in {mvs_yaml_path}")
 
-# 必須パラメータのチェック
 _required_params = [
     "WINDOW_SIZE",
     "MIN_DISP",
@@ -177,7 +166,6 @@ if _missing_params:
         f"Missing required parameters in {mvs_yaml_path}: {', '.join(_missing_params)}"
     )
 
-# グローバル変数に設定を反映
 g = globals()
 for k, v in _cfg.items():
     if v is not None:
@@ -193,7 +181,6 @@ if "VIZ_DEPTH_MIN" not in _cfg or _cfg["VIZ_DEPTH_MIN"] is None:
     )
 
 if "VIZ_DEPTH_MAX" not in _cfg or _cfg["VIZ_DEPTH_MAX"] is None:
-    # カメラ高度の1.0倍を最大値とする
     VIZ_DEPTH_MAX = camera_height * 1.0
     g["VIZ_DEPTH_MAX"] = VIZ_DEPTH_MAX
     import logging
@@ -202,7 +189,6 @@ if "VIZ_DEPTH_MAX" not in _cfg or _cfg["VIZ_DEPTH_MAX"] is None:
         f"VIZ_DEPTH_MAX auto-calculated from camera_height: {VIZ_DEPTH_MAX:.2f} (camera_height={camera_height:.2f} * 1.0)"
     )
 
-# VIZ_CMAPが設定された場合、ログに出力
 if "VIZ_CMAP" in _cfg:
     import logging
 
@@ -211,10 +197,9 @@ if "VIZ_CMAP" in _cfg:
     )
 
 
-# 環境変数からの設定読み込み（GUIから渡された設定を反映）
 # ブール値の文字列を適切に変換
 def _str_to_bool(s):
-    """文字列をブール値に変換"""
+    """文字列（true/1/yes/on）を True に、それ以外を適宜 bool に変換する。"""
     if isinstance(s, bool):
         return s
     if isinstance(s, str):
@@ -222,9 +207,7 @@ def _str_to_bool(s):
     return bool(s)
 
 
-# 環境変数から設定を読み込む
 g = globals()
-# 主要な設定項目のリスト
 _config_keys = [
     "SHOW_POINT_CLOUD",
     "POSITION_ERROR_SCALE",
@@ -258,9 +241,7 @@ _config_keys = [
 for key in _config_keys:
     env_value = os.getenv(key)
     if env_value is not None:
-        # 既にYAMLで設定されている場合はスキップ（YAMLが優先）
         if key not in g or g[key] == getattr(__builtins__, key, None):
-            # ブール値の場合は文字列を変換
             if key in (
                 "SHOW_POINT_CLOUD",
                 "DEBUG_SAVE_DEPTH_MAPS",
@@ -269,7 +250,6 @@ for key in _config_keys:
                 "MULTI_VIEW_VISIBILITY_FILTER_ENABLED",
             ):
                 g[key] = _str_to_bool(env_value)
-            # 数値の場合は型変換を試みる
             elif key in (
                 "POSITION_ERROR_SCALE",
                 "ROTATION_ERROR_SCALE",
@@ -287,7 +267,6 @@ for key in _config_keys:
                     g[key] = float(env_value)
                 except (ValueError, TypeError):
                     pass
-            # 整数の場合は型変換を試みる
             elif key in (
                 "PATCHMATCH_ITERATIONS",
                 "PATCHMATCH_PATCH_SIZE",
@@ -303,6 +282,5 @@ for key in _config_keys:
                     g[key] = int(env_value)
                 except (ValueError, TypeError):
                     pass
-            # 文字列の場合はそのまま
             else:
                 g[key] = env_value

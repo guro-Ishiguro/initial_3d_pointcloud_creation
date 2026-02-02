@@ -1,9 +1,18 @@
+"""
+MVSパイプライン用のコマンドラインエントリポイント。
+YAML設定パスとデータセット名を引数で受け取り、環境変数と sys.path を設定したうえで、mvs.main.run を呼び出す。
+"""
+
 import argparse
 import os
 import sys
 
 
 def _list_datasets(project_root: str):
+    """
+    プロジェクトルート直下の data ディレクトリ内のサブディレクトリ名を
+    データセット名としてソート済みリストで返す。
+    """
     data_dir = os.path.join(project_root, "data")
     if not os.path.isdir(data_dir):
         return []
@@ -13,8 +22,12 @@ def _list_datasets(project_root: str):
 
 
 def main():
+    """
+    コマンドライン引数を解析し、設定を適用してから mvs.main.run を実行する。
+    --config でYAMLパス、--dataset でデータセット名を指定可能。
+    """
     parser = argparse.ArgumentParser(
-        description="Run 3D point cloud pipeline (YAML-driven)"
+        description="Run 3D point cloud pipeline"
     )
     parser.add_argument(
         "--config",
@@ -30,7 +43,7 @@ def main():
     )
     args = parser.parse_args()
 
-    # Ensure project root and mvs dir on sys.path for module/bare imports inside mvs/*
+    # mvs モジュールの import のためにプロジェクトルートと mvs を sys.path に追加
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     mvs_dir = os.path.join(project_root, "mvs")
     if project_root not in sys.path:
@@ -38,10 +51,8 @@ def main():
     if mvs_dir not in sys.path:
         sys.path.insert(0, mvs_dir)
 
-    # Remove custom args so downstream parser (mvs.utils.parse_arguments) doesn't see them
     sys.argv = [sys.argv[0]]
 
-    # Apply global settings overrides if present
     try:
         from app.settings import apply_env_overrides
 
@@ -49,7 +60,6 @@ def main():
     except Exception:
         pass
 
-    # dataset selection (single dataset only)
     datasets = _list_datasets(project_root)
     if not datasets:
         print("No datasets found under ./data")
@@ -64,7 +74,7 @@ def main():
     elif len(datasets) == 1:
         selected_dataset = datasets[0]
     else:
-        # interactive selection
+        # 複数データセットがある場合は番号で対話選択
         print("\nSelect dataset:")
         for i, d in enumerate(datasets, 1):
             print(f"{i}) {d}")
@@ -80,14 +90,14 @@ def main():
             print("Invalid choice. Aborting.")
             sys.exit(2)
 
-    # single dataset: set env and run in-process
+    # 選択したデータセットを環境変数に設定し、同一プロセスで mvs.main を実行
     os.environ["DATA_TYPE"] = selected_dataset
 
-    # delegate to original entrypoint
+    # mvs.main.run に処理を委譲
     try:
         from mvs import main as mvs_main
     except Exception:
-        # Fallback: import by filename context if package import fails
+        # パッケージ import に失敗した場合は main.py をファイルから動的ロード
         import importlib.util
 
         main_path = os.path.join(project_root, "mvs", "main.py")
