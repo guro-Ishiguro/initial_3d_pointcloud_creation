@@ -1,3 +1,10 @@
+"""
+点群評価モジュール。
+
+再構成点群 P と真値メッシュ M（および真値点群 Q）を用いて、
+Cycle Consistency Error (CCE)、点群→メッシュ距離、外れ値割合を計算する。
+"""
+
 import argparse
 import pathlib
 from typing import Dict, Optional, Tuple, Union
@@ -13,15 +20,6 @@ ArrayNx3 = np.ndarray
 def save_point_cloud(points: ArrayNx3, file_path: Union[str, pathlib.Path]) -> None:
     """
     点群をPLY形式で保存する。
-
-    Open3Dを使用して高速に保存（利用可能な場合）。
-
-    Parameters
-    ----------
-    points : (N, 3) ndarray
-        点群の座標 [m]。
-    file_path : str | pathlib.Path
-        保存先のファイルパス。
     """
     points = np.asarray(points, dtype=np.float64)
     if points.ndim != 2 or points.shape[1] != 3:
@@ -63,16 +61,6 @@ end_header
 def load_point_cloud(file_path: Union[str, pathlib.Path]) -> ArrayNx3:
     """
     点群ファイル（PLYなど）を読み込む。
-
-    Parameters
-    ----------
-    file_path : str | pathlib.Path
-        点群ファイルのパス。
-
-    Returns
-    -------
-    points : (N, 3) ndarray
-        点群の座標 [m]。
     """
     file_path = pathlib.Path(file_path)
     if not file_path.exists():
@@ -147,22 +135,6 @@ def load_mesh(
 ) -> trimesh.Trimesh:
     """
     真値メッシュ M を読み込む / 構築するユーティリティ関数。
-
-    Parameters
-    ----------
-    mesh : str | pathlib.Path | trimesh.Trimesh | None
-        - メッシュファイルパス（PLY/OBJなど）、
-        - 既に構築済みの `trimesh.Trimesh` インスタンス、
-        - もしくは None（この場合は `vertices` / `faces` から構築）。
-    vertices : (V, 3) ndarray, optional
-        メモリ上の頂点座標 [m]。
-    faces : (F, 3) ndarray[int], optional
-        メモリ上の三角形ポリゴンの頂点インデックス。
-
-    Returns
-    -------
-    mesh : trimesh.Trimesh
-        構築された真値メッシュ。
     """
     if isinstance(mesh, trimesh.Trimesh):
         return mesh
@@ -172,7 +144,9 @@ def load_mesh(
         return trimesh.load_mesh(str(mesh), process=True)
 
     if vertices is None or faces is None:
-        raise ValueError("`vertices` と `faces` の両方、または `mesh` を指定してください。")
+        raise ValueError(
+            "`vertices` と `faces` の両方、または `mesh` を指定してください。"
+        )
 
     return trimesh.Trimesh(
         vertices=np.asarray(vertices),
@@ -188,25 +162,6 @@ def crop_mesh_with_bbox(
 ) -> trimesh.Trimesh:
     """
     再構成点群 P のバウンディングボックスで真値メッシュ M をクロップする。
-
-    Parameters
-    ----------
-    mesh : trimesh.Trimesh
-        真値メッシュ M。
-    points : (N, 3) ndarray
-        再構成点群 P [m]。
-    margin : float, optional
-        バウンディングボックスに付与するマージン [m]。
-
-    Returns
-    -------
-    cropped : trimesh.Trimesh
-        クロップ後の真値メッシュ。
-
-    Raises
-    ------
-    ValueError
-        クロップ後にメッシュが空になった場合。
     """
     if points.size == 0:
         raise ValueError("`points` が空です。")
@@ -223,7 +178,9 @@ def crop_mesh_with_bbox(
     faces_keep = mesh.faces[faces_keep_mask]
 
     if faces_keep.size == 0:
-        raise ValueError("バウンディングボックスでクロップした結果、メッシュが空になりました。")
+        raise ValueError(
+            "バウンディングボックスでクロップした結果、メッシュが空になりました。"
+        )
 
     cropped = trimesh.Trimesh(vertices=v, faces=faces_keep, process=True)
     return cropped
@@ -237,22 +194,6 @@ def sample_points_from_mesh(
 ) -> ArrayNx3:
     """
     メッシュ表面から一様サンプリングで点群 Q を生成する。
-
-    Parameters
-    ----------
-    mesh : trimesh.Trimesh
-        クロップ後の真値メッシュ M。
-    num_points : int
-        サンプリングする点数 |Q| = |P|。
-    random_state : int, optional
-        乱数シード（再現性のため）。
-    show_progress : bool, optional
-        プログレスバーを表示するかどうか。
-
-    Returns
-    -------
-    points : (num_points, 3) ndarray
-        真値点群 Q [m]。
     """
     if num_points <= 0:
         raise ValueError("`num_points` は正の整数である必要があります。")
@@ -276,30 +217,11 @@ def sample_points_from_mesh(
     return np.asarray(sampled, dtype=np.float64)
 
 
-def bidirectional_consistency_error(
+def cycle_consistency_error(
     P: ArrayNx3, Q: ArrayNx3, show_progress: bool = True
 ) -> float:
     """
-    Bidirectional Consistency Error (BCE) を計算する。
-
-    Eq. (BCE):
-        NN_Q(p) : 点 p に対する Q 上の最近傍点
-        NN_P(x) : 点 x に対する P 上の最近傍点
-        BCE = (1/|P|) sum_{p in P} || p - NN_P( NN_Q(p) ) ||
-
-    Parameters
-    ----------
-    P : (N, 3) ndarray
-        再構成点群 P [m]。
-    Q : (N, 3) ndarray
-        真値点群 Q [m]。
-    show_progress : bool, optional
-        プログレスバーを表示するかどうか。
-
-    Returns
-    -------
-    bce : float
-        Bidirectional Consistency Error [m]。
+    Cycle Consistency Error (CCE) を計算する。
     """
     P = np.asarray(P, dtype=np.float64)
     Q = np.asarray(Q, dtype=np.float64)
@@ -315,7 +237,7 @@ def bidirectional_consistency_error(
     if show_progress and P.shape[0] > 50000:
         batch_size = 50000
         idx_Q_list = []
-        with tqdm(total=P.shape[0], desc="  BCE: P→Q最近傍を計算中", unit="点") as pbar:
+        with tqdm(total=P.shape[0], desc="  CCE: P→Q最近傍を計算中", unit="点") as pbar:
             for i in range(0, P.shape[0], batch_size):
                 batch = P[i : i + batch_size]
                 _, batch_idx = tree_Q.query(batch, k=1)
@@ -331,7 +253,9 @@ def bidirectional_consistency_error(
     if show_progress and nn_Q.shape[0] > 50000:
         batch_size = 50000
         idx_P_back_list = []
-        with tqdm(total=nn_Q.shape[0], desc="  BCE: Q→P最近傍を計算中", unit="点") as pbar:
+        with tqdm(
+            total=nn_Q.shape[0], desc="  CCE: Q→P最近傍を計算中", unit="点"
+        ) as pbar:
             for i in range(0, nn_Q.shape[0], batch_size):
                 batch = nn_Q[i : i + batch_size]
                 _, batch_idx = tree_P.query(batch, k=1)
@@ -355,23 +279,6 @@ def point_to_mesh_distance(
 ) -> float:
     """
     点群 P から真値メッシュ M への最短距離の平均 d_{p->m} を計算する。
-
-    Eq. (point_to_mesh_distance):
-        d_{p->m} = (1/|P|) sum_{p in P} min_{x in M} || p - x ||
-
-    Parameters
-    ----------
-    P : (N, 3) ndarray
-        再構成点群 P [m]。
-    mesh : trimesh.Trimesh
-        クロップ後の真値メッシュ M。
-    show_progress : bool, optional
-        プログレスバーを表示するかどうか。
-
-    Returns
-    -------
-    d : float
-        平均点群→メッシュ距離 [m]。
     """
     P = np.asarray(P, dtype=np.float64)
     if P.shape[0] == 0:
@@ -410,35 +317,7 @@ def _compute_point_to_mesh_and_outlier_ratio(
     return_distances: bool = False,
 ) -> Union[Tuple[float, float], Tuple[float, float, ArrayNx3]]:
     """
-    点群→メッシュ距離と外れ値割合を同時に計算する（効率化のため）。
-
-    Open3DのRaycastingSceneを使用して高速化（利用可能な場合）。
-    メッシュファイルパスが指定されている場合、Open3Dで直接読み込んで変換をスキップ。
-
-    Parameters
-    ----------
-    P : (N, 3) ndarray
-        再構成点群 P [m]。
-    mesh : trimesh.Trimesh
-        クロップ後の真値メッシュ M。
-    threshold : float, optional
-        外れ値判定の閾値 T [m]。
-    show_progress : bool, optional
-        プログレスバーを表示するかどうか。
-    mesh_file_path : str | pathlib.Path | None, optional
-        メッシュファイルのパス（指定されている場合、Open3Dで直接読み込む）。
-
-    return_distances : bool, optional
-        距離情報も返すかどうか（可視化用）。
-
-    Returns
-    -------
-    d_pm : float
-        平均点群→メッシュ距離 [m]。
-    r_out : float
-        外れ値割合 [0〜1]。
-    distances : (N,) ndarray, optional
-        各点のメッシュへの距離 [m]（return_distances=Trueの場合）。
+    点群→メッシュ距離と外れ値割合を同時に計算する。
     """
     P = np.asarray(P, dtype=np.float64)
     if P.shape[0] == 0:
@@ -489,7 +368,9 @@ def _compute_point_to_mesh_and_outlier_ratio(
 
         # 符号付き距離を計算（バッチ処理でプログレスバーを表示）
         if show_progress and P.shape[0] > 50000:
-            batch_size = min(200000, P.shape[0] // 5)  # Open3Dは高速なので大きなバッチサイズを使用
+            batch_size = min(
+                200000, P.shape[0] // 5
+            )  # Open3Dは高速なので大きなバッチサイズを使用
             distances_list = []
             with tqdm(
                 total=P.shape[0],
@@ -520,7 +401,9 @@ def _compute_point_to_mesh_and_outlier_ratio(
 
         # 一度だけメッシュへの最近傍距離を計算
         if show_progress and P.shape[0] > 50000:
-            batch_size = min(100000, P.shape[0] // 10)  # 10バッチ程度に分割、最大100,000点
+            batch_size = min(
+                100000, P.shape[0] // 10
+            )  # 10バッチ程度に分割、最大100,000点
             distances_list = []
             with tqdm(
                 total=P.shape[0],
@@ -562,17 +445,6 @@ def visualize_point_cloud_with_distances(
     """
     距離に応じて色分けした点群を可視化する。
     推定点群と真値点群の両方を表示する。
-
-    Parameters
-    ----------
-    points : (N, 3) ndarray
-        推定点群の座標 [m]。
-    distances : (N,) ndarray
-        各点のメッシュへの距離 [m]。
-    gt_points : (M, 3) ndarray, optional
-        真値点群の座標 [m]（表示する場合）。
-    title : str, optional
-        ウィンドウタイトル。
     """
     try:
         import open3d as o3d
@@ -676,25 +548,6 @@ def outlier_ratio(
 ) -> float:
     """
     点群 P のうち、真値メッシュ M からの距離が閾値 T を超える外れ値の割合 r を計算する。
-
-    Eq. (outlier_ratio):
-        r = | { p in P | min_{x in M} ||p - x|| > T } | / |P|
-
-    Parameters
-    ----------
-    P : (N, 3) ndarray
-        再構成点群 P [m]。
-    mesh : trimesh.Trimesh
-        クロップ後の真値メッシュ M。
-    threshold : float, optional
-        外れ値判定の閾値 T [m]。
-    show_progress : bool, optional
-        プログレスバーを表示するかどうか。
-
-    Returns
-    -------
-    r : float
-        外れ値割合（0〜1）。
     """
     P = np.asarray(P, dtype=np.float64)
     if P.shape[0] == 0:
@@ -705,7 +558,9 @@ def outlier_ratio(
     if show_progress and P.shape[0] > 50000:
         batch_size = min(100000, P.shape[0] // 10)  # 10バッチ程度に分割、最大100,000点
         distances_list = []
-        with tqdm(total=P.shape[0], desc="外れ値割合を計算中", unit="点", miniters=1000) as pbar:
+        with tqdm(
+            total=P.shape[0], desc="外れ値割合を計算中", unit="点", miniters=1000
+        ) as pbar:
             for i in range(0, P.shape[0], batch_size):
                 batch = P[i : i + batch_size]
                 _, batch_distances, _ = mesh.nearest.on_surface(batch)
@@ -733,42 +588,7 @@ def evaluate_point_cloud(
     random_state: Optional[int] = 0,
 ) -> Dict[str, float]:
     """
-    再構成点群と真値メッシュ（および真値点群）に対する総合評価関数。
-
-    内部で以下を行う：
-      1. 真値メッシュの読み込み
-      2. 真値点群 Q の生成（gt_points がない場合はメッシュからサンプリング）
-      3. BCE, 点群→メッシュ距離, 外れ値割合の計算
-
-    Parameters
-    ----------
-    pred_points : (N, 3) ndarray
-        再構成点群 P [m]。
-    gt_mesh : str | pathlib.Path | trimesh.Trimesh | None
-        真値メッシュ M。ファイルパスまたは Trimesh インスタンス。
-        None の場合は gt_vertices / gt_faces から構築。
-    gt_points : (N, 3) ndarray, optional
-        既に用意されている真値点群 Q [m]。
-        None の場合は真値メッシュから一様サンプリングで生成。
-    gt_vertices : (V, 3) ndarray, optional
-        メモリ上の真値メッシュ頂点座標 [m]。
-    gt_faces : (F, 3) ndarray[int], optional
-        メモリ上の真値メッシュ面インデックス。
-    threshold : float, optional
-        外れ値割合 r の閾値 T [m]。
-    random_state : int, optional
-        真値点群 Q サンプリングの乱数シード。
-
-    Returns
-    -------
-    metrics : dict
-        {
-            "bce": float,            # Bidirectional Consistency Error [m]
-            "point_to_mesh": float,  # 平均点群→メッシュ距離 [m]
-            "outlier_ratio": float,  # 外れ値割合 [0〜1]
-            "gt_points": ndarray,   # サンプリングされた真値点群 Q (オプション)
-            "distances": ndarray,   # 各点のメッシュへの距離 [m] (可視化用)
-        }
+    再構成点群と真値メッシュに対する総合評価関数。
     """
     P = np.asarray(pred_points, dtype=np.float64)
     if P.ndim != 2 or P.shape[1] != 3:
@@ -793,9 +613,9 @@ def evaluate_point_cloud(
             show_progress=True,
         )
 
-    # 4. 各種指標を計算
+    # 3. 各種指標を計算（CCE, 点群→メッシュ距離, 外れ値割合）
     print("\n評価指標を計算しています...")
-    bce = bidirectional_consistency_error(P, Q, show_progress=True)
+    cce = cycle_consistency_error(P, Q, show_progress=True)
 
     # point_to_mesh_distanceとoutlier_ratioは同じ計算を使用するため、一度だけ計算して再利用
     print("点群→メッシュ距離を計算中（外れ値割合も同時に計算）...")
@@ -811,7 +631,7 @@ def evaluate_point_cloud(
     )
 
     result = {
-        "bce": bce,
+        "cce": cce,
         "point_to_mesh": d_pm,
         "outlier_ratio": r_out,
     }
@@ -824,6 +644,9 @@ def evaluate_point_cloud(
     return result
 
 
+# =============================================================================
+# コマンドラインエントリポイント
+# =============================================================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="点群と真値メッシュの評価を実行します。",
@@ -886,7 +709,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # 推定点群を読み込む
+    # 推定点群の読み込み（オプションで Y 軸反転・保存）
     print(f"推定点群を読み込んでいます: {args.pred_pointcloud}")
     pred_points = load_point_cloud(args.pred_pointcloud)
     if args.flip_y_axis:
@@ -894,18 +717,17 @@ if __name__ == "__main__":
         print("  Y軸を反転しました")
     print(f"  読み込んだ点数: {pred_points.shape[0]}")
 
-    # 推定点群を保存（指定されている場合）
     if args.save_pred_pointcloud is not None:
         save_point_cloud(pred_points, args.save_pred_pointcloud)
 
-    # 真値点群を読み込む（指定されている場合）
+    # 真値点群ファイルが指定されていれば読み込み（未指定時はメッシュからサンプリング）
     gt_points = None
     if args.gt_points is not None:
         print(f"真値点群を読み込んでいます: {args.gt_points}")
         gt_points = load_point_cloud(args.gt_points)
         print(f"  読み込んだ点数: {gt_points.shape[0]}")
 
-    # 評価を実行
+    # 真値メッシュを読み、CCE・点群→メッシュ距離・外れ値割合を計算
     print(f"真値メッシュを読み込んでいます: {args.gt_mesh}")
     metrics = evaluate_point_cloud(
         pred_points=pred_points,
@@ -915,11 +737,10 @@ if __name__ == "__main__":
         random_state=args.random_state,
     )
 
-    # サンプリングされた真値点群を保存（指定されている場合）
     if args.save_gt_points is not None and "gt_points" in metrics:
         save_point_cloud(metrics["gt_points"], args.save_gt_points)
 
-    # 結果を表示
+    # 数値指標の表示（gt_points / distances は除く）
     print("\n評価結果:")
     print("=" * 50)
     for k, v in metrics.items():
@@ -927,9 +748,8 @@ if __name__ == "__main__":
             print(f"  {k:20s}: {v:.6f}")
     print("=" * 50)
 
-    # 距離に応じて色分けした点群を可視化（デフォルトで実行）
+    # 距離に応じた色分けで推定点群（と真値点群）を Open3D で表示
     if "distances" in metrics and "gt_points" in metrics:
-        # 推定点群と真値点群の両方を表示
         visualize_point_cloud_with_distances(
             pred_points,
             metrics["distances"],

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-深度推定結果の評価スクリプト
+深度推定結果の評価スクリプト。
 
-推定深度と真値深度を比較し、評価指標を計算してCSVファイルに保存します。
+使用例:
+    python evaluation/depth_evaluate.py --pred-dir output/<DATA_TYPE>/depth --gt-dir data/<DATA_TYPE>/images/depth
 """
 
 import argparse
@@ -33,7 +34,7 @@ from mvs.utils import (  # noqa: E402
 
 
 def setup_logging():
-    """ログ設定"""
+    """標準出力へログを出すようルートロガーを設定する。既存ハンドラはクリアする。"""
     # 既存のハンドラをクリアしてから再設定
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
@@ -93,13 +94,6 @@ def find_gt_depth_file(gt_dir: str, filename_stem: str) -> Optional[str]:
 def find_pred_depth_files(pred_dir: str, filename_stem: str) -> Dict[str, str]:
     """
     推定深度ファイルを検索する。
-
-    Args:
-        pred_dir: 推定深度ディレクトリ
-        filename_stem: 画像ファイル名（拡張子なし）
-
-    Returns:
-        ステージ名をキー、ファイルパスを値とする辞書
     """
     folder_path = os.path.join(pred_dir, filename_stem)
     if not os.path.isdir(folder_path):
@@ -134,14 +128,6 @@ def evaluate_depth_pair(
 ) -> Tuple[Optional[Dict], int]:
     """
     推定深度と真値深度のペアを評価する。
-
-    Args:
-        pred_path: 推定深度ファイルのパス
-        gt_path: 真値深度ファイルのパス
-        stage: ステージ名
-
-    Returns:
-        (評価指標の辞書, 有効ピクセル数) のタプル
     """
     pred_depth = read_exr_depth(pred_path)
     gt_depth = read_exr_depth(gt_path)
@@ -163,9 +149,6 @@ def evaluate_depth_pair(
 def determine_output_dir(pred_dir: str) -> str:
     """
     出力ディレクトリを決定する。
-
-    pred-dirが output/<group>/<session>/depth の場合、
-    output/<group>/<session>/csv を返す。
     """
     pred_path = Path(pred_dir).resolve()
 
@@ -184,12 +167,6 @@ def determine_output_dir(pred_dir: str) -> str:
 def get_propagation_method(pred_dir: str) -> str:
     """
     伝播手法を推測する（YAMLファイルから、またはデフォルト値）。
-
-    Args:
-        pred_dir: 推定深度ディレクトリ
-
-    Returns:
-        伝播手法名（デフォルト: "checkerboard"）
     """
     # YAMLファイルから読み取る
     try:
@@ -225,6 +202,10 @@ def get_propagation_method(pred_dir: str) -> str:
 
 
 def main():
+    """
+    コマンドラインで --pred-dir / --gt-dir を受け取り、
+    推定深度と真値深度を比較して評価指標を CSV に出力する。
+    """
     parser = argparse.ArgumentParser(
         description="Evaluate predicted depth maps against ground truth"
     )
@@ -255,11 +236,11 @@ def main():
         logging.error(f"Ground truth directory does not exist: {gt_dir}")
         sys.exit(1)
 
-    # 出力ディレクトリを決定
+    # pred-dir の構造から CSV 出力先（セッションの csv/）を決定
     output_csv_dir = determine_output_dir(pred_dir)
     os.makedirs(output_csv_dir, exist_ok=True)
 
-    # pred-dir内の各フォルダ（画像ごと）を処理
+    # pred-dir 内のサブディレクトリ（フレームごとの深度フォルダ）を列挙
     pred_folders = [
         d for d in os.listdir(pred_dir) if os.path.isdir(os.path.join(pred_dir, d))
     ]
@@ -271,7 +252,7 @@ def main():
 
     logging.info(f"Found {len(pred_folders)} prediction folders")
 
-    # 各画像ごとに処理
+    # フレーム（filename_stem）ごとに真値と推定を突き合わせて評価
     for filename_stem in pred_folders:
         # 真値深度ファイルを検索
         gt_path = find_gt_depth_file(gt_dir, filename_stem)
@@ -295,7 +276,7 @@ def main():
         except ValueError:
             image_idx = hash(filename_stem) % 1000000  # フォールバック
 
-        # 各ステージ（initial, optimized, photometric, geometric）を評価（ログ出力のみ）
+        # 主要ステージの指標をログ出力のみで表示
         stage_order = ["initial", "optimized", "photometric", "geometric"]
         for stage in stage_order:
             if stage not in pred_files:
@@ -312,18 +293,16 @@ def main():
                 f"RMSE={metrics['rmse']:.4f}, AbsRel={metrics['abs_rel']:.4f}"
             )
 
-        # 各イテレーションごとの評価（メトリクスごとのCSV）
+        # イテレーション・photometric/geometric をメトリクス別 CSV に記録
         iter_files = {k: v for k, v in pred_files.items() if k.startswith("iter_")}
-        # イテレーションファイルがある場合、またはphotometric/geometricがある場合にCSVを作成
         if iter_files or "photometric" in pred_files or "geometric" in pred_files:
-            # CSVディレクトリを作成
             csv_subdir = os.path.join(output_csv_dir, filename_stem)
             os.makedirs(csv_subdir, exist_ok=True)
 
-            # 伝播手法を取得
+            # YAML または既存 CSV から伝播手法名（例: checkerboard）を取得
             propagation_method = get_propagation_method(pred_dir)
 
-            # 各メトリクスごとのCSVファイルを初期化（時間列なし）
+            # メトリクスごとに rmse_*.csv, mae_*.csv 等を初期化
             csv_files = {
                 "rmse": os.path.join(csv_subdir, f"rmse_{propagation_method}.csv"),
                 "mae": os.path.join(csv_subdir, f"mae_{propagation_method}.csv"),
@@ -339,16 +318,14 @@ def main():
                 "delta3": os.path.join(csv_subdir, f"delta3_{propagation_method}.csv"),
             }
 
-            # 既存のCSVファイルがある場合はクリア
             for csv_path in csv_files.values():
                 if os.path.exists(csv_path):
                     os.remove(csv_path)
 
-            # 時間列なしで初期化（image_idx, iter, valid_pixels, metric）
             for metric, csv_path in csv_files.items():
                 initialize_csv(csv_path, ["image_idx", "iter", "valid_pixels", metric])
 
-            # 初期深度（iter=0）を評価
+            # iter=0（初期深度）の指標を CSV に追記
             if "initial" in pred_files:
                 init_metrics, init_valid_pixels = evaluate_depth_pair(
                     pred_files["initial"], gt_path, "initial"
@@ -358,7 +335,7 @@ def main():
                         csv_files, image_idx, 0, 0.0, init_metrics, init_valid_pixels
                     )
 
-            # 各イテレーションを評価
+            # depth_iter_01.exr, depth_iter_02.exr, ... を順に評価して CSV に追記
             sorted_iters = sorted(iter_files.keys())
             for iter_key in sorted_iters:
                 iter_num = int(iter_key.split("_")[1])
@@ -371,13 +348,12 @@ def main():
                         csv_files, image_idx, iter_num, 0.0, metrics, valid_pixels
                     )
 
-            # photometricステージを評価（iter="photometric"として記録）
+            # 光度一貫性フィルタ後の深度を iter 列 "photometric" で記録
             if "photometric" in pred_files:
                 photo_metrics, photo_valid_pixels = evaluate_depth_pair(
                     pred_files["photometric"], gt_path, "photometric"
                 )
                 if photo_metrics is not None:
-                    # iter列に文字列"photometric"を入れるため、特別な処理が必要
                     for metric_key, csv_path in csv_files.items():
                         if metric_key in photo_metrics:
                             append_to_csv(
@@ -390,13 +366,12 @@ def main():
                                 ],
                             )
 
-            # geometricステージを評価（iter="geometric"として記録）
+            # 幾何一貫性フィルタ後の深度を iter 列 "geometric" で記録
             if "geometric" in pred_files:
                 geo_metrics, geo_valid_pixels = evaluate_depth_pair(
                     pred_files["geometric"], gt_path, "geometric"
                 )
                 if geo_metrics is not None:
-                    # iter列に文字列"geometric"を入れるため、特別な処理が必要
                     for metric_key, csv_path in csv_files.items():
                         if metric_key in geo_metrics:
                             append_to_csv(
