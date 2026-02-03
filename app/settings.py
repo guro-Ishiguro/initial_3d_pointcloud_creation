@@ -8,7 +8,9 @@ from typing import Any, Dict, Optional
 
 try:
     import yaml
-except Exception:  # PyYAML は requirements に含まれるが、未インストール時は yaml を None のまま続行
+except (
+    Exception
+):  # PyYAML は requirements に含まれるが、未インストール時は yaml を None のまま続行
     yaml = None
 
 
@@ -48,12 +50,10 @@ def apply_env_overrides(config_path: Optional[str] = None) -> Dict[str, Any]:
                 continue
             os.environ[str(k)] = sv
 
-    # 3) 主要なデータセット指定用変数を effective に集約
+    # 3) データセットは1つのみ（DATA_TYPE）を effective に集約
     effective: Dict[str, Any] = {}
     if "DATA_TYPE" in os.environ:
         effective["DATA_TYPE"] = os.environ["DATA_TYPE"]
-    if "DATA_TYPE_INDEX" in os.environ:
-        effective["DATA_TYPE_INDEX"] = os.environ["DATA_TYPE_INDEX"]
 
     # 4) env セクションの内容をマージして返す
     effective.update(env_cfg)

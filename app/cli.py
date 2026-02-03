@@ -26,9 +26,7 @@ def main():
     コマンドライン引数を解析し、設定を適用してから mvs.main.run を実行する。
     --config でYAMLパス、--dataset でデータセット名を指定可能。
     """
-    parser = argparse.ArgumentParser(
-        description="Run 3D point cloud pipeline"
-    )
+    parser = argparse.ArgumentParser(description="Run 3D point cloud pipeline")
     parser.add_argument(
         "--config",
         type=str,
@@ -74,8 +72,8 @@ def main():
     elif len(datasets) == 1:
         selected_dataset = datasets[0]
     else:
-        # 複数データセットがある場合は番号で対話選択
-        print("\nSelect dataset:")
+        # 1つのデータセットを番号で選択
+        print("\nSelect dataset (single choice):")
         for i, d in enumerate(datasets, 1):
             print(f"{i}) {d}")
         choice = input(f"Enter choice [1-{len(datasets)}]: ").strip()
