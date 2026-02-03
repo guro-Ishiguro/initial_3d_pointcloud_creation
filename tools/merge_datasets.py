@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-複数のデータセットを1つのデータセットに統合するスクリプト
+複数のデータセットを1つのデータセットに統合するスクリプト。
+
+画像（image_0, image_1）、GT深度（depth）、カメラポーズCSV（left_camera_poses.csv 等）を
+連番で結合し、data/<merged_name>/ に出力する。統合後は app/cli.py で単一データセットとして実行可能。
 
 使用方法:
     python3 merge_datasets.py dataset1 dataset2 dataset3 ...
-    または
     python3 merge_datasets.py  # 対話的に選択
-
-統合後のデータセットは data/<merged_name>/ に作成され、
-python3 app/cli.py で単一データセットとして実行可能になります。
+    python3 merge_datasets.py --name my_merged --no-right-poses  # オプション付き
 """
 
 import argparse
@@ -19,7 +19,9 @@ import sys
 
 
 def list_datasets(data_dir: str) -> list:
-    """dataディレクトリ内のデータセット一覧を取得"""
+    """
+    data ディレクトリ内で、images サブディレクトリを持つデータセット名の一覧を返す。
+    """
     if not os.path.isdir(data_dir):
         return []
     datasets = [
@@ -40,42 +42,35 @@ def merge_datasets(
 ) -> bool:
     """
     複数のデータセットを1つのデータセットに統合
-
-    Args:
-        source_datasets: 統合元のデータセット名のリスト
-        data_dir: dataディレクトリのパス
-        merged_name: 統合後のデータセット名
-        merge_right_poses: right_camera_poses.csvも統合するか
-
-    Returns:
-        成功した場合True
     """
     merged_dir = os.path.join(data_dir, merged_name)
     merged_images_dir = os.path.join(merged_dir, "images")
     merged_txt_dir = os.path.join(merged_dir, "txt")
 
-    # 統合先ディレクトリが既に存在する場合は確認
+    # 統合先が既に存在する場合は上書き確認
     if os.path.exists(merged_dir):
-        response = input(f"統合先ディレクトリ {merged_dir} が既に存在します。上書きしますか？ (y/N): ")
+        response = input(
+            f"統合先ディレクトリ {merged_dir} が既に存在します。上書きしますか？ (y/N): "
+        )
         if response.lower() != "y":
             print("統合をキャンセルしました。")
             return False
         shutil.rmtree(merged_dir)
 
-    # ディレクトリを作成
+    # 統合先のディレクトリ構造を作成（images/image_0, image_1, depth, txt）
     os.makedirs(merged_images_dir, exist_ok=True)
     os.makedirs(os.path.join(merged_images_dir, "image_0"), exist_ok=True)
     os.makedirs(os.path.join(merged_images_dir, "image_1"), exist_ok=True)
     os.makedirs(os.path.join(merged_images_dir, "depth"), exist_ok=True)
     os.makedirs(merged_txt_dir, exist_ok=True)
 
-    # 統合処理
+    # 統合結果を蓄積する変数
     total_frames = 0
     left_poses_rows = []
     right_poses_rows = []
     camera_params = None
 
-    # 各データセットのフレーム数を事前にカウント
+    # 各データセットのフレーム数を事前にカウント（連番オフセット用）
     dataset_frame_counts = []
     for dataset_name in source_datasets:
         source_dir = os.path.join(data_dir, dataset_name)
@@ -91,10 +86,13 @@ def merge_datasets(
         else:
             dataset_frame_counts.append(0)
 
+    # データセットごとに画像・深度・CSV をコピーし、filename の連番を振り直す
     for ds_idx, dataset_name in enumerate(source_datasets):
         source_dir = os.path.join(data_dir, dataset_name)
         if not os.path.isdir(source_dir):
-            print(f"警告: データセット {dataset_name} が見つかりません。スキップします。")
+            print(
+                f"警告: データセット {dataset_name} が見つかりません。スキップします。"
+            )
             continue
 
         source_images_dir = os.path.join(source_dir, "images")
@@ -106,7 +104,9 @@ def merge_datasets(
             dest_img_dir = os.path.join(merged_images_dir, img_type)
 
             if not os.path.isdir(source_img_dir):
-                print(f"警告: {dataset_name}/images/{img_type} が見つかりません。スキップします。")
+                print(
+                    f"警告: {dataset_name}/images/{img_type} が見つかりません。スキップします。"
+                )
                 continue
 
             # 画像ファイルを連番でコピー（ファイル名の数値でソート）
@@ -213,7 +213,7 @@ def merge_datasets(
 
         print(f"  {dataset_name}: {frame_count} フレームを統合しました。")
 
-    # CSVファイルを書き込み
+    # 統合したポーズとカメラパラメータを CSV で出力
     if left_poses_rows:
         left_poses_output = os.path.join(merged_txt_dir, "left_camera_poses.csv")
         with open(left_poses_output, "w", newline="") as f:
@@ -243,7 +243,12 @@ def merge_datasets(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="複数のデータセットを1つのデータセットに統合")
+    """
+    コマンドラインで指定したデータセットを1つに統合する。
+    """
+    parser = argparse.ArgumentParser(
+        description="複数のデータセットを1つのデータセットに統合"
+    )
     parser.add_argument(
         "datasets",
         nargs="*",
@@ -276,7 +281,7 @@ def main():
         print(f"エラー: {data_dir} にデータセットが見つかりません。")
         sys.exit(1)
 
-    # データセットの選択
+    # 統合元データセットを引数から取得するか、対話で選択
     if args.datasets:
         selected = args.datasets
     else:
@@ -285,13 +290,15 @@ def main():
         for i, ds in enumerate(available_datasets, 1):
             print(f"  {i}) {ds}")
 
-        print("\n統合するデータセットを選択してください（カンマ区切りまたはスペース区切り）:")
+        print(
+            "\n統合するデータセットを選択してください（カンマ区切りまたはスペース区切り）:"
+        )
         choice = input("> ").strip()
         if not choice:
             print("データセットが選択されませんでした。")
             sys.exit(1)
 
-        # 選択をパース
+        # 入力（カンマ/スペース区切り）をパースしてデータセット名または番号で解決
         parts = [p.strip() for p in choice.replace(",", " ").split() if p.strip()]
         selected = []
         for part in parts:
@@ -306,13 +313,13 @@ def main():
         print("エラー: 有効なデータセットが選択されませんでした。")
         sys.exit(1)
 
-    # 存在確認
+    # 選択された名前がすべて data_dir 内に存在するか確認
     invalid = [ds for ds in selected if ds not in available_datasets]
     if invalid:
         print(f"エラー: 以下のデータセットが見つかりません: {', '.join(invalid)}")
         sys.exit(1)
 
-    # 統合後の名前を決定
+    # 統合後のデータセット名（--name 指定がなければ統合元を _ で連結）
     if args.name:
         merged_name = args.name
     else:

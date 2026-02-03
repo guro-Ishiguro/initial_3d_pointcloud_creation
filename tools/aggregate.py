@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-評価指標CSVファイルを集約して平均値を計算し、result.csvに保存するスクリプト
+評価指標CSVファイルを集約して平均値を計算し、result.csv に保存するスクリプト。
 """
 
 import argparse
@@ -19,12 +19,6 @@ logging.basicConfig(
 def find_metric_csv_files(csv_dir: str) -> Dict[str, List[str]]:
     """
     指定されたディレクトリ内の各サブフォルダから評価指標CSVファイルを探す
-
-    Args:
-        csv_dir: CSVファイルが含まれるディレクトリのパス
-
-    Returns:
-        評価指標名をキー、CSVファイルパスのリストを値とする辞書
     """
     metric_files = defaultdict(list)
 
@@ -57,12 +51,6 @@ def find_metric_csv_files(csv_dir: str) -> Dict[str, List[str]]:
 def read_metric_csv(csv_path: str) -> Dict[str, float]:
     """
     評価指標CSVファイルを読み込み、各段階（iter）での値を辞書として返す
-
-    Args:
-        csv_path: CSVファイルのパス
-
-    Returns:
-        段階（iter）をキー、評価指標の値を値とする辞書
     """
     values_by_iter = {}
 
@@ -92,12 +80,6 @@ def read_metric_csv(csv_path: str) -> Dict[str, float]:
 def aggregate_metrics(csv_dir: str) -> Dict[str, Dict[str, float]]:
     """
     各評価指標ごとに、各段階での平均値を計算する
-
-    Args:
-        csv_dir: CSVファイルが含まれるディレクトリのパス
-
-    Returns:
-        評価指標名をキー、段階（iter）をキー、平均値を値とする辞書
     """
     metric_files = find_metric_csv_files(csv_dir)
 
@@ -134,21 +116,17 @@ def aggregate_metrics(csv_dir: str) -> Dict[str, Dict[str, float]]:
 def write_result_csv(csv_dir: str, aggregated: Dict[str, Dict[str, float]]):
     """
     集約された評価指標をresult.csvに書き込む
-
-    Args:
-        csv_dir: 出力先ディレクトリのパス
-        aggregated: 集約された評価指標データ
     """
     if not aggregated:
         logging.error("No aggregated data to write")
         return
 
-    # すべての段階（iter）を収集
+    # 全評価指標に現れる iter を収集
     all_iters = set()
     for metric_data in aggregated.values():
         all_iters.update(metric_data.keys())
 
-    # 段階をソート（0, 1, 2, ..., 10, photometric, geometric）
+    # iter を数値昇順＋特殊ラベル（photometric, geometric）の順でソート
     def sort_key(iter_str):
         if iter_str == "photometric":
             return (1, 999)
@@ -190,6 +168,10 @@ def write_result_csv(csv_dir: str, aggregated: Dict[str, Dict[str, float]]):
 
 
 def main():
+    """
+    コマンドライン引数で指定したディレクトリ内の評価指標CSVを集約し、
+    result.csv を同じディレクトリに書き出す。
+    """
     parser = argparse.ArgumentParser(
         description="Aggregate evaluation metrics from CSV files"
     )
@@ -210,14 +192,14 @@ def main():
 
     logging.info(f"Processing CSV directory: {csv_dir}")
 
-    # 評価指標を集約
+    # サブディレクトリ内の *_checkerboard.csv を集計して平均を計算
     aggregated = aggregate_metrics(csv_dir)
 
     if not aggregated:
         logging.error("No data aggregated")
         return 1
 
-    # result.csvに書き込む
+    # 集約結果を csv_dir/result.csv に出力
     write_result_csv(csv_dir, aggregated)
 
     logging.info("Aggregation complete")

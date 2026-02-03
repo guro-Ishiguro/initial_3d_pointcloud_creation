@@ -1,3 +1,11 @@
+"""
+カメラポーズ（フライトパス）を3Dで可視化するスクリプト。
+
+output/<dataset>/plots/selected_poses.csv と data/<dataset>/txt/camera_params.csv を読み、
+カメラ中心の軌跡と各フレームの視錐台（フラスタム）を Matplotlib の 3D プロットで表示する。
+実行するとデータセットの対話選択が行われる。
+"""
+
 import os
 import sys
 
@@ -8,7 +16,9 @@ from scipy.spatial.transform import Rotation as R
 
 
 def list_datasets(data_dir: str) -> list:
-    """dataディレクトリ内のデータセット一覧を取得"""
+    """
+    data ディレクトリ内で、images サブディレクトリを持つデータセット名の一覧を返す。
+    """
     if not os.path.isdir(data_dir):
         return []
     datasets = [
@@ -22,7 +32,9 @@ def list_datasets(data_dir: str) -> list:
 
 
 def select_dataset_interactively(data_dir: str) -> str:
-    """対話的にデータセットを選択"""
+    """
+    利用可能なデータセットを番号付きで表示し、ユーザー入力で1つ選択してその名前を返す。
+    """
     available_datasets = list_datasets(data_dir)
     if not available_datasets:
         print(f"エラー: {data_dir} にデータセットが見つかりません。")
@@ -50,7 +62,9 @@ def select_dataset_interactively(data_dir: str) -> str:
     sys.exit(1)
 
 
-# データセットの選択
+# =============================================================================
+# データセットの選択とパス設定
+# =============================================================================
 data_dir = "data"
 if not os.path.isdir(data_dir):
     print(f"エラー: dataディレクトリが見つかりません: {data_dir}")
@@ -59,13 +73,13 @@ if not os.path.isdir(data_dir):
 dataset_name = select_dataset_interactively(data_dir)
 print(f"\n選択されたデータセット: {dataset_name}\n")
 
-# ファイルパスの設定
+# カメラパラメータと選択済みポーズCSVのパス
 camera_params_path = os.path.join(data_dir, dataset_name, "txt", "camera_params.csv")
 selected_poses_path = os.path.join(
     "output", dataset_name, "plots", "selected_poses.csv"
 )
 
-# ファイルの存在確認
+# 必須ファイルの存在確認
 if not os.path.exists(camera_params_path):
     print(f"エラー: camera_params.csv が見つかりません: {camera_params_path}")
     sys.exit(1)
@@ -75,20 +89,27 @@ if not os.path.exists(selected_poses_path):
     print("このファイルがない場合、可視化を続行できません。")
     sys.exit(1)
 
-# データの読み込み
+# ポーズ（位置・四元数）とカメラFOVの読み込み
 poses_df = pd.read_csv(selected_poses_path)
 params_df = pd.read_csv(camera_params_path)
 
-# データの抽出
+# 位置ベクトルと四元数、FOVを配列として取得
 poses = poses_df[["pos_x", "pos_y", "pos_z"]].values
 quats = poses_df[["rot_x", "rot_y", "rot_z", "rot_w"]].values
 fov_h = params_df["fov_h_deg"][0]
 fov_v = params_df["fov_v_deg"][0]
 
 
-# ローカル座標系でのフラスタム（視錐台）の頂点を計算する関数
 def get_frustum_local(fov_h, fov_v, scale=1.0):
-    # 度数法をラジアンに変換
+    """
+    カメラローカル座標系で、視錐台（フラスタム）の頂点を計算する。
+
+    カメラ中心 (0,0,0) と、前方 scale 距離のイメージプレーン四隅の5点を返す。
+    FOV は水平・垂直の半角（度数法）で指定。
+
+    Returns:
+        [p_center, p_tr, p_tl, p_bl, p_br]: 中心と右上・左上・左下・右下の5点
+    """
     rad_h = np.deg2rad(fov_h)
     rad_v = np.deg2rad(fov_v)
 
@@ -107,17 +128,16 @@ def get_frustum_local(fov_h, fov_v, scale=1.0):
     return [p_center, p_tr, p_tl, p_bl, p_br]
 
 
-# 3Dプロットの作成
+# =============================================================================
+# 3D プロットの作成と描画
+# =============================================================================
 fig = plt.figure(figsize=(12, 12))
 ax = fig.add_subplot(111, projection="3d")
 
-# 座標変換（表示用）
-# 元の (x, y, z) を Matplotlib の (X, Y, Z) に割り当て直す。
-# 添付の目標イメージ（Yが縦、Zが上辺、Xが斜め）に合わせて
-# (X, Y, Z) = (Z, X, Y) とする。
+# 表示用座標変換: (x, y, z) → (Z, X, Y) で Matplotlib 3D に合わせる
 poses_transformed = np.column_stack([poses[:, 2], poses[:, 0], poses[:, 1]])
 
-# フライトパスの描画（黒線）
+# カメラ中心の軌跡を黒線で描画
 ax.plot(
     poses_transformed[:, 0],
     poses_transformed[:, 1],
@@ -128,13 +148,12 @@ ax.plot(
     alpha=0.5,
 )
 
-# フラスタムのスケール設定（シーンに合わせて調整）
+# 視錐台のサイズ（カメラ前方にこの距離でイメージプレーンを描く）
 frustum_scale = 3.0
 local_frustum = get_frustum_local(fov_h, fov_v, scale=frustum_scale)
-# フラスタムの色を統一（青色）
 frustum_color = "blue"
 
-# 各カメラポーズごとの描画ループ
+# 各フレームのカメラポーズでフラスタムをワールド座標に変換して描画
 for i in range(len(poses)):
     pos = poses[i]
     quat = quats[i]  # ローテーション (x, y, z, w)
@@ -173,7 +192,7 @@ for i in range(len(poses)):
     zs = [p[2] for p in rect]
     ax.plot(xs, ys, zs, color=frustum_color, alpha=0.8, linewidth=0.8)
 
-# カメラ中心位置を点で描画（赤点）
+# カメラ中心を赤い点で描画
 ax.scatter(
     poses_transformed[:, 0],
     poses_transformed[:, 1],
@@ -183,13 +202,13 @@ ax.scatter(
     label="Camera Center",
 )
 
-# 軸ラベルの設定（座標変換後の軸に対応）
+# 軸ラベルとタイトル（座標変換 (Z,X,Y) に合わせて表示）
 ax.set_xlabel("Z")
 ax.set_ylabel("X")
 ax.set_zlabel("Y")
 ax.set_title("Camera Poses and Flight Path")
 
-# 軸のスケールを揃える
+# アスペクト比を揃えて表示範囲を設定
 x_limits = ax.get_xlim3d()
 y_limits = ax.get_ylim3d()
 z_limits = ax.get_zlim3d()
@@ -202,20 +221,17 @@ mid_x = np.mean(x_limits)
 mid_y = np.mean(y_limits)
 mid_z = np.mean(z_limits)
 
-# 表示の拡大率（1.0=全体が入る、0.5=2倍ズーム相当）
+# ズーム率で表示範囲を調整（1.0=全体表示、0.6=やや拡大）
 zoom_factor = 0.6
 zoom_range = max_range * zoom_factor
-
 ax.set_xlim(mid_x - zoom_range / 2, mid_x + zoom_range / 2)
 ax.set_ylim(mid_y - zoom_range / 2, mid_y + zoom_range / 2)
 ax.set_zlim(mid_z - zoom_range / 2, mid_z + zoom_range / 2)
 
-# 軸の反転: Z軸正が左になるように（添付画像の目盛り方向）
-ax.invert_xaxis()  # 表示上の Z 軸（= Matplotlib の x軸）を反転
+# 表示上の Z 軸を反転（目盛り方向の調整）
+ax.invert_xaxis()
 
-# 初期視点の設定（添付画像寄り）
-# elev: 仰角（0度=水平、90度=真上から見下ろす）
-# azim: 方位角（0度=+X方向、90度=+Y方向、180度=-X方向、270度=-Y方向）
+# 初期視点: elev=仰角(度), azim=方位角(度)
 ax.view_init(elev=30, azim=-90)
 
 plt.show()
