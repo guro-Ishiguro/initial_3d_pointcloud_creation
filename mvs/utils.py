@@ -1,10 +1,9 @@
 """
 ユーティリティモジュール。
-コマンド引数解析、四元数から回転行列への変換、フォルダ削除、深度マップの読み書き、
+フォルダ削除、深度マップの読み書き、
 評価指標計算・CSV出力、法線・視差マップの可視化保存などを提供する。
 """
 
-import argparse
 import csv
 import logging
 import os
@@ -43,49 +42,6 @@ except ImportError:
         camera_height = 50.0
 
     config = DummyConfig()
-
-
-
-def parse_arguments():
-    """
-    コマンドライン引数を解析し、--show-viewer と --record-video の有無を返す。
-    """
-    parser = argparse.ArgumentParser(description="3D Point Cloud Creater")
-    parser.add_argument(
-        "--show-viewer",
-        action="store_true",
-        help="Show viewer during point cloud generation.",
-    )
-    parser.add_argument(
-        "--record-video", action="store_true", help="Record viewer output to video."
-    )
-    return parser.parse_args()
-
-
-def quaternion_to_rotation_matrix(qx, qy, qz, qw):
-    """
-    四元数 (qx, qy, qz, qw) を 3x3 回転行列に変換する。
-    """
-    R = np.array(
-        [
-            [
-                1 - 2 * (qy**2 + qz**2),
-                2 * (qx * qy - qz * qw),
-                2 * (qx * qz + qy * qw),
-            ],
-            [
-                2 * (qx * qy + qz * qw),
-                1 - 2 * (qx**2 + qz**2),
-                2 * (qy * qz - qx * qw),
-            ],
-            [
-                2 * (qx * qz - qy * qw),
-                2 * (qy * qz + qx * qw),
-                1 - 2 * (qx**2 + qy**2),
-            ],
-        ]
-    )
-    return R
 
 
 def clear_folder(dir_path):
@@ -328,27 +284,6 @@ def compute_depth_metrics(pred_depth, gt_depth):
     }
 
 
-def save_error_map_as_image(pred_depth, gt_depth, file_path, max_error=1.0):
-    """
-    予測深度と正解深度の絶対誤差を画像化し、max_error でクリップしてカラーマップで保存する。
-    """
-    valid_mask = np.isfinite(pred_depth) & np.isfinite(gt_depth) & (gt_depth > 0)
-    error_map = np.full(pred_depth.shape, np.nan, dtype=np.float32)
-    error_map[valid_mask] = np.abs(pred_depth[valid_mask] - gt_depth[valid_mask])
-
-    h, w = error_map.shape
-    vis_map = np.nan_to_num(error_map)
-    vis_map[vis_map > max_error] = max_error
-    vis_map = (vis_map / max_error) * 255.0
-
-    colored_map = cv2.applyColorMap(vis_map.astype(np.uint8), cv2.COLORMAP_INFERNO)
-    colored_map[~valid_mask] = [0, 0, 0]
-
-    # サイドバー無しでそのまま保存
-    cv2.imwrite(file_path, colored_map)
-    logging.info(f"Saved depth error map to {file_path}")
-
-
 def save_normal_map_as_image(normal_map, file_path):
     """
     法線マップを 0–255 に正規化して RGB 画像として保存する。
@@ -432,34 +367,6 @@ def append_to_csv(file_path, data_row):
         logging.error(f"Could not write to CSV file {file_path}: {e}")
     except Exception as e:
         logging.error(f"Unexpected error writing to CSV file {file_path}: {e}")
-
-
-def write_stage_metrics_to_csv(
-    csv_path: str,
-    image_idx: int,
-    stage: str,
-    valid_pixels: int,
-    metrics: dict,
-):
-    """
-    ステージごとの評価指標を1行として CSV に追記する。
-    """
-    append_to_csv(
-        csv_path,
-        [
-            image_idx,
-            stage,
-            valid_pixels,
-            metrics.get("mae", np.nan),
-            metrics.get("abs_rel", np.nan),
-            metrics.get("sq_rel", np.nan),
-            metrics.get("rmse", np.nan),
-            metrics.get("rmse_log", np.nan),
-            metrics.get("delta1", np.nan),
-            metrics.get("delta2", np.nan),
-            metrics.get("delta3", np.nan),
-        ],
-    )
 
 
 def write_iteration_metrics_to_csv(

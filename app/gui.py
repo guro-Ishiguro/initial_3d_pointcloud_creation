@@ -780,11 +780,12 @@ class MVSGUI(QMainWindow):
         layout = QVBoxLayout(central_widget)
         layout.setSpacing(10)
 
-        # データセット選択
+        # データセット選択（1つのみ）
         dataset_layout = QHBoxLayout()
         dataset_layout.addWidget(QLabel("データセット:"))
         self.dataset_combo = QComboBox()
         self.dataset_combo.setMinimumWidth(300)
+        self.dataset_combo.setToolTip("1つのデータセットを選択してください")
         dataset_layout.addWidget(self.dataset_combo)
         dataset_layout.addStretch()
         layout.addLayout(dataset_layout)
@@ -819,7 +820,7 @@ class MVSGUI(QMainWindow):
         layout.addWidget(self.progress)
 
     def _load_datasets(self):
-        """data ディレクトリ内のサブディレクトリを列挙し、コンボボックスに追加する。0件の場合は実行ボタンを無効化。"""
+        """data ディレクトリ内のサブディレクトリを列挙し、1つだけ選べるコンボボックスに追加する。0件の場合は実行ボタンを無効化。"""
         datasets = _list_datasets(self.project_root)
         if datasets:
             self.dataset_combo.addItems(datasets)

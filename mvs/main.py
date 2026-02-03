@@ -29,7 +29,6 @@ from utils import (  # noqa: E402
     append_to_csv,
     clear_folder,
     initialize_csv,
-    parse_arguments,
     read_exr_depth,
     save_depth_map_as_exr,
     save_depth_map_as_image,
@@ -427,7 +426,6 @@ def _export_gt_depth_pngs_per_view(
 
 def run():
     """ログ・DataLoader・各モジュールを初期化し、カメラペアごとに視差→深度→PatchMatch→点群統合を実行して PLY を出力する。"""
-    args = parse_arguments()
     start_time = time.time()
 
     try:
@@ -698,7 +696,7 @@ def run():
     logging.info("=" * 80)
     logging.info("")
     all_optimized_depths = {}
-    all_optimized_normals = {}  
+    all_optimized_normals = {}
     all_stage_depths = {}
     all_poses = {}
     all_images = {}
@@ -1050,7 +1048,7 @@ def run():
     logging.info("=" * 80)
     logging.info("")
     merged_pts_list, merged_cols_list = [], []
-    merged_normals_list = []  
+    merged_normals_list = []
     last_integ_pts, last_integ_cols = None, None
     last_integ_normals = None
 
