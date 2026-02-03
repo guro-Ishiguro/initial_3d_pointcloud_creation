@@ -1,3 +1,7 @@
+"""
+バンドル調整モジュール。
+"""
+
 import logging
 import time
 from typing import Dict, List, Optional, Tuple
@@ -5,7 +9,6 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
-# PyTorchのインポート（利用可能な場合）
 try:
     import torch
     import torch.nn.functional as F
@@ -20,21 +23,24 @@ except Exception:
     config = None
 
 
-# --- PyTorch Utility Functions ---
+# =============================================================================
+# PyTorch ユーティリティ（投影・回転変換）
+# =============================================================================
 
 
 def _axis_angle_to_rotation_matrix_torch(axis_angle):
     """
-    Rodriguesの公式をPyTorchで実装
+    Rodrigues の公式により、軸角表現を回転行列に変換する。
+
     Args:
-        axis_angle: (N, 3) tensor
+        axis_angle: (N, 3) 回転ベクトル（向き=回転軸、ノルム=回転角 [rad]）
+
     Returns:
-        R: (N, 3, 3) tensor
+        R: (N, 3, 3) 回転行列
     """
-    angle = torch.norm(axis_angle, dim=1, keepdim=True)  # (N, 1)
-    # 0除算回避 (微小値を追加)
+    angle = torch.norm(axis_angle, dim=1, keepdim=True)
     angle = torch.clamp(angle, min=1e-8)
-    axis = axis_angle / angle  # (N, 3)
+    axis = axis_angle / angle
 
     cos = torch.cos(angle)
     sin = torch.sin(angle)
@@ -42,7 +48,6 @@ def _axis_angle_to_rotation_matrix_torch(axis_angle):
 
     x, y, z = axis[:, 0], axis[:, 1], axis[:, 2]
 
-    # 回転行列の構築
     R = torch.zeros(
         (axis_angle.shape[0], 3, 3), device=axis_angle.device, dtype=axis_angle.dtype
     )
@@ -64,16 +69,7 @@ def _axis_angle_to_rotation_matrix_torch(axis_angle):
 
 def _project_points_torch(points_3d, rvecs, tvecs, K, camera_indices, point_indices):
     """
-    3D点を2D画像座標へ投影する (Batch処理)
-    Args:
-        points_3d: (M, 3) 全3D点
-        rvecs: (C, 3) 全カメラの回転ベクトル
-        tvecs: (C, 3) 全カメラの並進ベクトル
-        K: (3, 3) 内部パラメータ
-        camera_indices: (N,) 観測に対応するカメラID
-        point_indices: (N,) 観測に対応する3D点ID
-    Returns:
-        projections: (N, 2) 投影された2D座標
+    3D点を各カメラの2D画像座標へ投影する。
     """
     # 観測に対応するパラメータを抽出
     r_obs = rvecs[camera_indices]  # (N, 3)
@@ -127,7 +123,9 @@ def _optimize_bundle_adjustment_gpu(
     scheduler_patience: int = 10,
     log_every: int = 20,
 ) -> Tuple[Dict[int, Tuple[np.ndarray, np.ndarray]], np.ndarray, float, float]:
-
+    """
+    PyTorch を用いてバンドル調整を実行する。
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"[SfM] Running Bundle Adjustment on {device} (lr={learning_rate})...")
 
@@ -261,16 +259,20 @@ def _optimize_bundle_adjustment_gpu(
     return refined_camera_params, None, initial_loss, final_loss_ret
 
 
-# --- Existing CPU Logic (Preprocessing) ---
+# =============================================================================
+# 前処理（特徴点抽出・マッチング・三角測量）
+# =============================================================================
 
 
 def _get_feature_detector():
+    """SIFT が利用可能なら SIFT、そうでなければ ORB の検出器を返す。"""
     if hasattr(cv2, "SIFT_create"):
         return cv2.SIFT_create(), "SIFT"
     return cv2.ORB_create(nfeatures=5000), "ORB"
 
 
 def _create_matcher(det_name: str) -> cv2.BFMatcher:
+    """検出器名に応じた BFMatcher（SIFT: L2, ORB: Hamming）を返す。"""
     if det_name == "SIFT":
         return cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
     return cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
@@ -303,11 +305,7 @@ def _match_descriptors_mutual_ransac(
     ransac_confidence: float = 0.99,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    (1) ratio test, (2) mutual check, (3) Fundamental matrix RANSAC を通った
-    対応点インデックスのペアを返す。
-    Returns:
-        idx1: (M,) indices into kpts1_xy/desc1
-        idx2: (M,) indices into kpts2_xy/desc2
+    2画像間で特徴点マッチングを行い、幾何的に妥当な対応点のインデックスを返す。
     """
     if desc1 is None or desc2 is None or kpts1_xy.shape[0] < 8 or kpts2_xy.shape[0] < 8:
         return np.empty((0,), dtype=np.int32), np.empty((0,), dtype=np.int32)
@@ -374,7 +372,9 @@ def _match_features(
     max_matches: int,
     ratio: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    # Backward compatible wrapper: returns only coordinates (no indices).
+    """
+    2画像間でマッチした特徴点の座標を返す。
+    """
     detector, det_name = _get_feature_detector()
     matcher = _create_matcher(det_name)
     kpts1_xy, d1 = _extract_features(detector, img1)
@@ -402,6 +402,10 @@ def _triangulate_points(
     pts1: np.ndarray,
     pts2: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    2視点の対応点から三角測量により3D座標を計算する。
+    両カメラの前方（z > 0）にあり、有限値である点のみを返す。
+    """
     P1 = K @ np.hstack([R1, t1.reshape(3, 1)])
     P2 = K @ np.hstack([R2, t2.reshape(3, 1)])
     pts1_h = pts1.T
@@ -436,7 +440,7 @@ def run_bundle_adjustment(
         )
         return all_pairs_data
 
-    # Config Check
+    # ノイズスケールが0の場合は BA をスキップ（初期位置が既に正確な場合）
     if config is not None:
         pos_scale = float(getattr(config, "POSITION_ERROR_SCALE", 0.0) or 0.0)
         rot_scale = float(getattr(config, "ROTATION_ERROR_SCALE", 0.0) or 0.0)
@@ -468,7 +472,7 @@ def run_bundle_adjustment(
         image_cache[path] = img
         return img
 
-    # Initial Camera Params
+    # 各フレームのカメラパラメータ（rvec, tvec）を all_pairs_data から取得
     camera_params = {}
     for idx in sorted_indices:
         _, t_cv, _, _, R_cv = all_pairs_data[idx]
@@ -478,7 +482,7 @@ def run_bundle_adjustment(
             np.asarray(t_cv, dtype=np.float64).reshape(3),
         )
 
-    # Observations building (CPU - OpenCV is efficient enough here)
+    # 隣接フレームペアごとに特徴点マッチング→三角測量→観測リスト構築
     points_3d_list: List[np.ndarray] = []
     points_2d_list: List[np.ndarray] = []
     camera_indices: List[int] = []
@@ -552,7 +556,7 @@ def run_bundle_adjustment(
     )
     logging.info("")
 
-    # --- Run GPU Optimization ---
+    # 最初のフレームを固定し、PyTorch で最適化を実行
     fixed_cam_idx = int(sorted_indices[0])
 
     # 最適化パラメータを設定ファイルから読み込み
@@ -591,7 +595,7 @@ def run_bundle_adjustment(
         log_every=log_every,
     )
 
-    # Compute correction magnitude
+    # 最適化前後のカメラ中心の移動量をログ出力用に計算
     corrections = []
     for idx in sorted_indices:
         rvec0, tvec0 = camera_params[int(idx)]
@@ -614,7 +618,7 @@ def run_bundle_adjustment(
     logging.info(f"  - Average Camera Correction: {avg_correction:.4f} meters")
     logging.info("=" * 80)
 
-    # Update Data
+    # 最適化後のカメラパラメータで all_pairs_data を更新して返す
     refined_pairs_data = {}
     for idx in sorted_indices:
         idx_int = int(idx)
