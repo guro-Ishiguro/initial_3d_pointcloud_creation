@@ -62,13 +62,6 @@ def setup_logging():
 def find_gt_depth_file(gt_dir: str, filename_stem: str) -> Optional[str]:
     """
     真値深度ファイルを検索する。
-
-    Args:
-        gt_dir: 真値深度ディレクトリ
-        filename_stem: 画像ファイル名（拡張子なし、例: "000004"）
-
-    Returns:
-        真値深度ファイルのパス（見つからない場合はNone）
     """
     # ファイル名からインデックスを推測（6桁の数値）
     try:

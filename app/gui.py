@@ -653,6 +653,34 @@ class ConfigWidget(QWidget):
             QLabel("深度マップ可視化時に使用するカラーマップ。"),
         )
 
+        # VIZ_DEPTH_MIN / VIZ_DEPTH_MAX（深度可視化の表示レンジ）
+        self.config_widgets["VIZ_DEPTH_MIN"] = QDoubleSpinBox()
+        self.config_widgets["VIZ_DEPTH_MIN"].setDecimals(2)
+        self.config_widgets["VIZ_DEPTH_MIN"].setRange(0.0, 1000.0)
+        self.config_widgets["VIZ_DEPTH_MIN"].setValue(
+            self._get_float_value("VIZ_DEPTH_MIN", 0.0)
+        )
+        layout.addRow(
+            QLabel("深度可視化 MIN [m]:"),
+            self.config_widgets["VIZ_DEPTH_MIN"],
+        )
+        self.config_widgets["VIZ_DEPTH_MAX"] = QDoubleSpinBox()
+        self.config_widgets["VIZ_DEPTH_MAX"].setDecimals(2)
+        self.config_widgets["VIZ_DEPTH_MAX"].setRange(0.0, 1000.0)
+        self.config_widgets["VIZ_DEPTH_MAX"].setValue(
+            self._get_float_value("VIZ_DEPTH_MAX", 50.0)
+        )
+        layout.addRow(
+            QLabel("深度可視化 MAX [m]:"),
+            self.config_widgets["VIZ_DEPTH_MAX"],
+        )
+        layout.addRow(
+            QLabel(""),
+            QLabel(
+                "深度マップを画像保存するときの表示レンジ。未設定時は camera_height から自動計算されます。"
+            ),
+        )
+
         scroll.setWidget(widget)
         scroll.setWidgetResizable(True)
         return scroll
