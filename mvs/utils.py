@@ -227,21 +227,32 @@ def save_depth_map_as_exr(depth_map, file_path):
 
 def compute_depth_metrics(pred_depth, gt_depth):
     """
-    予測深度と正解深度を比較し、RMSE/MAE/abs_rel/sq_rel/rmse_log/delta1,2,3 を計算する。
+    予測深度と正解深度を比較し、RMSE/MAE/ME/abs_rel/sq_rel/rmse_log/delta1,2,3/欠損率 を計算する。
+    ME = Mean Error = mean(pred - gt)。正で過大推定・負で過小推定の傾向を示す。
+    欠損率 = 真値が有効な画素のうち、予測が無効（NaN等）な画素の割合。0〜1（百分率なら×100）。
     """
+    gt_valid_mask = np.isfinite(gt_depth) & (gt_depth > 0)
+    n_gt_valid = int(np.sum(gt_valid_mask))
+
     # 有効なピクセルのマスク（予測・真値とも有限かつ真値 > 0）
-    valid_mask = np.isfinite(pred_depth) & np.isfinite(gt_depth) & (gt_depth > 0)
+    valid_mask = np.isfinite(pred_depth) & gt_valid_mask
+
+    # 欠損率: 真値有効なのに予測が無効な割合
+    missing_rate = (1.0 - np.sum(valid_mask) / n_gt_valid) if n_gt_valid > 0 else np.nan
 
     # 有効なピクセルが存在しない場合はNaNを返す
     if np.sum(valid_mask) == 0:
         return {
             "rmse": np.nan,
             "mae": np.nan,
+            "me": np.nan,
             "abs_rel": np.nan,
+            "sq_rel": np.nan,
             "rmse_log": np.nan,
             "delta1": np.nan,
             "delta2": np.nan,
             "delta3": np.nan,
+            "missing_rate": missing_rate if n_gt_valid > 0 else np.nan,
         }
 
     # マスクを適用して有効な深度値のみを抽出
@@ -251,6 +262,7 @@ def compute_depth_metrics(pred_depth, gt_depth):
     # 基本的な誤差指標を計算
     rmse = np.sqrt(np.mean((pred_valid - gt_valid) ** 2))
     mae = np.mean(np.abs(pred_valid - gt_valid))
+    me = np.mean(pred_valid - gt_valid)  # Mean Error（符号付き）
     abs_rel = np.mean(np.abs(pred_valid - gt_valid) / gt_valid)
     sq_rel = np.mean(((pred_valid - gt_valid) ** 2) / gt_valid)
 
@@ -275,12 +287,14 @@ def compute_depth_metrics(pred_depth, gt_depth):
     return {
         "rmse": rmse,
         "mae": mae,
+        "me": me,
         "abs_rel": abs_rel,
         "sq_rel": sq_rel,
         "rmse_log": rmse_log,
         "delta1": delta1,
         "delta2": delta2,
         "delta3": delta3,
+        "missing_rate": missing_rate,
     }
 
 

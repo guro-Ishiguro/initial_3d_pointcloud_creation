@@ -282,8 +282,9 @@ def main():
                 continue
 
             logging.info(
-                f"{filename_stem} {stage}: MAE={metrics['mae']:.4f}, "
-                f"RMSE={metrics['rmse']:.4f}, AbsRel={metrics['abs_rel']:.4f}"
+                f"{filename_stem} {stage}: MAE={metrics['mae']:.4f}, ME={metrics['me']:.4f}, "
+                f"RMSE={metrics['rmse']:.4f}, AbsRel={metrics['abs_rel']:.4f}, "
+                f"欠損率={metrics['missing_rate']:.2%}"
             )
 
         # イテレーション・photometric/geometric をメトリクス別 CSV に記録
@@ -299,6 +300,7 @@ def main():
             csv_files = {
                 "rmse": os.path.join(csv_subdir, f"rmse_{propagation_method}.csv"),
                 "mae": os.path.join(csv_subdir, f"mae_{propagation_method}.csv"),
+                "me": os.path.join(csv_subdir, f"me_{propagation_method}.csv"),
                 "abs_rel": os.path.join(
                     csv_subdir, f"abs_rel_{propagation_method}.csv"
                 ),
@@ -309,6 +311,9 @@ def main():
                 "delta1": os.path.join(csv_subdir, f"delta1_{propagation_method}.csv"),
                 "delta2": os.path.join(csv_subdir, f"delta2_{propagation_method}.csv"),
                 "delta3": os.path.join(csv_subdir, f"delta3_{propagation_method}.csv"),
+                "missing_rate": os.path.join(
+                    csv_subdir, f"missing_rate_{propagation_method}.csv"
+                ),
             }
 
             for csv_path in csv_files.values():
